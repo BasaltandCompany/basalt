@@ -42,6 +42,9 @@ jobs:
       - working-directory: desktop
         run: bun install --frozen-lockfile
 
+      - name: fetch bun sidecar (gitignored, not in checkout)
+        run: bash desktop/scripts/fetch-bun.sh aarch64-apple-darwin
+
       - name: pick release tag
         id: tag
         run: |

@@ -1,8 +1,12 @@
+// Publisher: runs the meeting-publisher job on a timer (see publisher.rs).
+mod publisher;
+
 use tauri::{
   menu::{Menu, MenuItem},
   tray::TrayIconBuilder,
   Manager, WebviewUrl, WebviewWindowBuilder,
 };
+use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_opener::OpenerExt;
 
 const ADMIN_URL: &str = "https://madcactus-dashboard.fly.dev/admin";
@@ -20,14 +24,20 @@ fn show_main(app: &tauri::AppHandle) {
 pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_opener::init())
+    // Launch at login, replacing what launchd did for the local jobs.
+    .plugin(tauri_plugin_autostart::init(
+      tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+      None,
+    ))
+    .plugin(
+      tauri_plugin_log::Builder::default()
+        .level(log::LevelFilter::Info)
+        .build(),
+    )
     .setup(|app| {
-      if cfg!(debug_assertions) {
-        app.handle().plugin(
-          tauri_plugin_log::Builder::default()
-            .level(log::LevelFilter::Info)
-            .build(),
-        )?;
-      }
+      publisher::seed(app.handle());
+      publisher::spawn_loop(app.handle().clone());
+      let _ = app.autolaunch().enable();
 
       // Same-origin navigation stays in the window; anything else (e.g.
       // YouTube embeds, docs links) opens in the default browser.
@@ -50,14 +60,20 @@ pub fn run() {
         .build()?;
 
       let open = MenuItem::with_id(app, "open", "Open aspectrr Admin", true, None::<&str>)?;
+      let sync = MenuItem::with_id(app, "sync", "Sync meetings now", true, None::<&str>)?;
+      let logs = MenuItem::with_id(app, "logs", "Open data folder", true, None::<&str>)?;
       let quit = MenuItem::with_id(app, "quit", "Quit aspectrr Admin", true, None::<&str>)?;
-      let menu = Menu::with_items(app, &[&open, &quit])?;
+      let menu = Menu::with_items(app, &[&open, &sync, &logs, &quit])?;
       let tray = TrayIconBuilder::with_id("main-tray")
         .icon(app.default_window_icon().expect("default window icon").clone())
         .tooltip("aspectrr Admin")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id.as_ref() {
           "open" => show_main(app),
+          "sync" => app.state::<publisher::Publisher>().sync_now(),
+          "logs" => {
+            let _ = app.opener().open_path(publisher::data_dir(app).display().to_string(), None::<&str>);
+          }
           "quit" => app.exit(0),
           _ => {}
         })
