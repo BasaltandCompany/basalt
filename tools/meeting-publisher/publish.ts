@@ -28,10 +28,11 @@ import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 
 const HOME_DIR = import.meta.dir;
-const STATE = join(HOME_DIR, "state");
+// Desktop app runs the bundled copy with its own Application Support state dir.
+const STATE = process.env.PUBLISHER_STATE_DIR ?? join(HOME_DIR, "state");
 const DB_PATH = `${process.env.HOME}/Library/Application Support/hyprnote/app.db`;
 const API_KEY = process.env.MADCACTUS_API_KEY ?? "";
-const BASE_URL = process.env.MADCACTUS_URL ?? "https://madcactus.org";
+const BASE_URL = process.env.MADCACTUS_URL ?? "https://basalt.ac";
 const UPLOAD_URL = `${BASE_URL}/api/upload-transcript`;
 const CLIENTS_URL = `${BASE_URL}/api/clients`;
 const MAX_ATTEMPTS = 3;
