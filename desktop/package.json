@@ -1,6 +1,13 @@
 {
-  "dependencies": {},
-  "devDependencies": {
-    "@tauri-apps/cli": "^2.12.1"
-  }
+	"name": "aspectrr-desktop",
+	"private": true,
+	"scripts": {
+		"fetch-bun": "bash scripts/fetch-bun.sh",
+		"dev": "tauri dev",
+		"build": "tauri build"
+	},
+	"dependencies": {},
+	"devDependencies": {
+		"@tauri-apps/cli": "^2.12.1"
+	}
 }
