@@ -41,6 +41,9 @@ jobs:
       - working-directory: desktop
         run: bun install --frozen-lockfile
 
+      - name: fetch bun sidecar (gitignored, not in checkout)
+        run: bash desktop/scripts/fetch-bun.sh aarch64-apple-darwin
+
       - uses: tauri-apps/tauri-action@v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
