@@ -18,8 +18,11 @@ invites per run, no exceptions.
    Empty `queue` → done, report "nothing approved", touch nothing.
 3. Take at most the first 5 rows (the response's `cap` field names the limit).
    For each row, one at a time:
-   - Open the profile URL from `notes` (`li: <url>`), or search the name in
-     LinkedIn if no URL is stored.
+   - A row's notes may carry TWO targets — invite BOTH, same run:
+     `li: <url>` (the employee who self-labels AI) and optionally
+     `li-owner: <url>` (the owner/CEO). Each invite counts against the 5-cap.
+   - Open each profile URL directly, or search the name in LinkedIn if no
+     URL is stored.
    - ABORT the whole run (report and stop) on any CAPTCHA, login wall, account
      warning banner, or unexpected markup.
    - Click Connect. If a note box opens: leave it empty. Never paste template

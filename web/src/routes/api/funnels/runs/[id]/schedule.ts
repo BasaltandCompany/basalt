@@ -36,7 +36,7 @@ export const PUT = async (event: APIEvent) => {
 	};
 	const patch = {
 		...(typeof body.enabled === "boolean" ? { enabled: body.enabled } : {}),
-		...(body.discoverySource === null || body.discoverySource === "fmcsa" ? { discoverySource: body.discoverySource } : {}),
+		...(body.discoverySource === null || ["fmcsa", "prospeo_ai", "prospeo_company"].includes(body.discoverySource as string) ? { discoverySource: body.discoverySource } : {}),
 		...(Number.isInteger(body.discoveryIntervalDays) && (body.discoveryIntervalDays as number) > 0 ? { discoveryIntervalDays: body.discoveryIntervalDays } : {}),
 		...(Number.isInteger(body.enrichPerDay) && (body.enrichPerDay as number) > 0 ? { enrichPerDay: body.enrichPerDay } : {}),
 		...(Number.isInteger(body.techPerDay) && (body.techPerDay as number) > 0 ? { techPerDay: body.techPerDay } : {}),

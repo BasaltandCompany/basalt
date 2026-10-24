@@ -1,4 +1,4 @@
-# Verify a stage via the open web (owner_led, revenue_band, industry_type)
+# Verify a stage via the open web (owner_led, revenue_band)
 
 Work a funnel stage queue with web search (Orca web agent). Verify ONE stage.
 
@@ -13,9 +13,6 @@ Work a funnel stage queue with web search (Orca web agent). Verify ONE stage.
 - `revenue_band` — $10-70M with rev/employee sanity $150-500k. Look at IBJ
   Largest Private Companies, Inc. 5000, ZoomInfo/CompWorth/D&B free profiles.
   Record the estimate + source in `note`.
-- `industry_type` — freight brokerage / 3PL / knowledge-heavy carrier. The
-  company site + FMCSA authority type. Fail on: pure asset-light trucking with
-  no brokerage ops is NOT auto-fail — judge knowledge-heavy per ICP.md.
 
 **Verdict POST to `<BASE>/api/funnels/results`:**
 `{"itemId": "...", "stage": "<STAGE>", "verdict": "pass"|"fail",

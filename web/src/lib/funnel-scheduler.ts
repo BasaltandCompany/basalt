@@ -1,16 +1,27 @@
 // Scheduled funnel automation — runs from the publish scheduler tick (in-process
 // 60s ticker + Supabase cron pings). Pure code: no agent, no tokens. Each
 // enabled funnel_schedules row drives:
-//   discovery (every N days): pull new companies from its source (FMCSA census,
-//     keyless) into an open run — auto-creating a monthly run when none is open
-//   enrich (daily): headcount (Prospeo, enrichPerDay budget) → revenue +
-//     ai_signal (cache reads, ~free) → tech_team (Apollo, techPerDay budget)
+//   discovery (every N days): pull new companies from its rail into an open
+//     run (auto-creating a monthly run when none is open) — fmcsa (keyless
+//     census, freight), prospeo_ai (search-person: Indiana AI self-labels),
+//     prospeo_company (search-company: industry list)
+//   enrich (daily): ai_signal first (Prospeo company enrich + full roster —
+//     the paid work, enrichPerDay budget) → headcount + revenue (cache reads,
+//     ~free) → tech_team (roster, techPerDay budget)
 import { and, desc, eq, isNull, lt, or } from "drizzle-orm";
 import { db } from "~/db";
 import { funnelRuns, funnelSchedules, funnels } from "~/db/schema";
 import { importRunItems } from "~/lib/funnels";
 import { runStageBatch } from "~/lib/funnel-stages";
 import { discoverIndianaBrokers } from "~/lib/fmcsa";
+import { discoverAiPeople, discoverCompanies } from "~/lib/prospeo-discovery";
+
+// ponytail: Rail-B industries keyed by funnel name — add a row when industry
+// #2 (accounting/insurance/staffing) gets its own funnel.
+const RAIL_B_INDUSTRIES: Record<string, { industry: string }> = {
+	"legal icp": { industry: "Legal Services" },
+};
+const railBIndustry = (funnelName: string) => RAIL_B_INDUSTRIES[funnelName.toLowerCase()] ?? { industry: "Legal Services" };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -46,19 +57,26 @@ export async function runScheduledFunnels(): Promise<{ funnels: number; discover
 		try {
 			const run = await openRunFor(funnel.id, funnel.name);
 
-			// discovery — every discoveryIntervalDays when a source is set
+			// discovery — every discoveryIntervalDays when a source is set. Each
+			// rail imports into THIS funnel's open run; setup is per-funnel by design
+			// (prospeo_ai belongs on "Indiana AI-Signal", prospeo_company on Legal ICP).
 			const discoveryDue =
-				schedule.discoverySource === "fmcsa" &&
+				schedule.discoverySource !== null &&
 				(!schedule.lastDiscoveryAt || Date.now() - schedule.lastDiscoveryAt.getTime() >= schedule.discoveryIntervalDays * DAY_MS);
 			if (discoveryDue) {
-				const companies = await discoverIndianaBrokers(200);
+				const companies =
+					schedule.discoverySource === "fmcsa"
+						? await discoverIndianaBrokers(200)
+						: schedule.discoverySource === "prospeo_ai"
+							? await discoverAiPeople()
+							: await discoverCompanies(railBIndustry(funnel.name));
 				const res = await importRunItems(run.id, companies);
 				discovered += res.imported;
 				await db.update(funnelSchedules).set({ lastDiscoveryAt: new Date() }).where(eq(funnelSchedules.id, schedule.id));
-				console.log(`[funnel-scheduler] ${funnel.name}: +${res.imported} new from FMCSA`);
+				console.log(`[funnel-scheduler] ${funnel.name}: +${res.imported} new from ${schedule.discoverySource}`);
 			}
 
-			// enrichment — once per day, stages in gate order
+			// enrichment — once per day, stages in stage order
 			// atomic claim: stamp lastEnrichAt BEFORE the (slow) run so a concurrent
 			// tick 60s later can't double-burn the day's enrichment budget — the
 			// same outer-guard lesson as the docs claim in scheduler.ts
@@ -72,9 +90,9 @@ export async function runScheduledFunnels(): Promise<{ funnels: number; discover
 					.returning({ id: funnelSchedules.id });
 				if (claimed.length === 0) continue;
 				for (const [stage, limit] of [
+					["ai_signal", schedule.enrichPerDay],
 					["headcount", schedule.enrichPerDay],
 					["revenue_band", schedule.enrichPerDay],
-					["ai_signal", schedule.enrichPerDay],
 					["tech_team", schedule.techPerDay],
 				] as const) {
 					const r = await runStageBatch(run.id, stage, limit);

@@ -15,16 +15,19 @@ import {
 	type FunnelStage,
 } from "~/db/schema";
 
-// Ordered gates from ICP.md — a later funnel (law, gov) is another row in
-// `funnels` with its own stages; nothing here is freight-specific.
+// Stage skeleton — order is display/processing order only. Every stage is
+// soft: nothing gates, queues are "no verdict at this stage yet", and a fail
+// never removes a company. ai_signal is the ONLY promotion gate
+// (applyVerdictConsequences); the firmographic stages record verdicts as
+// enrichment data to learn from. A later funnel (law, gov) is another row in
+// `funnels` with the same stages; nothing here is freight-specific.
 export const FREIGHT_STAGES: FunnelStage[] = [
-	{ key: "hq_state", label: "Indiana HQ", gate: "Address/city is in Indiana, not a name token", method: "source" },
-	{ key: "industry_type", label: "Industry", gate: "Freight brokerage / 3PL / knowledge-heavy carrier", method: "source" },
-	{ key: "headcount", label: "Headcount", gate: "15-250 employees", method: "api", params: { min: 15, max: 250 } },
-	{ key: "revenue_band", label: "Revenue", gate: "$10-70M estimate; rev/employee $150-500k sanity; no Prospeo revenue → headcount × $325k/emp estimate", method: "api", params: { min: 10_000_000, max: 70_000_000, perEmp: 325_000 } },
-	{ key: "tech_team", label: "Tech team", gate: "≤6 title hits for CTO/VP Eng/IT Director/engineer/developer", method: "api", params: { maxHits: 6 } },
+	{ key: "hq_state", label: "Indiana HQ", gate: "Address/city is in Indiana, not a name token", method: "source", soft: true },
+	{ key: "ai_signal", label: "AI signal", gate: "≥1 employee self-labels AI (Prospeo roster); site evidence corroborates only; vendor-hint recorded separately", method: "api", soft: true, params: { maxRosterPages: 10 } },
+	{ key: "headcount", label: "Headcount", gate: "15-250 employees", method: "api", soft: true, params: { min: 15, max: 250 } },
+	{ key: "revenue_band", label: "Revenue", gate: "$10-70M estimate; rev/employee $150-500k sanity; no Prospeo revenue → headcount × $325k/emp estimate", method: "api", soft: true, params: { min: 10_000_000, max: 70_000_000, perEmp: 325_000 } },
+	{ key: "tech_team", label: "Tech team", gate: "≤6 title hits for CTO/VP Eng/IT Director/engineer/developer", method: "api", soft: true, params: { maxHits: 6 } },
 	{ key: "owner_led", label: "Owner-led", gate: "Founder/CEO still running it, not a PE roll-up", method: "agent", soft: true },
-	{ key: "ai_signal", label: "AI signal", gate: "≥1 employee self-labels AI (Prospeo roster); site evidence corroborates only; vendor-hint recorded separately", method: "api", params: { maxRosterPages: 10 } },
 ];
 
 /** Funnels API accepts an admin session (UI) or an mc_ API key (scripts/agents). */
@@ -97,8 +100,6 @@ export async function importRunItems(
 				note: [row.city?.trim(), item.state].filter(Boolean).join(", ") || null,
 			});
 		}
-		const industry = typeof row.rawData?.industryType === "string" ? row.rawData.industryType.trim() : "";
-		if (industry) auto.push({ stage: "industry_type", verdict: "pass", note: industry });
 		for (const a of auto) {
 			await db
 				.insert(funnelStageResults)
@@ -117,18 +118,14 @@ export async function importRunItems(
 }
 
 /** New funnel, idempotent on name (existing row wins — safe to re-call).
- *  Stages clone the freight skeleton; industry_gate rewords the industry_type
- *  gate for a non-freight industry. */
-export async function createFunnel(name: string, description?: string | null, industryGate?: string | null) {
+ *  Stages clone the ungated freight skeleton as-is. */
+export async function createFunnel(name: string, description?: string | null) {
 	const trimmed = name.trim();
 	const [existing] = await db.select().from(funnels).where(eq(funnels.name, trimmed)).limit(1);
 	if (existing) return existing;
-	const stages: FunnelStage[] = FREIGHT_STAGES.map((s) =>
-		s.key === "industry_type" && industryGate?.trim() ? { ...s, gate: industryGate.trim() } : s,
-	);
 	const [row] = await db
 		.insert(funnels)
-		.values({ name: trimmed, description: description?.trim() || null, stages })
+		.values({ name: trimmed, description: description?.trim() || null, stages: FREIGHT_STAGES })
 		.onConflictDoNothing({ target: funnels.name })
 		.returning();
 	return row ?? (await db.select().from(funnels).where(eq(funnels.name, trimmed)).limit(1))[0];
@@ -181,31 +178,47 @@ export async function recordStageVerdict(input: {
 		.insert(funnelStageResults)
 		.values({ itemId: input.itemId, stage: input.stage, ...values })
 		.onConflictDoUpdate({ target: [funnelStageResults.itemId, funnelStageResults.stage], set: values });
-	await applyVerdictConsequences(input.itemId, info.stages);
+	await applyVerdictConsequences(input.itemId);
 	return { ok: true };
 }
 
-/** Insert the Freight ICP funnel if the table is empty. Called on list reads —
- *  no seed migration, so drizzle stays the only writer of SQL. */
+/** Merge a funnel row's stages into the code skeleton: code wins for
+ * gate/label/method/soft (definitions evolve), the row wins for params
+ * (runtime tuning). Keys not in the skeleton — e.g. legacy industry_type —
+ * drop out. Pure — exported for tests. */
+export function mergeStages(skeleton: FunnelStage[], rowStages: FunnelStage[]): FunnelStage[] {
+	const tuned = new Map(rowStages.map((s) => [s.key, s]));
+	return skeleton.map((s) => {
+		const t = tuned.get(s.key);
+		return t ? { ...s, ...(t.params ? { params: t.params } : {}), ...(t.soft !== undefined ? { soft: t.soft } : {}) } : s;
+	});
+}
+
+// stage keys a freight-skeleton funnel may carry beyond the skeleton itself
+const LEGACY_STAGE_KEYS = new Set(["industry_type"]);
+
+/** Insert the Freight ICP funnel if missing, then keep EVERY funnel built on
+ * the freight skeleton in sync with the code definitions (called on list reads
+ * — no seed migration, so drizzle stays the only writer of SQL). Funnels with
+ * unknown extra stages are left alone; a missing skeleton key = not ours. */
 export async function ensureFreightFunnel() {
-	const existing = await db.select().from(funnels).where(eq(funnels.name, "Freight ICP")).limit(1);
-	if (existing.length === 0) {
+	const existing = await db.select().from(funnels);
+	if (!existing.some((f) => f.name === "Freight ICP")) {
 		await db.insert(funnels).values({
 			name: "Freight ICP",
 			description: "Owner-led Indiana freight brokers/3PLs, $10-70M, no tech team (see ICP.md)",
 			stages: FREIGHT_STAGES,
 		}).onConflictDoNothing();
-		return;
 	}
-	// stage definitions evolve (method changes) — keep the seeded row in sync,
-	// but runtime tuning (params/soft edited on the run page) always wins
-	const tuned = new Map(existing[0].stages.map((s) => [s.key, s]));
-	const merged: FunnelStage[] = FREIGHT_STAGES.map((s) => {
-		const t = tuned.get(s.key);
-		return t ? { ...s, ...(t.params ? { params: t.params } : {}), ...(t.soft !== undefined ? { soft: t.soft } : {}) } : s;
-	});
-	if (JSON.stringify(existing[0].stages) !== JSON.stringify(merged)) {
-		await db.update(funnels).set({ stages: merged }).where(eq(funnels.id, existing[0].id));
+	const skeletonKeys = new Set(FREIGHT_STAGES.map((s) => s.key));
+	for (const f of existing) {
+		const keys = new Set(f.stages.map((s) => s.key));
+		if (![...skeletonKeys].every((k) => keys.has(k))) continue; // not a freight-skeleton funnel
+		if (![...keys].every((k) => skeletonKeys.has(k) || LEGACY_STAGE_KEYS.has(k))) continue; // custom stages — leave alone
+		const merged = mergeStages(FREIGHT_STAGES, f.stages);
+		if (JSON.stringify(f.stages) !== JSON.stringify(merged)) {
+			await db.update(funnels).set({ stages: merged }).where(eq(funnels.id, f.id));
+		}
 	}
 }
 
@@ -227,8 +240,10 @@ export async function getRunStages(runId: string): Promise<{ run: typeof funnelR
 }
 
 /**
- * Items queued at `stage`: all earlier stages pass, this stage has no result.
- * Fail at any stage removes the item from all later queues (and its own).
+ * Items queued at `stage`: this stage has no result yet, and every earlier
+ * HARD stage passed. Current funnels are all-soft (nothing gates — the queue
+ * is just "unscored at this stage"), but the soft filter keeps the semantics
+ * correct should a hard stage ever return.
  */
 export async function getQueue(runId: string, stageKey: string) {
 	const info = await getRunStages(runId);
@@ -285,23 +300,18 @@ export async function getSummary(runId: string, stages: FunnelStage[]) {
 }
 
 /**
- * After a verdict lands: 6/6 passes → promote (idempotent — a second 6/6
- * updates the existing prospect); any fail on a promoted item → icpApproved
- * stays false until a pass re-lands everywhere.
+ * After a verdict lands: ai_signal pass → promote (idempotent — a re-pass
+ * updates the existing prospect). ai_signal is the ONLY gate — every stage is
+ * soft, so firmographic fails never drop a company or un-approve; a fail on
+ * ai_signal does (until a pass re-lands). Unsccored ai_signal → no change.
  */
-export async function applyVerdictConsequences(itemId: string, stages: FunnelStage[]) {
+export async function applyVerdictConsequences(itemId: string) {
 	const [item] = await db.select().from(funnelItems).where(eq(funnelItems.id, itemId)).limit(1);
 	if (!item) return;
 	const results = await db
 		.select({ stage: funnelStageResults.stage, verdict: funnelStageResults.verdict, note: funnelStageResults.note })
 		.from(funnelStageResults)
 		.where(eq(funnelStageResults.itemId, itemId));
-	// soft stages record signals but never block promotion or un-approve —
-	// a fail there is "worth knowing", not "drop"
-	const allPass = stages
-		.filter((s) => !s.soft)
-		.every((s) => results.some((r) => r.stage === s.key && r.verdict === "pass"));
-	const anyFail = results.some((r) => (stages.find((s) => s.key === r.stage)?.soft ? false : r.verdict === "fail"));
 
 	// ai_signal note tier → aiInterest (tier1=high, tier2=some) — only on a
 	// pass; a tier2 FAIL note (site-only rescue evidence) must never set it.
@@ -312,7 +322,7 @@ export async function applyVerdictConsequences(itemId: string, stages: FunnelSta
 			? "some"
 			: null;
 
-	if (allPass && !anyFail) {
+	if (aiRow?.verdict === "pass") {
 		const raw = (item.rawData ?? {}) as Record<string, unknown>;
 		const resultRows = await db
 			.select({ stage: funnelStageResults.stage, note: funnelStageResults.note })
@@ -347,6 +357,21 @@ export async function applyVerdictConsequences(itemId: string, stages: FunnelSta
 				})
 				.where(eq(outreachProspects.id, item.prospectId));
 		} else {
+			// LinkedIn targets for the connect loop: the self-labeling AI person
+			// (Rail-A import evidence) and the owner from the cached roster. Both
+			// get invited in the same cycle — the connect automation caps itself.
+			const aiHits = (raw.aiHits as { linkedinUrl?: string | null }[] | undefined) ?? [];
+			const aiLi = aiHits.find((h) => h.linkedinUrl)?.linkedinUrl ?? null;
+			const rosterPeople = (raw.roster as { people?: { title?: string | null; linkedinUrl?: string | null }[] } | undefined)?.people ?? [];
+			const ownerLi =
+				rosterPeople.find((p) => p.linkedinUrl && /\b(ceo|founder|owner|president)\b/i.test(p.title ?? ""))?.linkedinUrl ?? null;
+			const notes = [
+				typeof raw.address === "string" ? raw.address : null,
+				aiLi ? `li: ${aiLi}` : null,
+				ownerLi ? `li-owner: ${ownerLi}` : null,
+			]
+				.filter(Boolean)
+				.join("\n") || null;
 			const [prospect] = await db
 				.insert(outreachProspects)
 				.values({
@@ -359,7 +384,7 @@ export async function applyVerdictConsequences(itemId: string, stages: FunnelSta
 					icpApproved: true,
 					sourceNote: `funnel-run ${new Date().toISOString().slice(0, 10)}`,
 					campaignId: campaign?.id ?? null,
-					notes: typeof raw.address === "string" ? raw.address : null,
+					notes,
 				})
 				.returning({ id: outreachProspects.id });
 			await db
@@ -375,9 +400,9 @@ export async function applyVerdictConsequences(itemId: string, stages: FunnelSta
 		return;
 	}
 
-	// not 6/6 (or a fail landed): if promoted, drop approval — the existing
+	// ai_signal fail landed: if promoted, drop approval — the existing
 	// invite gate picks this up; the prospect row itself survives.
-	if (item.prospectId) {
-		await db.update(outreachProspects).set({ icpApproved: allPass && !anyFail }).where(eq(outreachProspects.id, item.prospectId));
+	if (aiRow?.verdict === "fail" && item.prospectId) {
+		await db.update(outreachProspects).set({ icpApproved: false }).where(eq(outreachProspects.id, item.prospectId));
 	}
 }

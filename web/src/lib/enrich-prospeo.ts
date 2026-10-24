@@ -6,21 +6,24 @@
 /** Strip legal suffixes — "10-4 GLOBAL LLC" finds nothing, "10-4 Global" does. */
 export const cleanName = (n: string) => n.replace(/\s+(LLC|L\.L\.C|INC|INC\.|CORP|CORPORATION|LTD|CO\.)\s*$/i, "").trim();
 
-// Prospeo rate-limits per minute (429) — space calls out and back off on 429.
-let MIN_INTERVAL = 10_000;
-let lastCall = 0;
-async function throttle() {
-	const wait = MIN_INTERVAL - (Date.now() - lastCall);
+// Prospeo plan limits — search-person 1/s + 30/min, enrich 5/s + 300/min —
+// fixed spacing sits safely under each sustained cap; 429 still backs off.
+const INTERVALS = { search: 2_200, enrich: 250 }; // ~27/min search, 4/s enrich
+const lastCall = { search: 0, enrich: 0 };
+export async function throttle(kind: keyof typeof INTERVALS) {
+	const wait = INTERVALS[kind] - (Date.now() - lastCall[kind]);
 	if (wait > 0) await Bun.sleep(wait);
-	lastCall = Date.now();
+	lastCall[kind] = Date.now();
 }
 /** Test hooks: clear the rate-limit spacing between mocked calls, or zero it
- *  for multi-page roster fetches (pagination would otherwise sleep 10s/page). */
+ *  for multi-page roster fetches (pagination would otherwise sleep per page). */
 export function _resetThrottle() {
-	lastCall = 0;
+	lastCall.search = 0;
+	lastCall.enrich = 0;
 }
 export function _setMinInterval(ms: number) {
-	MIN_INTERVAL = ms;
+	INTERVALS.search = ms;
+	INTERVALS.enrich = ms;
 }
 
 export function prospeoConfigured() {
@@ -43,7 +46,7 @@ export type ProspeoCompany = {
 	industry: string | null;
 };
 
-function mapCompany(c: Record<string, unknown>): ProspeoCompany {
+export function mapCompany(c: Record<string, unknown>): ProspeoCompany {
 	const range = (c.employee_range as string | null) ?? null;
 	const rev = (c.revenue_range as { min?: number; max?: number } | null) ?? {};
 	const loc = (c.location as { city?: string; state?: string } | null) ?? {};
@@ -68,7 +71,7 @@ export async function prospeoBulkEnrich(companyNames: string[]): Promise<Map<str
 	const out = new Map<string, ProspeoCompany | null>();
 	if (companyNames.length === 0) return out;
 	for (let attempt = 0; ; attempt++) {
-		await throttle();
+		await throttle("enrich");
 		const r = await fetch("https://api.prospeo.io/bulk-enrich-company", {
 			method: "POST",
 			headers: { "Content-Type": "application/json", "X-KEY": process.env.PROSPEO_API_KEY! },
@@ -106,7 +109,7 @@ export async function prospeoEnrichBatch(companyNames: string[]): Promise<Map<st
 export async function prospeoEnrichCompany(companyName: string): Promise<ProspeoCompany | null> {
 	let body = "";
 	for (let attempt = 0; ; attempt++) {
-		await throttle();
+		await throttle("enrich");
 		const r = await fetch("https://api.prospeo.io/enrich-company", {
 			method: "POST",
 			headers: { "Content-Type": "application/json", "X-KEY": process.env.PROSPEO_API_KEY! },
@@ -171,7 +174,7 @@ export async function prospeoCompanyRoster(refs: RosterRefs, { maxPages = 10 }: 
 	// One page = one throttled request; 429 backs off, other errors throw.
 	const fetchPage = async (page: number): Promise<string> => {
 		for (let attempt = 0; ; attempt++) {
-			await throttle();
+			await throttle("search");
 			const r = await fetch("https://api.prospeo.io/search-person", {
 				method: "POST",
 				headers: { "Content-Type": "application/json", "X-KEY": process.env.PROSPEO_API_KEY! },
