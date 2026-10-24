@@ -12,15 +12,17 @@ import { runScheduledFunnels } from "~/lib/funnel-scheduler";
 const TICK_MS = 60_000;
 const STALE_MS = 5 * 60_000;
 
-export async function tick(): Promise<{ docs: number; emails: number; funnels: number }> {
+export async function tick(): Promise<{ docs: number; emails: number }> {
 	let docsPublished = 0;
 	let emailsSent = 0;
 
 	// scheduled funnel automation (discovery + daily enrichment) — pure code,
-	// failures are logged inside and never break the publish/email work below
-	const funnelRes = await runScheduledFunnels().catch((e) => {
+	// fire-and-forget: ai_signal batches hold Prospeo rate-limit slots
+	// (~10s/call — hours at 100+ items/day) and must never delay the
+	// publish/email work below. The atomic lastEnrichAt claim inside prevents
+	// double-runs; caches make mid-batch crashes resume free.
+	void runScheduledFunnels().catch((e) => {
 		console.error("[scheduler] funnel automation failed:", e);
-		return { funnels: 0, discovered: 0, verdicts: 0 };
 	});
 	// reclaim crashed dispatches
 	await db
@@ -119,7 +121,7 @@ export async function tick(): Promise<{ docs: number; emails: number; funnels: n
 		}
 	}
 
-	return { docs: docsPublished, emails: emailsSent, funnels: funnelRes.funnels };
+	return { docs: docsPublished, emails: emailsSent };
 }
 
 const KEY = Symbol.for("madcactus.publish-scheduler");

@@ -4,14 +4,16 @@
 
 **Why this band:** Above $70M most have at least a small dev team or an IT director who becomes the gatekeeper (and says no). Below $10M there's often no ops pain worth a brain. $10-70M with owner-led decisions = the CEO *is* the buyer and feels the scatter personally. (Revised Sept 2026: $30M floor dropped after the freight pull showed the in-band no-tech intersection is nearly empty — and 2 of 3 shipped targets, Flora $12.2M and MO Strategies $6.1M, sit below $30M. Revealed filter: visible success + owner access, not revenue.)
 
-## Hard filters (must pass all)
+## Qualification filters (scored — nothing drops a company)
+
+The funnel records a pass/fail per filter as enrichment data for every company; a fail never removes one. **`ai_signal` is the only promotion gate** — the rest are learning data: enrich widely, then let outreach responses reveal the real ICP. The thresholds below still define what each verdict means.
 
 | Filter | Test | Fail → |
 | --- | --- | --- |
-| Indiana HQ | Address/city, not name tokens (Franklin, Anderson etc. exist nationwide) | drop |
-| $10-70M revenue | IBJ/Inc/Buzzfile/ZoomInfo estimate; sanity-check rev/employee $150-500k | drop |
-| Owner-operated | Founder/CEO still running it, not PE roll-up with shared corporate IT | drop |
-| No real tech team | LinkedIn people search: ≤6 hits for CTO/VP Engineering/IT Director/"software engineer"/"developer" | drop |
+| Indiana HQ | Address/city, not name tokens (Franklin, Anderson etc. exist nationwide) | recorded |
+| $10-70M revenue | IBJ/Inc/Buzzfile/ZoomInfo estimate; sanity-check rev/employee $150-500k | recorded |
+| Owner-operated | Founder/CEO still running it, not PE roll-up with shared corporate IT | recorded |
+| No real tech team | LinkedIn people search: ≤6 hits for CTO/VP Engineering/IT Director/"software engineer"/"developer" | recorded |
 | Knowledge-heavy | Their product is judgment, relationships, data-wrangling, compliance — not physical goods or software | deprioritize |
 
 ## Industries, ranked by brain-reuse
@@ -28,6 +30,17 @@ The three shipped brains are templates. A new target in the same industry = swap
 ## Where to find the lists
 
 Ranked by signal-per-hour. Everything below is free or cheap unless noted.
+
+### Discovery rails (the funnel's automated sources)
+
+| Rail | Source | Cost | Notes |
+| --- | --- | --- |
+| A — AI people | Prospeo `/search-person`: Indiana + job title contains AI/ML/ChatGPT | ~10 credits/run | Every company arrives pre-qualified — the hit IS the ai_signal match; the person's LinkedIn URL rides along for the connect loop. Belongs to the "Indiana AI-Signal" funnel. |
+| B — industry lists | Prospeo `/search-company`: Indiana + industry enum + headcount 11-200 | ~1 credit/25 cos + 3-4/company at ai_signal | Feeds the industry funnels (Legal ICP first). |
+| C — curated | IBJ / Inc 5000 / lobbyist registry → paste import | 0 credits | Visible-success signal; stays manual. |
+| bottom — FMCSA | FMCSA census (freight only) | 0 credits | 78% of its discoveries aren't in Prospeo at all (no people data) — keep, but slow (14d+). |
+
+Knobs: `maxPages` caps each discovery run (10 pages A / 5 pages B); `discoveryIntervalDays` per funnel schedule. Filter enums resolve through Prospeo's free `/search-suggestions` endpoint at runtime.
 
 **Cross-industry, already paying off (keep using):**
 - IBJ Data Center / Book of Lists (ibj.com/lists) — Largest Private Companies, Fast 25, Largest Law Firms, Largest Accounting Firms, Corporate 100. Paid but the single best IN filter; free snippets + annual features cover most.
@@ -70,8 +83,8 @@ Score 5 min/company by hand; batch 20 in an hour. Automatable later via Clay/Apo
 | Industry brain-reuse | Same as shipped brain | New skeleton needed |
 | Visible success | Fast 25 / Inc 5000 / awards | Unknown |
 | Visible scatter | Public chaos signals (growth, hiring, ops mess) | None visible |
-| Owner access | Founder/CEO still running it, not a PE roll-up (funnel gate: `owner_led`) | Layered exec team / PE roll-up |
-| Timing / AI signal | An employee self-labels AI on LinkedIn, any role (funnel gate: `ai_signal` — see below) | Nothing pressing; zero AI signal anywhere |
+| Owner access | Founder/CEO still running it, not a PE roll-up (funnel score: `owner_led`) | Layered exec team / PE roll-up |
+| Timing / AI signal | An employee self-labels AI on LinkedIn, any role (the ONLY promotion gate: `ai_signal` — see below) | Nothing pressing; zero AI signal anywhere |
 
 ## Weekly loop (feeds ASPTR-212)
 
@@ -85,7 +98,9 @@ Score 5 min/company by hand; batch 20 in an hour. Automatable later via Clay/Apo
 
 **The only promotion signal is an employee who self-labels AI** — any role, in their current LinkedIn self-label: headline, current job title, or listed skills. A small technical team using AI is the expected good case (BCW: Director of Ecommerce + offshore dev, 2 matches), not a disqualifier. An employee who writes AI into their own LinkedIn chose to say it; companies that don't care write nothing anywhere (Koola: 0 matches, never viewed the brain). **Past AI job titles are note-only** (`past-AI:` in the stage note) — never a pass, still a signal they could be doing something here now.
 
-The roster scan is full: `/search-person` paginates 25 people/page up to `maxRosterPages` (stage param, default 10 = 250 people ≥ the funnel's 250-headcount ceiling). Credit math: 1 credit per page that returns people (~3–4 pages for a typical ICP company), identical pages deduped free for 30 days, and the completed roster is cached on the item forever — every re-run, re-score, and later read costs 0. Rosters cached partial (legacy page-1 pulls, quota-cut pages) **auto-backfill on the next AI-signal stage run**: pagination completes, the item re-scores, latest verdict wins. The upstream `tech_team` gate (≤6 tech titles in its 25-person sample) is deliberately unchanged — it stays a calibrated sample, not a full-roster count.
+`ai_signal` runs at position 2 (right after the free `hq_state` auto-verdict), before any paid firmographic stage: its Prospeo enrich + full roster + site scan run on every imported company, and its cached payload answers headcount/revenue free. A pass promotes the company into outreach regardless of the other scores; a fail (any tier) keeps it in the funnel with all its recorded data for the rescue pile and later analysis.
+
+The upstream `tech_team` score (≤6 tech titles in its 25-person sample) is deliberately unchanged — it stays a calibrated sample, not a full-roster count, and no longer gates anything either.
 
 | Evidence | Verdict | aiInterest |
 | --- | --- | --- |
