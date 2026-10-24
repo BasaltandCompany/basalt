@@ -1,0 +1,2 @@
+ALTER TABLE "funnel_schedules" DROP CONSTRAINT "funnel_schedule_source_check";--> statement-breakpoint
+ALTER TABLE "funnel_schedules" ADD CONSTRAINT "funnel_schedule_source_check" CHECK ("funnel_schedules"."discovery_source" is null or "funnel_schedules"."discovery_source" in ('fmcsa', 'prospeo_ai', 'prospeo_company'));

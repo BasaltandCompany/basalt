@@ -244,7 +244,7 @@ export const funnelSchedules = pgTable(
 			.unique()
 			.references(() => funnels.id, { onDelete: "cascade" }),
 		enabled: boolean("enabled").notNull().default(false),
-		// fmcsa | null (none)
+		// fmcsa | prospeo_ai (search-person AI hits) | prospeo_company (search-company industry list) | null (none)
 		discoverySource: text("discovery_source"),
 		discoveryIntervalDays: integer("discovery_interval_days").notNull().default(7),
 		enrichPerDay: integer("enrich_per_day").notNull().default(50),
@@ -254,7 +254,7 @@ export const funnelSchedules = pgTable(
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 		updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 	},
-	(t) => [check("funnel_schedule_source_check", sql`${t.discoverySource} is null or ${t.discoverySource} = 'fmcsa'`)],
+	(t) => [check("funnel_schedule_source_check", sql`${t.discoverySource} is null or ${t.discoverySource} in ('fmcsa', 'prospeo_ai', 'prospeo_company')`)],
 );
 
 // ── Companies (the org / client company) ───────────────────────────
