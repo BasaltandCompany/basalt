@@ -2,9 +2,8 @@
 // POST /api/funnels/runs/:id/items
 //   { items: [{ companyName, city?, state?, sourceUrl?, sourceKind?, rawData? }] }
 //   Max 100 per call. Dedups within the run; skips companies already promoted
-//   as prospects. Auto-writes hq_state (state field) and industry_type
-//   (rawData.industryType) results with method=source when the row carries
-//   the evidence.
+//   as prospects. Auto-writes the hq_state result (method=source) when the
+//   row carries a state field.
 import type { APIEvent } from "@solidjs/start/server";
 import { funnelAuthed, getRunStages, importRunItems, type ImportRow } from "~/lib/funnels";
 

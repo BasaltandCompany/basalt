@@ -458,10 +458,12 @@ export default function AdminFunnelRun(props: { params: { id: string } }) {
 						</label>
 						<label class="muted" style={{ "font-size": "13px" }}>
 							discovery
-							<select name="discoverySource">
-								<option value="" selected={!schedule()?.discoverySource}>none</option>
-								<option value="fmcsa" selected={schedule()?.discoverySource === "fmcsa"}>FMCSA census (new Indiana brokers)</option>
-							</select>
+								<select name="discoverySource">
+									<option value="" selected={!schedule()?.discoverySource}>none</option>
+									<option value="fmcsa" selected={schedule()?.discoverySource === "fmcsa"}>FMCSA census (new Indiana brokers)</option>
+									<option value="prospeo_ai" selected={schedule()?.discoverySource === "prospeo_ai"}>Prospeo AI people (Indiana AI self-labels)</option>
+									<option value="prospeo_company" selected={schedule()?.discoverySource === "prospeo_company"}>Prospeo company list (industry)</option>
+								</select>
 						</label>
 						<label class="muted" style={{ "font-size": "13px" }}>
 							every <input name="discoveryIntervalDays" type="number" class="num" min="1" value={schedule()?.discoveryIntervalDays ?? 7} /> days
