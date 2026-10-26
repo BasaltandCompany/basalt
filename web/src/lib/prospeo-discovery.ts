@@ -6,6 +6,7 @@
 // Credits: 1 per 25-result page that returns rows. Canonical filter values
 // (location/industry enums) resolve through the FREE /search-suggestions
 // endpoint, cached per process — enum drift never 400s a discovery run.
+import { aiHit } from "./ai-signal";
 import { mapCompany, prospeoConfigured, throttle, type ProspeoCompany } from "./enrich-prospeo";
 import type { ImportRow } from "./funnels";
 
@@ -101,9 +102,16 @@ export function aiPeopleToRows(hits: SearchPersonHit[]): ImportRow[] {
 		const co = company as Record<string, unknown> | null;
 		const name = typeof co?.name === "string" ? (co.name as string).trim() : "";
 		if (!co || !name) continue; // no current employer → nothing to target
+		const title = (person.current_job_title as string | null) ?? null;
+		const headline = (person.headline as string | null) ?? null;
+		// strict locked-rule test client-side: the bare "AI" search term
+		// contains-matches case-insensitively (Training, Chair, Liaison,
+		// Sustainability…), so only title/headline self-labels count
+		if (!aiHit(title ?? "") && !aiHit(headline ?? "")) continue;
 		const hit = {
 			name: ((person.full_name as string | undefined) ?? "").trim(),
-			title: (person.current_job_title as string | null) ?? null,
+			title,
+			headline,
 			linkedinUrl: (person.linkedin_url as string | null) ?? null,
 		};
 		const existing = byCompany.get(name.toLowerCase());

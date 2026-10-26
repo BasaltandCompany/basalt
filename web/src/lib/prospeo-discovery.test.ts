@@ -8,6 +8,19 @@ import { aiPeopleToRows, companiesToRows, type SearchPersonHit, type SearchCompa
 
 const person = (over: Record<string, unknown> = {}) => ({ full_name: "Brett Mathews", current_job_title: "Director of AI", linkedin_url: "https://linkedin.com/in/brett", ...over });
 
+test("aiPeopleToRows drops search false positives — bare 'AI' contains-matches Training/Chair/Liaison", () => {
+	const hits: SearchPersonHit[] = [
+		{ person: person({ full_name: "T", current_job_title: "Training Specialist" }), company: company({ name: "Noise Co" }) }, // no strict label
+		{ person: person({ full_name: "C", current_job_title: "Chair of Pharmacy Practice" }), company: company({ name: "Noise Co" }) },
+		{ person: person({ full_name: "H", current_job_title: "Ops Manager", headline: "AI enthusiast" }), company: company({ name: "Headline Co" }) }, // headline carries it
+		{ person: person({ full_name: "R", current_job_title: "Director of AI" }), company: company({ name: "Real Co" }) },
+	];
+	const rows = aiPeopleToRows(hits);
+	assert.deepEqual(rows.map((r) => r.companyName), ["Headline Co", "Real Co"]);
+	const h = rows[0].rawData!.aiHits as { headline: string | null }[];
+	assert.equal(h[0].headline, "AI enthusiast");
+});
+
 const company = (over: Record<string, unknown> = {}) => ({
 	name: "Smoke Brokerage LLC",
 	location: { city: "Indianapolis", state: "IN" },

@@ -47,15 +47,20 @@ export function scoreRoster(people: ProspeoPerson[]): AiMatch[] {
  *  self-labeler the roster pull never returns), so discovery evidence scores
  *  too — same strict current-self-label test, evidence tagged (search:).
  *  Pure — exported for tests. */
-export function mergeSearchHits(matches: AiMatch[], hits: { name?: string; title?: string | null }[]): AiMatch[] {
+export function mergeSearchHits(
+	matches: AiMatch[],
+	hits: { name?: string; title?: string | null; headline?: string | null }[],
+): AiMatch[] {
 	const out = [...matches];
 	const seen = new Set(out.map((m) => m.name.toLowerCase()));
 	for (const h of hits) {
 		if (out.length >= 3) break;
 		const title = h.title ?? "";
-		if (!h.name || !aiHit(title) || seen.has(h.name.toLowerCase())) continue;
+		const headline = h.headline ?? "";
+		const via = aiHit(title) ? title : aiHit(headline) ? headline : null;
+		if (!h.name || via === null || seen.has(h.name.toLowerCase())) continue;
 		seen.add(h.name.toLowerCase());
-		out.push({ name: h.name, title: title || null, linkedinUrl: null, evidence: `${h.name} — ${title} (search: ${title})` });
+		out.push({ name: h.name, title: title || null, linkedinUrl: null, evidence: `${h.name} — ${title || "role n/a"} (search: ${via})` });
 	}
 	return out;
 }
