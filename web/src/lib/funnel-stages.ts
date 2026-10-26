@@ -15,7 +15,7 @@ import {
 	type ProspeoCompany,
 	type ProspeoRoster,
 } from "~/lib/enrich-prospeo";
-import { pastMatches, scoreAiSignal, scoreRoster, scanSite } from "~/lib/ai-signal";
+import { mergeSearchHits, pastMatches, scoreAiSignal, scoreRoster, scanSite } from "~/lib/ai-signal";
 
 const M = 1_000_000;
 
@@ -154,7 +154,10 @@ async function aiSignalVerdict(item: typeof funnelItems.$inferSelect, stage: Fun
 		roster = fresh;
 		await cacheRoster(item.id, fresh);
 	}
-	const matches = scoreRoster(roster.people);
+	const matches = mergeSearchHits(
+		scoreRoster(roster.people),
+		(raw.aiHits as { name?: string; title?: string | null }[] | undefined) ?? [],
+	);
 	const past = pastMatches(roster.people);
 
 	const siteEvidence: string[] = [];

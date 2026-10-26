@@ -13,6 +13,7 @@ import {
 	scanSite,
 	scoreAiSignal,
 	humanizeAiSignalNote,
+	mergeSearchHits,
 	brandTokens,
 	type AiMatch,
 	type TierInput,
@@ -363,4 +364,17 @@ test("roster fetch stops at maxPages (partial); mid-run failure keeps paid pages
 	} finally {
 		globalThis.fetch = realFetch;
 	}
+});
+
+test("mergeSearchHits unions search-time evidence under the strict rule", () => {
+	const rosterMatch = { name: "Shannon Gacke", title: "Director", linkedinUrl: null, evidence: "roster hit" };
+	const merged = mergeSearchHits([rosterMatch], [
+		{ name: "Patrick Hedrick", title: "AI Lead" }, // search hit → merged
+		{ name: "Patrick Hedrick", title: "AI Lead" }, // dup → skipped
+		{ name: "Justin Smith", title: "Sales Manager" }, // no AI self-label → skipped
+		{ name: "Brad Smith", title: "VP of Machine Learning" }, // phrase hit → merged
+	]);
+	assert.equal(merged.length, 3); // roster match + 2 search hits, cap 3
+	assert.ok(merged[1].evidence.includes("search:"));
+	assert.equal(merged[1].name, "Patrick Hedrick");
 });
