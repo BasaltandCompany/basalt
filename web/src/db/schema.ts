@@ -1109,6 +1109,9 @@ export const brainRequests = pgTable(
 		// every form answer, verbatim — the extracted columns below are the
 		// queryable subset for the pipeline views
 		answers: jsonb("answers").notNull().default({}),
+		// the blueprint rendered on their screen at submit time (null on rows
+		// created before this column existed)
+		blueprint: jsonb("blueprint"),
 		company: text("company").notNull(),
 		contactEmail: text("contact_email").notNull(),
 		jobTitle: text("job_title"),
