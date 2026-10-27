@@ -7,5 +7,5 @@ export function initHeroVideo(): string | null {
     localStorage.setItem("basalt.heroVideoMigrated", "1")
     localStorage.removeItem(HERO_KEY)
   }
-  return localStorage.getItem(HERO_KEY) ?? "/hero-loop.mp4"
+  return localStorage.getItem(HERO_KEY) ?? "/hero-loop.webm"
 }
