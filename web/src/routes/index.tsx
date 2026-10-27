@@ -1,4 +1,4 @@
-import { createSignal, onCleanup, onMount, Show } from "solid-js"
+import { createSignal, For, onCleanup, onMount, Show } from "solid-js"
 import { Logo } from "@/brand/logo"
 import { Button } from "@basalt/ui"
 import { initHeroVideo } from "@/routes/site-state"
@@ -7,26 +7,44 @@ import { initHeroVideo } from "@/routes/site-state"
 /**
  * The scroll narrative. One message per 100vh screen; the bottom-left corner
  * swaps between them as you scroll. Edit copy here — nowhere else.
- * Facts from the Mad Cactus marketing page, in the Basalt voice.
+ * Order: what we do → proof → the free-brain CTA.
  */
-const MESSAGES = [
+const MESSAGES: Message[] = [
   {
-    title: "The rock under everything.",
-    body: "We embed AI into your operations to drive real revenue — custom agents and workflows that let a team of five operate like a team of twenty-five.",
-  },
-  {
-    title: "First the audit. Then the brain. Then the agents.",
-    body: "Our agent learns every workflow from your people. Your data, docs, and institutional knowledge become one intelligence layer. Custom agents take entire tasks off your team.",
+    title: "We embed custom AI solutions into your business.",
+    body: "We focus on revenue per work-hour, letting your team of five operate like a team of twenty-five with AI-driven systems and solutions built by our consultants. Learn more about why we focus on this metric",
+    link: { href: "/thesis", label: "here." },
   },
   {
     title: "Proven in production.",
-    body: "Indiana University to Customs Data Lock. We taught them to use AI agents to build small software for their outbound operations, growing their response rate, saving 1/3 of their time, and automating manual back-end and administrative work. 2.75x more revenue per hour worked.",
+    proof: [
+      {
+        client: "Indiana University",
+        stat: "2.75x",
+        line: "revenue per work-hour, with AI agents running their outbound and a third of their time back.",
+      },
+      {
+        client: "Customs Data Lock",
+        stat: "+200%",
+        line: "response rates from the cold-outreach dashboard, plus coding-agent training and prospect identification that grew sales and outreach.",
+      },
+    ],
   },
   {
-    title: "Hand tasks to agents, or don't pay.",
-    body: "We don't sell hours. We embed with your team, build the layer, deploy the agents, and train your people to run them.",
+    title: "Start with a free company brain.",
+    body: "Take the three-minute test and your Company Brain Blueprint renders instantly: the exact connectors for your stack, your first three workflows, and the complete recipe to build it yourself. Or I'll build it with your team, free.",
+    cta: { href: "/brain", label: "Take the brain test" },
   },
 ]
+
+type Message = {
+  title: string
+  body?: string
+  link?: { href: string; label: string }
+  proof?: { client: string; stat: string; line: string }[]
+  cta?: { href: string; label: string }
+}
+
 
 // The approved text-link look, now a Button variant. dim passes /40 instead of /60.
 function LinkText(props: { dim?: boolean; href?: string; children: string; onClick?: (e: MouseEvent) => void }) {
@@ -137,29 +155,67 @@ export function Site(props: { heroVideo: string | null }) {
         {/* keyed on the message object → remounts per screen, replaying .msg-in */}
         <Show when={MESSAGES[index()]} keyed>
           {(msg) => (
-            <div class="msg-in">
-              <Show
-                when={index() === 0}
-                fallback={
-                  <p class="font-serif text-4xl leading-[1.05] tracking-[-0.01em] md:text-5xl">
-                    {msg.title}
-                  </p>
-                }
-              >
-                <h1 class="font-serif text-4xl leading-[1.05] tracking-[-0.01em] md:text-5xl">
-                  {msg.title}
-                </h1>
-              </Show>
-              <p class="mt-4 max-w-lg font-sans text-base leading-relaxed text-muted-foreground">
-                {msg.body}
+        <div class="msg-in">
+          <Show
+            when={index() === 0}
+            fallback={
+              <p class="font-serif text-4xl leading-[1.05] tracking-[-0.01em] md:text-5xl">
+                {msg.title}
               </p>
-            </div>
+            }
+          >
+            <h1 class="font-serif text-4xl leading-[1.05] tracking-[-0.01em] md:text-5xl">
+              {msg.title}
+            </h1>
+          </Show>
+          <Show
+            when={msg.proof}
+            fallback={
+              <p class="mt-4 max-w-lg font-sans text-base leading-relaxed text-muted-foreground">
+                {msg.body}{" "}
+                <Show when={msg.link}>
+                  {(l) => (
+                    <a
+                      class="text-foreground/80 underline underline-offset-4 hover:text-foreground"
+                      href={l().href}
+                    >
+                      {l().label}
+                    </a>
+                  )}
+                </Show>
+              </p>
+            }
+          >
+            {(proof) => (
+              <div class="mt-5 space-y-7">
+                <For each={proof()}>
+                  {(p) => (
+                    <div>
+                      <p class="font-sans text-xs uppercase tracking-[0.25em] text-muted-foreground">
+                        {p.client}
+                      </p>
+                      <p class="mt-1 font-serif text-5xl leading-none">{p.stat}</p>
+                      <p class="mt-2 max-w-lg font-sans text-sm leading-relaxed text-muted-foreground">
+                        {p.line}
+                      </p>
+                    </div>
+                  )}
+                </For>
+              </div>
+            )}
+          </Show>
+          <div class="pointer-events-auto mt-6 flex items-center gap-8">
+            <Show
+              when={msg.cta}
+              fallback={<LinkText href="/contact">Start a conversation</LinkText>}
+            >
+              {(cta) => <LinkText href={cta().href}>{cta().label}</LinkText>}
+            </Show>
+            <LinkText dim href="/thesis">Read the thesis</LinkText>
+          </div>
+        </div>
           )}
         </Show>
-        <div class="pointer-events-auto mt-6 flex items-center gap-8">
-          <LinkText href="/contact">Start a conversation</LinkText>
-          <LinkText dim href="/writing">Read the thesis</LinkText>
-        </div>
       </div>
 
       {/* ── Scroll control ──────────────────────────────────────── */}
