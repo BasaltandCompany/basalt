@@ -1,6 +1,6 @@
 {
   "id": "9c1f0e21-72eb-4fc5-8a6f-9a96d83cb578",
-  "prevId": "43193bc5-6bda-4ad1-b398-e48a0a2615b5",
+  "prevId": "0f5b2dfc-4aaf-4cbf-bb9a-1deb7ea05c27",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1005,6 +1005,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "blueprint": {
+          "name": "blueprint",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
