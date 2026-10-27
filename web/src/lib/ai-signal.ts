@@ -42,6 +42,29 @@ export function scoreRoster(people: ProspeoPerson[]): AiMatch[] {
 	return out.slice(0, 3);
 }
 
+/** Union rail-A search-time hits into roster matches: Prospeo's person
+ *  search index and its roster endpoint disagree on coverage (search finds a
+ *  self-labeler the roster pull never returns), so discovery evidence scores
+ *  too — same strict current-self-label test, evidence tagged (search:).
+ *  Pure — exported for tests. */
+export function mergeSearchHits(
+	matches: AiMatch[],
+	hits: { name?: string; title?: string | null; headline?: string | null }[],
+): AiMatch[] {
+	const out = [...matches];
+	const seen = new Set(out.map((m) => m.name.toLowerCase()));
+	for (const h of hits) {
+		if (out.length >= 3) break;
+		const title = h.title ?? "";
+		const headline = h.headline ?? "";
+		const via = aiHit(title) ? title : aiHit(headline) ? headline : null;
+		if (!h.name || via === null || seen.has(h.name.toLowerCase())) continue;
+		seen.add(h.name.toLowerCase());
+		out.push({ name: h.name, title: title || null, linkedinUrl: null, evidence: `${h.name} — ${title || "role n/a"} (search: ${via})` });
+	}
+	return out;
+}
+
 /** Past AI job titles ("was \"ML Analyst\"") — never passes, note-only:
  *  still a good signal they could be doing something here now. Only people
  *  with NO current hit, else they'd already be in scoreRoster. */

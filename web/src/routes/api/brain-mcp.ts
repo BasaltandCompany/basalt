@@ -711,13 +711,12 @@ chat_uuid: { type: "string" },
 	{
 		name: "create_funnel",
 		description:
-			"Create a funnel (idempotent on name) whose stages clone the freight 8-gate skeleton (hq_state, industry_type, headcount, revenue_band, tech_team, ops_trigger, owner_led, ai_signal) with industry_type's gate reworded via industry_gate. Then create_funnel_run → add_funnel_items → run_funnel_stage.",
+			"Create a funnel (idempotent on name) whose stages clone the ungated freight skeleton (hq_state, ai_signal, headcount, revenue_band, tech_team, ops_trigger, owner_led — all soft, nothing drops a company; an ai_signal pass is the only promotion gate, and ops_trigger + owner_led form the trigger path that promotes an ai_signal fail). Then create_funnel_run → add_funnel_items → run_funnel_stage.",
 		inputSchema: {
 			type: "object",
 			properties: {
 				name: { type: "string", description: "unique funnel name, e.g. 'Legal ICP'" },
 				description: { type: "string" },
-				industry_gate: { type: "string", description: "rewords the industry_type gate for this industry (e.g. 'Indiana law firm — attorneys are the product')" },
 			},
 			required: ["name"],
 		},
@@ -739,7 +738,7 @@ chat_uuid: { type: "string" },
 	{
 		name: "add_funnel_items",
 		description:
-			"Import companies into an open run (≤100 per call, deduped per run, already-promoted companies skipped). Pass state + rawData.industryType and the hq_state / industry_type verdicts are auto-written from that evidence. Re-pulls are safe.",
+			"Import companies into an open run (≤100 per call, deduped per run, already-promoted companies skipped). A state field auto-writes the hq_state verdict. Re-pulls are safe.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -754,7 +753,7 @@ chat_uuid: { type: "string" },
 							state: { type: "string" },
 							sourceUrl: { type: "string" },
 							sourceKind: { type: "string" },
-							rawData: { type: "object", description: "free-form evidence; industryType key feeds the industry_type verdict" },
+							rawData: { type: "object", description: "free-form evidence kept on the item" },
 						},
 						required: ["companyName"],
 					},
@@ -766,7 +765,7 @@ chat_uuid: { type: "string" },
 	{
 		name: "run_funnel_stage",
 		description:
-			"Batch-run an api-method stage (headcount, revenue_band, tech_team, ops_trigger, ai_signal) for queued items through its driver (Prospeo/Apollo — CREDITS). limit bounds the batch; re-calls resume where it stopped. agent-method stages (owner_led) are yours: judge then record_funnel_verdict.",
+			"Batch-run an api-method stage (ai_signal, headcount, revenue_band, tech_team, ops_trigger) for queued items through its Prospeo driver — CREDITS. Nothing gates: the queue is simply items without this stage's verdict yet. ai_signal runs the paid enrich + roster first (its cache answers the other stages free). limit bounds the batch; re-calls resume where it stopped. agent-method stages (owner_led) are yours: judge then record_funnel_verdict.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -1813,11 +1812,7 @@ export async function POST(event: APIEvent) {
 							result = { error: "name is required" };
 							break;
 						}
-						result = await createFunnel(
-							name,
-							toolArgs.description ? String(toolArgs.description) : null,
-							toolArgs.industry_gate ? String(toolArgs.industry_gate) : null,
-						);
+					result = await createFunnel(name, toolArgs.description ? String(toolArgs.description) : null);
 						break;
 					}
 					case "create_funnel_run": {

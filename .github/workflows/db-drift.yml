@@ -79,13 +79,15 @@ jobs:
         run: |
           # Structural drift only, measured against MAIN's migrations: a PR's
           # own not-yet-applied migration is expected pre-merge, and platform
-          # churn (default privileges, grants, comments) is noise, not drift.
+          # churn (default privileges, grants, comments, platform-managed
+          # extensions — Supabase itself enables hypopg/index_advisor) is
+          # noise, not drift.
           git fetch --quiet --depth=1 origin main
           rm -rf supabase/migrations
           git checkout origin/main -- supabase/migrations
           out=$(supabase db diff --linked --output-format json </dev/null)
           diff_sql=$(echo "$out" | jq -r '.diff // ""' \
-            | grep -vE '^(ALTER DEFAULT PRIVILEGES|GRANT|REVOKE|COMMENT ON|--|$)' || true)
+            | grep -vE '^(ALTER DEFAULT PRIVILEGES|GRANT|REVOKE|COMMENT ON|SET local|CREATE EXTENSION|--|$)' || true)
           if [ -n "$(echo "$diff_sql" | tr -d '[:space:]')" ]; then
             echo "::error::Prod schema differs from what main's migrations produce — someone changed the DB outside migrations."
             echo "$diff_sql"

@@ -10,6 +10,13 @@ re-enter secrets (API keys live in the dashboard, never in this repo).
 |---|---|---|---|---|
 | `meeting-publisher/` | Finished Anarlog meetings with a client-matching title → draft (transcript + memo + audio) on the Mad Cactus dashboard | every 60s (`StartInterval`) | `./install.sh mc_<key>` | `./status.sh` |
 
+**Migrating into the desktop app** (`desktop/`): the Tauri app now runs this
+same script on a 60s timer (Bun sidecar — see `desktop/scripts/fetch-bun.sh`),
+seeding config + state from the launchd install on first run. Until you cut
+over (`launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.madcactus.meeting-publisher.plist`),
+launchd is still the runtime; `install.sh` stays as rollback. Don't run both
+for long — separate state dirs can double-push a meeting recorded mid-overlap.
+
 Other personal automation that is NOT here: Orca automations (e.g. the
 Siri→Linear voice-ideas pipeline) live inside the Orca app, not launchd —
 they follow the laptop via Orca's own sync/setup, not this repo.

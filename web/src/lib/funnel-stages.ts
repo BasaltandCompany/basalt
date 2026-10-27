@@ -10,11 +10,12 @@ import {
 	prospeoCompanyRoster,
 	prospeoConfigured,
 	prospeoEnrichBatch,
+	prospeoEnrichCompany,
 	rangeMidpoint,
 	type ProspeoCompany,
 	type ProspeoRoster,
 } from "~/lib/enrich-prospeo";
-import { pastMatches, scoreAiSignal, scoreRoster, scanSite } from "~/lib/ai-signal";
+import { mergeSearchHits, pastMatches, scoreAiSignal, scoreRoster, scanSite } from "~/lib/ai-signal";
 
 const M = 1_000_000;
 
@@ -165,11 +166,21 @@ function internalLinks(html: string): string[] {
  *  re-fetches. */
 async function aiSignalVerdict(item: typeof funnelItems.$inferSelect, stage: FunnelStage) {
 	const raw = (item.rawData ?? {}) as Record<string, unknown>;
-	const prospeo = (raw.prospeo ?? null) as { companyId?: string | null; domain?: string | null } | null;
+	let prospeo = (raw.prospeo ?? null) as { companyId?: string | null; domain?: string | null } | null;
+	// ai_signal runs before any firmographic stage now — no headcount cache
+	// exists yet. Match the company by cleaned name first (1 credit on match,
+	// 0 on miss) so the roster uses exact ids (the name fallback can pull in
+	// unrelated same-name companies), and cache it — that pre-answers
+	// headcount/revenue for free.
+	if (!prospeo) {
+		const co = await prospeoEnrichCompany(cleanName(item.companyName));
+		await cacheProspeo(item.id, co);
+		prospeo = { companyId: co?.companyId ?? null, domain: co?.domain ?? null };
+	}
 	const refs = {
-		companyId: prospeo?.companyId ?? null,
-		domain: prospeo?.domain ?? null,
-		name: item.companyName,
+		companyId: prospeo.companyId ?? null,
+		domain: prospeo.domain ?? null,
+		name: cleanName(item.companyName),
 	};
 	const maxPages = num(stage, "maxRosterPages", 10);
 	const cached = (raw.roster ?? null) as ProspeoRoster | null;
@@ -185,7 +196,10 @@ async function aiSignalVerdict(item: typeof funnelItems.$inferSelect, stage: Fun
 		roster = fresh;
 		await cacheRoster(item.id, fresh);
 	}
-	const matches = scoreRoster(roster.people);
+	const matches = mergeSearchHits(
+		scoreRoster(roster.people),
+		(raw.aiHits as { name?: string; title?: string | null }[] | undefined) ?? [],
+	);
 	const past = pastMatches(roster.people);
 
 	const siteEvidence: string[] = [];
@@ -262,11 +276,16 @@ export async function runStageBatch(runId: string, stageKey: string, limit = 50)
 	// and its own cached roster instead.
 	const enriched = new Map<string, ProspeoCompany | null>();
 	if ((stageKey === "headcount" || stageKey === "revenue_band") && prospeoConfigured() && items.length > 0) {
-		// revenue_band: the headcount run already cached the payload — re-enriching
-		// matched companies burns 1 credit each for data we have. Enrich only the
-		// items the cache can't answer.
-		const todo =
-			stageKey === "revenue_band" ? items.filter((it) => !hasFirmographics(cachedProspeo(it))) : items;
+	// firmographic stages: skip items the ai_signal run already enriched and
+	// cached (matched or matched:false) — re-enriching burns 1 credit each for
+	// data we have. Bulk-request the rest: one per 50 companies, same credit
+	// cost (per match), one rate-limit slot, no 429 storms.
+	const todo =
+		stageKey === "headcount"
+			? items.filter((it) => !cachedProspeo(it))
+			: stageKey === "revenue_band"
+				? items.filter((it) => !hasFirmographics(cachedProspeo(it)))
+				: items;
 		try {
 			for (let i = 0; i < todo.length; i += 50) {
 				const chunk = todo.slice(i, i + 50);
@@ -282,8 +301,12 @@ export async function runStageBatch(runId: string, stageKey: string, limit = 50)
 			let verdict: "pass" | "fail" = "fail";
 			let note = "";
 			if (stageKey === "headcount") {
-				const co = enriched.get(item.id) ?? null;
-				await cacheProspeo(item.id, co);
+				// cached payload (ai_signal-first) answers most items free; the fresh
+				// bulk above only ran for cache-less items
+				const cached = cachedProspeo(item);
+				const fresh = enriched.get(item.id) ?? null;
+				if (!cached) await cacheProspeo(item.id, fresh);
+				const co = cached ?? fresh;
 				const n = co?.employeeCount ?? rangeMidpoint(co?.employeeRange ?? null);
 				// null = not in Prospeo → almost certainly under the minimum → honest fail
 				const min = num(stage, "min", 15);
@@ -330,7 +353,7 @@ export async function runStageBatch(runId: string, stageKey: string, limit = 50)
 			// — latest verdict wins, evidenceUrl survives (not in set)
 			await upsert(item.id, verdict, note);
 			okCount++;
-			await applyVerdictConsequences(item.id, info.stages);
+			await applyVerdictConsequences(item.id);
 		} catch (e) {
 			recordError(e);
 		}
@@ -360,7 +383,7 @@ export async function runStageBatch(runId: string, stageKey: string, limit = 50)
 				const { verdict, note } = await aiSignalVerdict(item, stage);
 				await upsert(item.id, verdict, note);
 				okCount++;
-				await applyVerdictConsequences(item.id, info.stages);
+				await applyVerdictConsequences(item.id);
 			} catch (e) {
 				recordError(e);
 			}
