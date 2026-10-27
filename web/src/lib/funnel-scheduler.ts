@@ -76,6 +76,7 @@ export async function runScheduledFunnels(): Promise<{ funnels: number; discover
 					["revenue_band", schedule.enrichPerDay],
 					["ai_signal", schedule.enrichPerDay],
 					["tech_team", schedule.techPerDay],
+					["ops_trigger", schedule.enrichPerDay],
 				] as const) {
 					const r = await runStageBatch(run.id, stage, limit);
 					if (r.ok) verdicts += r.results;

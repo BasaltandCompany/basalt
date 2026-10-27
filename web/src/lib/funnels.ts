@@ -23,6 +23,7 @@ export const FREIGHT_STAGES: FunnelStage[] = [
 	{ key: "headcount", label: "Headcount", gate: "15-250 employees", method: "api", params: { min: 15, max: 250 } },
 	{ key: "revenue_band", label: "Revenue", gate: "$10-70M estimate; rev/employee $150-500k sanity; no Prospeo revenue → headcount × $325k/emp estimate", method: "api", params: { min: 10_000_000, max: 70_000_000, perEmp: 325_000 } },
 	{ key: "tech_team", label: "Tech team", gate: "≤6 title hits for CTO/VP Eng/IT Director/engineer/developer", method: "api", params: { maxHits: 6 } },
+	{ key: "ops_trigger", label: "Ops trigger", gate: "≥1 finance/ops leadership title (CFO/controller/COO/business manager) or ≥2 recruiting titles in the roster — the buyer layer Flowscope's customers all showed; soft, records strength only", method: "api", soft: true, params: { minFinance: 1, minHiring: 2 } },
 	{ key: "owner_led", label: "Owner-led", gate: "Founder/CEO still running it, not a PE roll-up", method: "agent", soft: true },
 	{ key: "ai_signal", label: "AI signal", gate: "≥1 employee self-labels AI (Prospeo roster); site evidence corroborates only; vendor-hint recorded separately", method: "api", params: { maxRosterPages: 10 } },
 ];
@@ -298,10 +299,30 @@ export async function applyVerdictConsequences(itemId: string, stages: FunnelSta
 		.where(eq(funnelStageResults.itemId, itemId));
 	// soft stages record signals but never block promotion or un-approve —
 	// a fail there is "worth knowing", not "drop"
+	// Second promotion path (Flowscope study, Oct 2026): an ai_signal FAIL is
+	// forgiven when the trigger path fired — a visible finance/ops buyer layer
+	// (ops_trigger pass) AND the human owner_led gate passed. 2 of Flowscope's
+	// 3 named customers had zero employee AI self-labels; the pain is the
+	// pitch, so readiness ≠ AI enthusiasm. Requires the ai_signal verdict to
+	// exist, so the trigger path never promotes before the gate has run.
+	const triggerPath = () =>
+		results.some((r) => r.stage === "ops_trigger" && r.verdict === "pass") &&
+		results.some((r) => r.stage === "owner_led" && r.verdict === "pass");
 	const allPass = stages
 		.filter((s) => !s.soft)
-		.every((s) => results.some((r) => r.stage === s.key && r.verdict === "pass"));
-	const anyFail = results.some((r) => (stages.find((s) => s.key === r.stage)?.soft ? false : r.verdict === "fail"));
+		.every((s) => {
+			const passed = results.some((r) => r.stage === s.key && r.verdict === "pass");
+			if (s.key === "ai_signal" && !passed) {
+				const ran = results.some((r) => r.stage === "ai_signal");
+				return ran && triggerPath();
+			}
+			return passed;
+		});
+	const anyFail = results.some((r) => {
+		if (stages.find((s) => s.key === r.stage)?.soft) return false;
+		if (r.stage === "ai_signal" && r.verdict === "fail") return !triggerPath();
+		return r.verdict === "fail";
+	});
 
 	// ai_signal note tier → aiInterest (tier1=high, tier2=some) — only on a
 	// pass; a tier2 FAIL note (site-only rescue evidence) must never set it.

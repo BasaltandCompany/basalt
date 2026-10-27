@@ -711,7 +711,7 @@ chat_uuid: { type: "string" },
 	{
 		name: "create_funnel",
 		description:
-			"Create a funnel (idempotent on name) whose stages clone the freight 7-gate skeleton (hq_state, industry_type, headcount, revenue_band, tech_team, owner_led, ai_signal) with industry_type's gate reworded via industry_gate. Then create_funnel_run → add_funnel_items → run_funnel_stage.",
+			"Create a funnel (idempotent on name) whose stages clone the freight 8-gate skeleton (hq_state, industry_type, headcount, revenue_band, tech_team, ops_trigger, owner_led, ai_signal) with industry_type's gate reworded via industry_gate. Then create_funnel_run → add_funnel_items → run_funnel_stage.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -766,7 +766,7 @@ chat_uuid: { type: "string" },
 	{
 		name: "run_funnel_stage",
 		description:
-			"Batch-run an api-method stage (headcount, revenue_band, tech_team, ai_signal) for queued items through its driver (Prospeo/Apollo — CREDITS). limit bounds the batch; re-calls resume where it stopped. agent-method stages (owner_led) are yours: judge then record_funnel_verdict.",
+			"Batch-run an api-method stage (headcount, revenue_band, tech_team, ops_trigger, ai_signal) for queued items through its driver (Prospeo/Apollo — CREDITS). limit bounds the batch; re-calls resume where it stopped. agent-method stages (owner_led) are yours: judge then record_funnel_verdict.",
 		inputSchema: {
 			type: "object",
 			properties: {
