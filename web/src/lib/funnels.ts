@@ -27,6 +27,7 @@ export const FREIGHT_STAGES: FunnelStage[] = [
 	{ key: "headcount", label: "Headcount", gate: "15-250 employees", method: "api", soft: true, params: { min: 15, max: 250 } },
 	{ key: "revenue_band", label: "Revenue", gate: "$10-70M estimate; rev/employee $150-500k sanity; no Prospeo revenue → headcount × $325k/emp estimate", method: "api", soft: true, params: { min: 10_000_000, max: 70_000_000, perEmp: 325_000 } },
 	{ key: "tech_team", label: "Tech team", gate: "≤6 title hits for CTO/VP Eng/IT Director/engineer/developer", method: "api", soft: true, params: { maxHits: 6 } },
+	{ key: "ops_trigger", label: "Ops trigger", gate: "≥1 finance/ops leadership title (CFO/controller/COO/business manager) or ≥2 recruiting titles in the roster — the buyer layer Flowscope's customers all showed; soft, records strength only", method: "api", soft: true, params: { minFinance: 1, minHiring: 2 } },
 	{ key: "owner_led", label: "Owner-led", gate: "Founder/CEO still running it, not a PE roll-up", method: "agent", soft: true },
 ];
 
@@ -312,6 +313,16 @@ export async function applyVerdictConsequences(itemId: string) {
 		.select({ stage: funnelStageResults.stage, verdict: funnelStageResults.verdict, note: funnelStageResults.note })
 		.from(funnelStageResults)
 		.where(eq(funnelStageResults.itemId, itemId));
+	// Second promotion path (Flowscope study, Oct 2026): the automated top of
+	// the rescue pile. An ai_signal FAIL still records the item for rescue —
+	// unless the trigger path fired: a visible finance/ops buyer layer
+	// (ops_trigger pass) AND the human owner_led pass. 2 of Flowscope's 3
+	// named customers had zero employee AI self-labels; the pain is the
+	// pitch, so readiness ≠ AI enthusiasm. Requires the ai_signal verdict to
+	// exist, so the path never promotes before the gate has run.
+	const triggerPath =
+		results.some((r) => r.stage === "ops_trigger" && r.verdict === "pass") &&
+		results.some((r) => r.stage === "owner_led" && r.verdict === "pass");
 
 	// ai_signal note tier → aiInterest (tier1=high, tier2=some) — only on a
 	// pass; a tier2 FAIL note (site-only rescue evidence) must never set it.
@@ -322,7 +333,7 @@ export async function applyVerdictConsequences(itemId: string) {
 			? "some"
 			: null;
 
-	if (aiRow?.verdict === "pass") {
+	if (aiRow?.verdict === "pass" || triggerPath) {
 		const raw = (item.rawData ?? {}) as Record<string, unknown>;
 		const resultRows = await db
 			.select({ stage: funnelStageResults.stage, note: funnelStageResults.note })

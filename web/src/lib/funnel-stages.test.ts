@@ -4,7 +4,7 @@
 // queue forever; now it estimates from headcount (the ICP's own rev/employee
 // sanity) or fails honestly.
 import { describe, expect, test } from "bun:test";
-import { revenueBandVerdict } from "./funnel-stages";
+import { opsTriggerVerdict, revenueBandVerdict } from "./funnel-stages";
 
 const rev = (min: number | null, max: number | null) => ({
 	revenueMin: min,
@@ -67,5 +67,51 @@ describe("revenueBandVerdict", () => {
 		);
 		expect(est.verdict).toBe("pass");
 		expect(est.note).toContain("$400k/emp");
+	});
+});
+
+const person = (title: string) => ({
+	name: title,
+	title,
+	headline: null,
+	skills: [],
+	historyTitles: [],
+	linkedinUrl: null,
+});
+const rosterOf = (...titles: string[]) => ({
+	people: titles.map(person),
+	total: titles.length,
+	pagesPulled: 1,
+	complete: true,
+});
+
+describe("opsTriggerVerdict", () => {
+	test("finance buyer layer → pass, titles named in the note", () => {
+		const r = opsTriggerVerdict(rosterOf("CFO", "Staff Accountant", "Dispatcher"));
+		expect(r.verdict).toBe("pass");
+		expect(r.note).toContain("fin:1");
+		expect(r.note).toContain("CFO");
+	});
+
+	test("manual hiring machine (≥2 recruiting titles) → pass with no finance", () => {
+		expect(opsTriggerVerdict(rosterOf("Recruiter", "Onboarding Specialist")).verdict).toBe("pass");
+	});
+
+	test("one recruiter alone → fail (below minHiring)", () => {
+		expect(opsTriggerVerdict(rosterOf("Recruiter", "Driver")).verdict).toBe("fail");
+	});
+
+	test("nothing visible → honest fail with sample size", () => {
+		const r = opsTriggerVerdict(rosterOf("Driver", "Dispatcher"));
+		expect(r.verdict).toBe("fail");
+		expect(r.note).toContain("2-person sample");
+	});
+
+	test("a project controller is not a finance buyer", () => {
+		expect(opsTriggerVerdict(rosterOf("Project Controller", "Dispatcher")).verdict).toBe("fail");
+	});
+
+	test("runtime params retune the thresholds", () => {
+		expect(opsTriggerVerdict(rosterOf("Recruiter", "Driver"), { minFinance: 1, minHiring: 1 }).verdict).toBe("pass");
 	});
 });

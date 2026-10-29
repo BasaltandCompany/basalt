@@ -711,7 +711,7 @@ chat_uuid: { type: "string" },
 	{
 		name: "create_funnel",
 		description:
-			"Create a funnel (idempotent on name) whose stages clone the ungated freight skeleton (hq_state, ai_signal, headcount, revenue_band, tech_team, owner_led — all soft, nothing drops a company; an ai_signal pass is the only promotion gate). Then create_funnel_run → add_funnel_items → run_funnel_stage.",
+			"Create a funnel (idempotent on name) whose stages clone the ungated freight skeleton (hq_state, ai_signal, headcount, revenue_band, tech_team, ops_trigger, owner_led — all soft, nothing drops a company; an ai_signal pass is the only promotion gate, and ops_trigger + owner_led form the trigger path that promotes an ai_signal fail). Then create_funnel_run → add_funnel_items → run_funnel_stage.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -765,7 +765,7 @@ chat_uuid: { type: "string" },
 	{
 		name: "run_funnel_stage",
 		description:
-			"Batch-run an api-method stage (ai_signal, headcount, revenue_band, tech_team) for queued items through its Prospeo driver — CREDITS. Nothing gates: the queue is simply items without this stage's verdict yet. ai_signal runs the paid enrich + roster first (its cache answers the other stages free). limit bounds the batch; re-calls resume where it stopped. agent-method stages (owner_led) are yours: judge then record_funnel_verdict.",
+			"Batch-run an api-method stage (ai_signal, headcount, revenue_band, tech_team, ops_trigger) for queued items through its Prospeo driver — CREDITS. Nothing gates: the queue is simply items without this stage's verdict yet. ai_signal runs the paid enrich + roster first (its cache answers the other stages free). limit bounds the batch; re-calls resume where it stopped. agent-method stages (owner_led) are yours: judge then record_funnel_verdict.",
 		inputSchema: {
 			type: "object",
 			properties: {

@@ -53,6 +53,29 @@ export function revenueBandVerdict(
 	};
 }
 
+/** The ops_trigger soft signal (Flowscope study, Oct 2026): does the roster
+ *  show the finance/ops buyer layer their customers all had — CFO/controller/
+ *  COO/business manager — or a manual hiring machine (recruiting/onboarding
+ *  titles)? Current titles only: a past CFO elsewhere isn't this company's
+ *  buyer. Soft by design — a small sample missing the CFO is absence of
+ *  evidence, so this records strength and never gates. */
+export function opsTriggerVerdict(
+	roster: ProspeoRoster,
+	{ minFinance = 1, minHiring = 2 }: { minFinance?: number; minHiring?: number } = {},
+): { verdict: "pass" | "fail"; note: string } {
+	const FINANCE = /\bcfo\b|chief financial|(?<!project\s)controller|vp\.? finance|finance director|head of finance|treasurer|\bcoo\b|chief operating|business manager/i;
+	const HIRING = /recruit|onboarding|talent (acquisition|manager)|staffing coordinator|human resources|\bhr\b/i;
+	const fin = roster.people.filter((p) => FINANCE.test(p.title ?? ""));
+	const hire = roster.people.filter((p) => HIRING.test(p.title ?? ""));
+	const names = (ps: typeof fin, n: number) =>
+		[...new Set(ps.map((p) => p.title ?? "").filter(Boolean))].slice(0, n).join(", ") || "none";
+	const pass = fin.length >= minFinance || hire.length >= minHiring;
+	return {
+		verdict: pass ? "pass" : "fail",
+		note: `fin:${fin.length} hire:${hire.length} in ${roster.people.length}-person sample (Prospeo) — ${names(fin, 3)} / ${names(hire, 3)}`,
+	};
+}
+
 export type BatchResult = { ok: true; results: number; errors: number; firstError?: string } | { ok: false; error: string };
 
 /** Cached Prospeo payload written by the headcount run (null = never enriched). */
@@ -89,6 +112,25 @@ async function cacheRawJson(itemId: string, key: "roster" | "aiMatches", value: 
 		.where(eq(funnelItems.id, itemId));
 }
 const cacheRoster = (itemId: string, roster: ProspeoRoster) => cacheRawJson(itemId, "roster", roster);
+
+/** The company roster, cached-or-pull: free when an earlier stage on this
+ *  item (ai_signal, a prior tech_team run) already cached it; one pull +
+ *  cache otherwise. */
+async function rosterFor(item: typeof funnelItems.$inferSelect): Promise<ProspeoRoster> {
+	const raw = (item.rawData ?? {}) as Record<string, unknown>;
+	const prospeo = (raw.prospeo ?? null) as { companyId?: string | null; domain?: string | null } | null;
+	const refs = {
+		companyId: prospeo?.companyId ?? null,
+		domain: prospeo?.domain ?? null,
+		name: cleanName(item.companyName),
+	};
+	let roster = (raw.roster ?? null) as ProspeoRoster | null;
+	if (!roster) {
+		roster = await prospeoCompanyRoster(refs);
+		await cacheRoster(item.id, roster);
+	}
+	return roster;
+}
 
 /** Keyless page fetch for the site scan — a dead site skips the scan, it
  *  never fails the stage. ponytail: 500KB cap covers any real homepage. */
@@ -286,20 +328,21 @@ export async function runStageBatch(runId: string, stageKey: string, limit = 50)
 				// one vendor, zero extra API calls when ai_signal already cached
 				// the roster. Sample proxy for "no real tech team" (≤6 hits passes —
 				// small in-house tech teams of 3-6 are common and still good targets).
-				const raw0 = (item.rawData ?? {}) as Record<string, unknown>;
-				const p0 = (raw0.prospeo ?? null) as { companyId?: string | null; domain?: string | null } | null;
-				const refs0 = { companyId: p0?.companyId ?? null, domain: p0?.domain ?? null, name: cleanName(item.companyName) };
-				let roster0 = (raw0.roster ?? null) as ProspeoRoster | null;
-				if (!roster0) {
-					roster0 = await prospeoCompanyRoster(refs0);
-					await cacheRoster(item.id, roster0);
-				}
+				const roster0 = await rosterFor(item);
 				const TECH = /cto|cio|vp.?eng|engineer|developer|it director|software|data engineer|devops|programmer/i;
 				const hits = roster0.people.filter(
 					(p) => TECH.test(p.title ?? "") || p.historyTitles.some((t) => TECH.test(t)),
 				).length;
 				verdict = hits <= num(stage, "maxHits", 6) ? "pass" : "fail";
 				note = `${hits} tech titles in ${roster0.people.length}-person sample (Prospeo)`;
+			} else if (stageKey === "ops_trigger") {
+				// Soft Flowscope-buyer-layer signal on the cached roster (free when
+				// ai_signal ran; one pull otherwise). Never gates the queue.
+				const roster1 = await rosterFor(item);
+				({ verdict, note } = opsTriggerVerdict(roster1, {
+					minFinance: num(stage, "minFinance", 1),
+					minHiring: num(stage, "minHiring", 2),
+				}));
 			} else if (stageKey === "ai_signal") {
 				({ verdict, note } = await aiSignalVerdict(item, stage));
 			} else {

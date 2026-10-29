@@ -19,10 +19,10 @@ const legacyRow: FunnelStage[] = [
 	{ key: "ai_signal", label: "AI signal", gate: "≥1 employee self-labels AI", method: "api", params: { maxRosterPages: 10 } },
 ];
 
-test("FREIGHT_STAGES is the ungated 6-stage skeleton with ai_signal at position 2", () => {
+test("FREIGHT_STAGES is the ungated 7-stage skeleton with ai_signal at position 2", () => {
 	assert.deepEqual(
 		FREIGHT_STAGES.map((s) => s.key),
-		["hq_state", "ai_signal", "headcount", "revenue_band", "tech_team", "owner_led"],
+		["hq_state", "ai_signal", "headcount", "revenue_band", "tech_team", "ops_trigger", "owner_led"],
 	);
 	assert.ok(FREIGHT_STAGES.every((s) => s.soft === true), "every stage must be soft (nothing gates)");
 });
