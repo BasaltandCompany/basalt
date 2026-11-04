@@ -1,0 +1,13 @@
+diff --git a/web/dist/web.js b/web/dist/web.js
+index 051f69e2190a3a0afe40db1b1be0044c90cf3ac9..3d70ddf2d1eb641feda7968e18762263e794da95 100644
+--- a/web/dist/web.js
++++ b/web/dist/web.js
+@@ -762,7 +762,7 @@ function createDynamic(component, props) {
+         return untrack(() => component(props));
+       case "string":
+         const isSvg = SVGElements.has(component);
+-        const el = sharedConfig.context ? getNextElement() : createElement(component, isSvg, untrack(() => props.is));
++        const el = sharedConfig.context ? getNextElement(() => createElement(component, isSvg, untrack(() => props.is))) : createElement(component, isSvg, untrack(() => props.is));
+         spread(el, props, isSvg);
+         return el;
+     }

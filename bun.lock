@@ -76,6 +76,9 @@
       },
     },
   },
+  "patchedDependencies": {
+    "solid-js@1.9.17": "patches/solid-js@1.9.17.patch",
+  },
   "packages": {
     "@aspectrr/feedback-widget": ["@aspectrr/feedback-widget@0.1.6", "", { "dependencies": { "@kobalte/core": "^0.13.10", "modern-screenshot": "^4.6.0" }, "peerDependencies": { "solid-js": "^1.8.0" } }, "sha512-npdiBlDPM2G/5EXTQawdPFIG6k3xrk28iF13fc3daWpUHp1DByvbjn4PlTo/5Z1IdlJzgU818t4sIMkiwgasSQ=="],
 
