@@ -6,6 +6,7 @@ FROM oven/bun:1.4 AS builder
 WORKDIR /app
 
 COPY package.json bun.lock* bun.lockb* ./
+COPY patches patches
 COPY web/package.json web/package.json
 COPY packages/ui/package.json packages/ui/package.json
 RUN bun install
