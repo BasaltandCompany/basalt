@@ -2,7 +2,7 @@ import type { APIEvent } from "@solidjs/start/server";
 import { eq, and, desc, inArray, sql, ilike, lte, isNotNull } from "drizzle-orm";
 import { hashKey } from "~/lib/crypto";
 import { db } from "~/db";
-import { apiKeys, companies, outreachProspects, OUTREACH_STAGES, campaigns, campaignCompanies, videos, funnels, funnelRuns, funnelItems, funnelStageResults } from "~/db/schema";
+import { apiKeys, companies, outreachProspects, OUTREACH_STAGES, campaigns, campaignCompanies, videos, funnels, funnelRuns, funnelItems, funnelStageResults, funnelSchedules } from "~/db/schema";
 import { brainQuery, entityFacts } from "~/lib/brain/search";
 import { brainJobs, docs, shortLinks } from "~/db/schema";
 import { agentWrite, createDoc, getDoc, getDocVersionDiff, listDocVersions, listDocs, renameDoc, setDocAppendix } from "~/lib/docs";
@@ -774,6 +774,26 @@ chat_uuid: { type: "string" },
 				limit: { type: "number", description: "default 50, max 500" },
 			},
 			required: ["run_id", "stage"],
+		},
+	},
+	{
+		name: "list_funnel_schedules",
+		description:
+			"Every funnel with its automation schedule — enabled is the running switch the scheduler obeys (discovery pulls + daily paid enrichment). Call before/after set_funnel_schedule to see what's running.",
+		inputSchema: { type: "object", properties: {} },
+	},
+	{
+		name: "set_funnel_schedule",
+		description:
+			"Enable or disable a funnel's automation schedule — this IS the running switch for scheduled discovery + paid enrichment (Prospeo credits). Pass funnel_name (case-insensitive) or funnel_id, plus enabled true|false. Disabling stops future scheduler ticks; a batch already in flight finishes.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				funnel_name: { type: "string" },
+				funnel_id: { type: "string" },
+				enabled: { type: "boolean", description: "true = running, false = stopped" },
+			},
+			required: ["enabled"],
 		},
 	},
 	{
@@ -1858,6 +1878,51 @@ export async function POST(event: APIEvent) {
 							String(toolArgs.stage ?? ""),
 							Number(toolArgs.limit ?? 50) || 50,
 						);
+						break;
+					}
+					case "list_funnel_schedules": {
+						const rows = await db
+							.select({
+								funnelId: funnels.id,
+								funnelName: funnels.name,
+								enabled: funnelSchedules.enabled,
+								discoverySource: funnelSchedules.discoverySource,
+								discoveryIntervalDays: funnelSchedules.discoveryIntervalDays,
+								enrichPerDay: funnelSchedules.enrichPerDay,
+								techPerDay: funnelSchedules.techPerDay,
+								lastDiscoveryAt: funnelSchedules.lastDiscoveryAt,
+								lastEnrichAt: funnelSchedules.lastEnrichAt,
+							})
+							.from(funnels)
+							.leftJoin(funnelSchedules, eq(funnelSchedules.funnelId, funnels.id))
+							.orderBy(funnels.name);
+						result = { funnels: rows.map((r) => ({ ...r, running: r.enabled === true })) };
+						break;
+					}
+					case "set_funnel_schedule": {
+						const enabledArg = toolArgs.enabled;
+						const enabled = enabledArg === true || String(enabledArg) === "true";
+						if (enabledArg === undefined || enabledArg === null || !["true", "false"].includes(String(enabledArg))) {
+							result = { error: "enabled (true|false) is required — this flips live paid enrichment" };
+							break;
+						}
+						let target: { id: string; name: string } | undefined;
+						if (toolArgs.funnel_id) {
+							[target] = await db.select({ id: funnels.id, name: funnels.name }).from(funnels).where(eq(funnels.id, String(toolArgs.funnel_id))).limit(1);
+						} else if (toolArgs.funnel_name) {
+							[target] = await db.select({ id: funnels.id, name: funnels.name }).from(funnels).where(ilike(funnels.name, String(toolArgs.funnel_name))).limit(1);
+						}
+						if (!target) {
+							result = { error: "funnel not found — list_funnel_schedules has ids and names" };
+							break;
+						}
+						const [existing] = await db.select({ id: funnelSchedules.id }).from(funnelSchedules).where(eq(funnelSchedules.funnelId, target.id)).limit(1);
+						if (existing) {
+							await db.update(funnelSchedules).set({ enabled, updatedAt: new Date() }).where(eq(funnelSchedules.id, existing.id));
+						} else {
+							await db.insert(funnelSchedules).values({ funnelId: target.id, enabled });
+						}
+						result = { funnelId: target.id, funnelName: target.name, enabled, running: enabled };
 						break;
 					}
 					case "record_funnel_verdict": {
