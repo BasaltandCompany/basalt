@@ -67,7 +67,7 @@ export default function AdminEmail() {
 	const [visibleCount, setVisibleCount] = createSignal(50);
 	const [editBody, setEditBody] = createSignal<Record<string, string>>({});
 	// locally edited to/subject — shown until the next list revalidate
-	const [editMeta, setEditMeta] = createSignal<Record<string, { to?: string; subject?: string; cc?: string; bcc?: string }>>({});
+	const [editMeta, setEditMeta] = createSignal<Record<string, { to?: string; subject?: string; cc?: string; bcc?: string; signature?: string }>>({});
 	const [sendStatus, setSendStatus] = createSignal("");
 	const [connecting, setConnecting] = createSignal(false);
 	// per-draft CRDT history (Drafts tab); clicking a draft row opens the
@@ -331,12 +331,12 @@ export default function AdminEmail() {
 
 	// draft autosave — debounced PUT for body/to/subject; body is CRDT-tracked
 	// server-side (hunks into the Loro snapshot, coalesced version rows)
-	const editDraft = (outboxId: string, patch: { body?: string; to?: string; subject?: string; cc?: string; bcc?: string }) => {
+	const editDraft = (outboxId: string, patch: { body?: string; to?: string; subject?: string; cc?: string; bcc?: string; signature?: string }) => {
 		if (patch.body !== undefined) {
 			setEditBody({ ...editBody(), [outboxId]: patch.body });
 			lintDraft(outboxId, patch.body);
 		}
-		if (patch.to !== undefined || patch.subject !== undefined || patch.cc !== undefined || patch.bcc !== undefined) {
+	if (patch.to !== undefined || patch.subject !== undefined || patch.cc !== undefined || patch.bcc !== undefined || patch.signature !== undefined) {
 			setEditMeta({ ...editMeta(), [outboxId]: { ...editMeta()[outboxId], ...patch } });
 		}
 		clearTimeout(draftSaveTimers[outboxId]);
@@ -349,6 +349,7 @@ export default function AdminEmail() {
 			if (m?.subject !== undefined) payload.subject = m.subject;
 			if (m?.cc !== undefined) payload.cc = m.cc;
 			if (m?.bcc !== undefined) payload.bcc = m.bcc;
+			if (m?.signature !== undefined) payload.signature = m.signature;
 			const res = await fetch(`/api/email/drafts/${outboxId}`, {
 				method: "PUT",
 				headers: { "Content-Type": "application/json" },
@@ -1075,6 +1076,19 @@ export default function AdminEmail() {
 								onInput={(e) => editDraft(d.id, { subject: e.currentTarget.value })}
 								style={{ width: "100%", "margin-bottom": "8px", padding: "8px", border: "1px solid rgba(0,0,0,0.12)" }}
 							/>
+							<label style={{ display: "flex", "align-items": "center", gap: "6px", "margin-bottom": "8px", "font-size": "12px", color: "#6b6455" }}>
+								Footer
+								<select
+									value={editMeta()[d.id]?.signature ?? d.signature ?? ""}
+									onChange={(e) => editDraft(d.id, { signature: e.currentTarget.value })}
+									style={{ padding: "4px", border: "1px solid rgba(0,0,0,0.12)" }}
+								>
+									<option value="">Auto ({d.campaignCompanyId ? "plain" : "full"})</option>
+									<option value="full">Full signature</option>
+									<option value="plain">Plain (Collin)</option>
+									<option value="none">None</option>
+								</select>
+							</label>
 							<LintedTextarea
 								ariaLabel="Draft body"
 								value={editBody()[d.id] ?? d.body}

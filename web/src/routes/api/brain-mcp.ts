@@ -605,6 +605,7 @@ chat_uuid: { type: "string" },
 				send_at: { type: "string", description: "ISO timestamp — schedules the draft for auto-send via the outbox ticker; omit for a plain draft" },
 				campaign_company_id: { type: "string", description: "campaign_companies id — links this send to its campaign company for Gmail-grounded stats (list_campaigns has ids)" },
 				campaign_step: { type: "number", description: "which touch of the campaign sequence this email is (1-based)" },
+				signature: { type: "string", enum: ["full", "plain", "none"], description: "outbound footer: full (branded), plain (just 'Collin'), none. Omit = auto: campaign drafts get plain, everything else full" },
 			},
 			required: ["to", "subject", "body"],
 		},
@@ -1559,8 +1560,9 @@ export async function POST(event: APIEvent) {
 								subject: String(toolArgs.subject ?? ""),
 								body: draftBody,
 								...(campaignCompanyId ? { campaignCompanyId, campaignStep } : {}),
+								...(toolArgs.signature ? { signature: toolArgs.signature as "full" | "plain" | "none" } : {}),
 							});
-							result = upd;
+						result = upd;
 							if (!(upd && typeof upd === "object" && "outboxId" in upd)) break;
 							if (toolArgs.send_at) await scheduleDraftResult(String(upd.outboxId));
 							break;
@@ -1574,6 +1576,7 @@ export async function POST(event: APIEvent) {
 							chatUuid: String(toolArgs.chat_uuid ?? ""),
 							threadId: toolArgs.thread_id ? String(toolArgs.thread_id) : undefined,
 							...(campaignCompanyId ? { campaignCompanyId, campaignStep } : {}),
+							...(toolArgs.signature ? { signature: toolArgs.signature as "full" | "plain" | "none" } : {}),
 						});
 						result = created;
 						if (toolArgs.send_at) await scheduleDraftResult(created.outboxId);

@@ -79,11 +79,44 @@ describe("buildMime", () => {
 		expect(mime).toContain("text/plain");
 		expect(mime).toContain("\r\n\r\nline one\nline two");
 	});
+	test("From + Reply-To on every send", () => {
+		const mime = buildMime({ to: "a@b.c", subject: "Hi", body: "b" });
+		expect(mime).toContain("From: Collin Pfeifer <cpfeifer@basalt.ac>");
+		expect(mime).toContain("Reply-To: cpfeifer@basalt.ac");
+	});
 	test("cc/bcc headers, omitted when empty", () => {
 		const mime = buildMime({ to: "a@b.c", cc: "c@d.e, f@g.h", bcc: "x@y.z", subject: "Hi", body: "b" });
 		expect(mime).toContain("Cc: c@d.e, f@g.h");
 		expect(mime).toContain("Bcc: x@y.z");
 		expect(buildMime({ to: "a@b.c", subject: "Hi", body: "b" })).not.toContain("Cc:");
+	});
+	test("no signature → single plain part (machine sends stay bare)", () => {
+		const mime = buildMime({ to: "a@b.c", subject: "Hi", body: "b" });
+		expect(mime).toContain('Content-Type: text/plain; charset="UTF-8"');
+		expect(mime).not.toContain("multipart");
+		expect(mime).not.toContain("-- \n");
+	});
+	test("full signature → multipart/alternative with branded html part", () => {
+		const mime = buildMime({ to: "a@b.c", subject: "Hi", body: "line one\n<script>alert(1)</script> & more", signature: "full" });
+		expect(mime).toContain('Content-Type: multipart/alternative; boundary="_basalt_sig"');
+		// plain part: body + text signature
+		expect(mime).toContain("line one\n<script>alert(1)</script> & more\n\n-- \nCollin Pfeifer");
+		// html part: escaped body + logo + disclaimer, in order
+		const htmlStart = mime.indexOf("<html><body");
+		expect(htmlStart).toBeGreaterThan(-1);
+		expect(mime.indexOf("line one<br>&lt;script&gt;")).toBeGreaterThan(htmlStart);
+		expect(mime).toContain("/logo-email.png");
+		expect(mime).toContain("cpfeifer@basalt.ac");
+		expect(mime).toContain("confidential");
+		expect(mime).toContain("--_basalt_sig--");
+	});
+	test("plain signature → just Collin, no logo or disclaimer", () => {
+		const mime = buildMime({ to: "a@b.c", subject: "Hi", body: "quick note", signature: "plain" });
+		expect(mime).toContain("multipart/alternative");
+		expect(mime).toContain("quick note\n\n-- \nCollin");
+		expect(mime).toContain(">Collin</div>");
+		expect(mime).not.toContain("logo-email.png");
+		expect(mime).not.toContain("confidential");
 	});
 });
 
