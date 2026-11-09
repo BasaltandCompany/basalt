@@ -1,7 +1,7 @@
-// /api/brain-request — the /brain lead-magnet form target. Validates, stores
-// the row (answers verbatim in jsonb + extracted queryable columns), and
-// alerts Collin. Spam defense at launch: per-IP rate limit + honeypot field,
-// no captcha dependency.
+// /api/gift-request — the /gift lead-magnet form target. Validates, stores the
+// row (answers verbatim in jsonb + extracted queryable columns), and alerts
+// Collin, who sends the 3-month Claude gift manually. Spam defense: per-IP
+// rate limit + honeypot field, no captcha dependency.
 import type { APIEvent } from "@solidjs/start/server";
 import { db } from "~/db";
 import { brainRequests } from "~/db/schema";
@@ -67,7 +67,7 @@ export const POST = async (event: APIEvent) => {
 	if (!contactName || !company) return json({ error: "Name and company are required." }, 400);
 	if (!EMAIL_RE.test(contactEmail)) return json({ error: "A valid work email is required." }, 400);
 
-	// issue attribution: /brain?ref=<docId> from the issue page CTA links
+	// issue attribution: /gift?ref=<docId> from the issue page CTA links
 	const ref = str("ref");
 	const sourceDocId = UUID_RE.test(ref) ? ref : null;
 
@@ -75,12 +75,9 @@ export const POST = async (event: APIEvent) => {
 	const answers: Record<string, unknown> = {
 		name: contactName,
 		jobTitle: str("jobTitle"),
-		industry: str("industry"),
-		headcount: str("headcount"),
-		whatTheyDo: str("whatTheyDo"),
-		techTeam: str("techTeam"),
-		stackAndAi: str("stackAndAi"),
-		bottleneck: str("bottleneck"),
+		phone: str("phone"),
+		company,
+		email: contactEmail,
 		heardAbout: str("heardAbout"),
 	};
 
@@ -91,23 +88,19 @@ export const POST = async (event: APIEvent) => {
 			company,
 			contactEmail,
 			jobTitle: str("jobTitle") || null,
-			headcount: str("headcount") || null,
 			...(sourceDocId ? { sourceDocId } : {}),
 		})
 		.returning({ id: brainRequests.id });
 
 	const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
 	await alertEmail(
-		`New brain request: ${company}`,
-		`<p><strong>${esc(contactName)}</strong> (${esc(str("jobTitle") || "—")}) at <strong>${esc(company)}</strong> wants a free company brain.</p>
-		 <p><a href="mailto:${esc(contactEmail)}">${esc(contactEmail)}</a> · headcount ${esc(str("headcount") || "?")} · tech team ${esc(str("techTeam") || "?")}</p>
+		`New Claude gift request: ${company}`,
+		`<p><strong>${esc(contactName)}</strong> (${esc(str("jobTitle") || "—")}) at <strong>${esc(company)}</strong> claimed the Claude gift.</p>
+		 <p><a href="mailto:${esc(contactEmail)}">${esc(contactEmail)}</a> · phone ${esc(str("phone") || "—")}</p>
 		 <ul>
-			<li><strong>What they do:</strong> ${esc(str("whatTheyDo") || "—")}</li>
-			<li><strong>Stack + AI today:</strong> ${esc(str("stackAndAi") || "—")}</li>
-			<li><strong>Biggest bottleneck:</strong> ${esc(str("bottleneck") || "—")}</li>
 			<li><strong>Heard about us:</strong> ${esc(str("heardAbout") || "—")}</li>
 		 </ul>
-		 <p>Manage it in the dashboard → Brain requests (row ${row.id}).</p>`,
+		 <p>Send the 3-month Claude gift, then manage it in the dashboard → Lead magnet requests (row ${row.id}).</p>`,
 	);
 
 	return json({ ok: true });
