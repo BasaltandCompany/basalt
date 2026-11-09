@@ -1,1 +1,0 @@
-ALTER TABLE "brain_requests" ADD COLUMN "blueprint" jsonb;

@@ -31,9 +31,9 @@ const MESSAGES: Message[] = [
     ],
   },
   {
-    title: "Start with a free company brain.",
-    body: "Take the three-minute test and your Company Brain Blueprint renders instantly: the exact connectors for your stack, your first three workflows, and the complete recipe to build it yourself. Or I'll build it with your team, free, with your first 3 months of Claude on me ($60 value).",
-    cta: { href: "/brain", label: "Take the brain test" },
+    title: "Start with 3 months of Claude, free.",
+    body: "A $60 value, no strings. Most owners are AI-curious with no way in — this is the way in. Use it on your real work, and when you notice it going slow, cluttered, and dumb again because nothing around it is set up right, that's the problem we solve for a living.",
+    cta: { href: "/gift", label: "Claim your Claude gift" },
   },
 ]
 

@@ -7,10 +7,9 @@ dashboard's campaign view and voice-linted on every save. Agents read it via
 
 ## CTA line for every template (the one funnel)
 
-Point every touch at the test, not a meeting ask: **/brain** — "take the
-3-minute test, get your Company Brain Blueprint instantly — plus the
-complete recipe to build it yourself." The recipe (the give-away artifact for
-cold outreach) is a stable public URL: `https://basalt.ac/company-brain-diy.md`.
+Point every touch at the gift, not a meeting ask: **/gift** — "3 months of
+Claude, free ($60 value). Claim it in a minute." The brain recipe
+(`/company-brain-diy.md`) stays the give-away artifact for cold outreach.
 No Copilot comparison copy in outreach (positioning still being decided).
 
 Send container: campaign "Rung-1 findings" (`bd1aa268-5d61-4a85-8197-a496d4fd8c4f`).
