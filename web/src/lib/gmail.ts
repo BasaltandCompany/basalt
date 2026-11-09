@@ -4,6 +4,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "~/db";
 import { fromBase64, toBase64Url } from "~/lib/crypto";
 import { emailAccounts, emailMessages, emailThreads, type EmailAccount, type EmailThread } from "~/db/schema";
+import { SIGNATURES, escapeBodyHtml, FROM_ADDRESS, REPLY_TO } from "~/lib/email-signature";
 
 const GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN = "https://oauth2.googleapis.com/token";
@@ -476,29 +477,51 @@ export async function performUnsubscribe(account: EmailAccount, info: UnsubInfo)
 
 // ── Send ───────────────────────────────────────────────────────────
 
-export function buildMime(input: { to: string; cc?: string | null; bcc?: string | null; subject: string; body: string }): string {
+export function buildMime(input: { to: string; cc?: string | null; bcc?: string | null; subject: string; body: string; signature?: "full" | "plain" }): string {
 	const headers = [
 		`To: ${input.to}`,
 		...(input.cc ? [`Cc: ${input.cc}`] : []),
 		// Bcc goes in the raw MIME so Gmail delivers to them, then strips the
 		// header — bcc'd addresses never appear to To/Cc recipients.
 		...(input.bcc ? [`Bcc: ${input.bcc}`] : []),
+		`From: ${FROM_ADDRESS}`,
+		`Reply-To: ${REPLY_TO}`,
 		`Subject: ${input.subject}`,
 		"MIME-Version: 1.0",
+	];
+	if (!input.signature) {
+		headers.push('Content-Type: text/plain; charset="UTF-8"', "Content-Transfer-Encoding: 8bit");
+		return `${headers.join("\r\n")}\r\n\r\n${input.body}`;
+	}
+	// signature present → multipart/alternative: plain body + signature text,
+	// and an HTML part with the branded signature block.
+	const sig = SIGNATURES[input.signature];
+	headers.push('Content-Type: multipart/alternative; boundary="_basalt_sig"');
+	return [
+		headers.join("\r\n"),
+		"",
+		"--_basalt_sig",
 		'Content-Type: text/plain; charset="UTF-8"',
 		"Content-Transfer-Encoding: 8bit",
-	];
-	return `${headers.join("\r\n")}\r\n\r\n${input.body}`;
+		"",
+		`${input.body}\n\n${sig.plain}`,
+		"--_basalt_sig",
+		'Content-Type: text/html; charset="UTF-8"',
+		"Content-Transfer-Encoding: 8bit",
+		"",
+		`<html><body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111111;line-height:1.5;margin:0;padding:24px;">${escapeBodyHtml(input.body)}${sig.html}</body></html>`,
+		"--_basalt_sig--",
+	].join("\r\n");
 }
 
 /** Send via Gmail. Returns the new message id + its Gmail thread id. */
 export async function sendGmail(
 	account: EmailAccount,
-	input: { to: string; cc?: string | null; bcc?: string | null; subject: string; body: string; inReplyToGmailId?: string },
+	input: { to: string; cc?: string | null; bcc?: string | null; subject: string; body: string; signature?: "full" | "plain"; inReplyToGmailId?: string },
 ): Promise<{ id: string; threadId: string }> {
 	// Gmail threads replies via the threadId param — no In-Reply-To guessing
 	const threadId = input.inReplyToGmailId ? await threadIdOf(account, input.inReplyToGmailId) : undefined;
-	const raw = toBase64Url(buildMime({ to: input.to, cc: input.cc, bcc: input.bcc, subject: input.subject, body: input.body }));
+	const raw = toBase64Url(buildMime({ to: input.to, cc: input.cc, bcc: input.bcc, subject: input.subject, body: input.body, signature: input.signature }));
 	const res = await gmail<{ id: string; threadId: string }>(account, "/messages/send", {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },

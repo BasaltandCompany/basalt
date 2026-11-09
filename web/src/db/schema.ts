@@ -1036,6 +1036,9 @@ export const emailOutbox = pgTable(
 			onDelete: "set null",
 		}),
 		campaignStep: integer("campaign_step"),
+		// outbound signature choice: 'full' | 'plain' | 'none'; NULL = auto
+		// (campaign draft → plain, otherwise full). Resolved at send time.
+		signature: text("signature"),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 		updatedAt: timestamp("updated_at", { withTimezone: true })
 			.notNull()

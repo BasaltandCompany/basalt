@@ -43,6 +43,7 @@ export const PUT = async (event: APIEvent) => {
 		version = await saveDraftBody(event.params.id, body.body);
 		if (version === null) return json({ error: "not found" }, 404);
 	}
+	if (body.signature !== undefined && !["", "full", "plain", "none"].includes(body.signature)) return json({ error: "invalid signature" }, 400);
 	const [row] = await db
 		.update(emailOutbox)
 		.set({
@@ -52,6 +53,8 @@ export const PUT = async (event: APIEvent) => {
 			// "required" state to protect
 			...(body.cc !== undefined ? { ccEmail: body.cc || null } : {}),
 			...(body.bcc !== undefined ? { bccEmail: body.bcc || null } : {}),
+			// '' clears to auto (null): campaign → plain, else full
+			...(body.signature !== undefined ? { signature: body.signature || null } : {}),
 		})
 		.where(eq(emailOutbox.id, event.params.id))
 		.returning();

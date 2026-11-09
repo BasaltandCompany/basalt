@@ -11,6 +11,7 @@ import { emailMessages, emailOutbox, emailThreads } from "~/db/schema";
 import { getPrimaryAccount, threadWithMessages, sendGmail } from "~/lib/gmail";
 import { trackText } from "~/lib/crdt-text-db";
 import { lintVoiceText, recordLintOverrides } from "~/lib/voice-lint-db";
+import { SIGNATURES } from "~/lib/email-signature";
 import type { LintViolation } from "~/lib/voice-lint";
 
 export type SendResult =
@@ -114,6 +115,11 @@ export async function sendOutboxInner(
 		}
 	}
 
+	// signature: explicit per-draft choice wins; NULL = auto (campaign → plain,
+	// otherwise full). 'none' = bare send.
+	const sig = row.signature === "none" ? undefined : (row.signature ?? (row.campaignCompanyId ? "plain" : "full")) as "full" | "plain" | undefined;
+	const deliveredBody = sig ? `${body}\n\n${SIGNATURES[sig].plain}` : body;
+
 	try {
 		const { id: gmailMessageId, threadId: gmailThreadId } = await sendGmail(account, {
 			to: row.toEmail,
@@ -121,6 +127,7 @@ export async function sendOutboxInner(
 			bcc: row.bccEmail,
 			subject: row.subject,
 			body,
+			signature: sig,
 			inReplyToGmailId,
 		});
 		// the sent body lands as its own tracked version (human author).
@@ -174,8 +181,9 @@ export async function sendOutboxInner(
 				threadId: threadRowId,
 				gmailId: gmailMessageId,
 				toEmails: row.toEmail,
-				bodyText: body,
-				// plain-text send: '' marks the row "checked" so open-backfill never refetches
+				bodyText: deliveredBody,
+				// local record already has the delivered text: '' marks the row
+				// "checked" so open-backfill never refetches
 				bodyHtml: "",
 				date: new Date(),
 				isSent: true,
@@ -210,6 +218,7 @@ export async function createEmailDraft(input: {
 	context?: string;
 	campaignCompanyId?: string;
 	campaignStep?: number;
+	signature?: "full" | "plain" | "none";
 }): Promise<{ outboxId: string }> {
 	"use server";
 	const [outbox] = await db
@@ -224,6 +233,7 @@ export async function createEmailDraft(input: {
 			chatUuid: input.chatUuid,
 			campaignCompanyId: input.campaignCompanyId,
 			campaignStep: input.campaignStep,
+			...(input.signature ? { signature: input.signature } : {}),
 		})
 		.returning();
 	// v1 of the draft's tracked history = the agent's original body
@@ -251,6 +261,7 @@ export async function updateEmailDraft(input: {
 	bcc?: string;
 	campaignCompanyId?: string;
 	campaignStep?: number;
+	signature?: "full" | "plain" | "none";
 }): Promise<{ outboxId: string; updated: true; version: number | null } | { error: string }> {
 	"use server";
 	const [row] = await db.select().from(emailOutbox).where(eq(emailOutbox.id, input.outboxId));
@@ -264,6 +275,7 @@ export async function updateEmailDraft(input: {
 			...(input.cc !== undefined ? { ccEmail: input.cc } : {}),
 			...(input.bcc !== undefined ? { bccEmail: input.bcc } : {}),
 			...(input.campaignCompanyId !== undefined ? { campaignCompanyId: input.campaignCompanyId, campaignStep: input.campaignStep } : {}),
+			...(input.signature ? { signature: input.signature } : {}),
 		})
 		.where(eq(emailOutbox.id, input.outboxId));
 	const version = await saveDraftBody(input.outboxId, input.body, "agent");
