@@ -32,7 +32,7 @@ const MESSAGES: Message[] = [
   },
   {
     title: "Start with a free company brain.",
-    body: "Take the three-minute test and your Company Brain Blueprint renders instantly: the exact connectors for your stack, your first three workflows, and the complete recipe to build it yourself. Or I'll build it with your team, free.",
+    body: "Take the three-minute test and your Company Brain Blueprint renders instantly: the exact connectors for your stack, your first three workflows, and the complete recipe to build it yourself. Or I'll build it with your team, free, with your first 3 months of Claude on me ($60 value).",
     cta: { href: "/brain", label: "Take the brain test" },
   },
 ]

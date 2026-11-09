@@ -229,8 +229,9 @@ export default function BrainLanding() {
                 <h2 class="font-serif text-2xl leading-tight">Want it done for you?</h2>
                 <p class="font-sans text-sm leading-relaxed text-muted-foreground">
                   I install one company brain a month, free — connectors wired into your Microsoft or
-                  Google, your team trained, first workflow live in week one. Hit a wall building it
-                  yourself instead? Email me, I'll get you unstuck — also free.
+                  Google, your team trained, first workflow live in week one. Book it and your first 3
+                  months of Claude are on me ($60 value), so the brain has hands from day one. Hit a
+                  wall building it yourself instead? Email me, I'll get you unstuck — also free.
                 </p>
                 <div class="flex flex-wrap gap-3">
                   <Button as="a" size="lg" href={CAL_LINK} target="_blank">

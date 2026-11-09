@@ -2,7 +2,7 @@
 
 This is everything we do when we install a company brain for a client. It's yours. Hand this file to your own AI agent (Claude Code, Copilot Workspace, Cursor — anything that can run a terminal and write code) and it can build the whole thing with your team.
 
-If you'd rather not do it alone: **email me at cpfeifer@basalt.ac with any question — permissions, connectors, tuning — and I'll help you through it, free.** Or [book a call](https://cal.com/cpfeifer/info-meeting) and I'll build and install it with your team myself (one install a month, free). — Collin
+If you'd rather not do it alone: **email me at cpfeifer@basalt.ac with any question — permissions, connectors, tuning — and I'll help you through it, free.** Or [book a call](https://cal.com/cpfeifer/info-meeting) and I'll build and install it with your team myself (one install a month, free, and your first 3 months of Claude is on me — $60 value). — Collin
 
 ---
 
@@ -110,4 +110,4 @@ consent screen or a permission you don't recognize, stop and ask me.
 
 ---
 
-*Built and installed by us, this is a $10k engagement — the recipe is the same either way. Questions, stuck on a consent screen, connector acting weird: cpfeifer@basalt.ac. Want it done for you: [cal.com/cpfeifer/info-meeting](https://cal.com/cpfeifer/info-meeting) — one install a month, free.*
+*Built and installed by us, this is a $10k engagement — the recipe is the same either way. Questions, stuck on a consent screen, connector acting weird: cpfeifer@basalt.ac. Want it done for you: [cal.com/cpfeifer/info-meeting](https://cal.com/cpfeifer/info-meeting) — one install a month, free, first 3 months of Claude included ($60 value).*
