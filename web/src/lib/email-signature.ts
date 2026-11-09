@@ -19,7 +19,7 @@ export const SIGNATURES: Record<"full" | "plain", { html: string; plain: string 
 		html: `<div style="margin-top:24px;">
 <table cellpadding="0" cellspacing="0" border="0" style="font-family:Arial,Helvetica,sans-serif;border-collapse:collapse;">
 <tr><td style="padding:0;">
-<img src="${siteUrl()}/logo-email.png" width="48" height="48" alt="Basalt" style="display:block;width:48px;height:48px;border-radius:2px;" />
+<img src="${siteUrl()}/logo-email.png" width="48" height="48" alt="Basalt" style="max-width:100%;margin:0.7em 0;display:block;width:48px;height:48px;border-radius:2px;" />
 <div style="font-family:Georgia,'Times New Roman',serif;font-size:14px;font-weight:bold;color:#111111;margin-top:12px;">Collin Pfeifer</div>
 <div style="font-size:12px;color:#6b6455;margin-top:3px;">Technology &middot; <a href="https://basalt.ac" style="color:#6b6455;text-decoration:underline;">Basalt &amp; Company</a></div>
 <div style="font-size:12px;color:#6b6455;margin-top:3px;">cpfeifer@basalt.ac &middot; (317) 995-5114</div>
