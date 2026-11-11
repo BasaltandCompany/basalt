@@ -29,7 +29,7 @@ export default function Writing() {
               Case Study
             </p>
             <h2 class="mt-2 font-serif text-2xl transition-colors group-hover:text-foreground">
-              Indiana <em>University</em> — the autonomous ticket agent
+              Indiana <em>University</em>: the autonomous ticket agent
             </h2>
             <p class="mt-1 font-sans text-sm text-muted-foreground">
               45% productivity increase, measured across Q2—Q3.

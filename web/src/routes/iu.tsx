@@ -37,7 +37,7 @@ function Stat(props: { value: string; label: string }) {
 export default function IuCaseStudy() {
   return (
     <Page
-      title="Basalt & Company — IU Case Study"
+      title="IU Case Study | Basalt & Company"
       description="How we built an autonomous data engineering agent for Indiana University that increased productivity by 45%."
     >
       {/* hero */}
@@ -45,7 +45,7 @@ export default function IuCaseStudy() {
         <div class="grid gap-10 md:grid-cols-2 md:items-end">
           <div>
             <p class="font-sans text-xs uppercase tracking-[0.3em] text-muted-foreground">
-              Case Study — Data Engineering
+              Case Study · Data Engineering
             </p>
             <h1 class="mt-4 font-serif text-5xl leading-[1.05] tracking-[-0.01em] md:text-6xl">
               Indiana
@@ -54,10 +54,10 @@ export default function IuCaseStudy() {
             </h1>
           </div>
           <p class="max-w-md font-sans text-base leading-relaxed text-muted-foreground md:justify-self-end">
-            IU's data engineering team was drowning in tickets. Senior engineers spent more time
-            triaging than building. We deployed an autonomous AI agent that performs intelligent
-            first-pass analysis — transforming their resolution pipeline and freeing the team to
-            focus on architecture, not triage.
+            Indiana University's data engineering team runs the ticket queue for the whole
+            university's data platform. Senior engineers triaged every ticket by hand: read it,
+            guess the cause, route it. We built an AI agent that does that first pass for them.
+            Over Q2 and Q3, team productivity rose 45%.
           </p>
         </div>
       </section>
@@ -74,45 +74,27 @@ export default function IuCaseStudy() {
 
       <CaseSection label="Problem">
         <p>
-          IU's data engineering team managed a high-throughput ticket queue serving researchers,
-          faculty, and staff across the university. As data infrastructure grew, so did the volume
-          and complexity of incoming issues.
+          Indiana University's data engineering team manages a ticket queue for researchers,
+          faculty, and staff across the university. As the data platform grew, so did the queue.
         </p>
         <p>
-          Senior engineers were spending a disproportionate amount of time on initial triage —
-          reading tickets, categorizing issues, identifying root causes, and routing them to the
-          right person. This created a bottleneck that slowed resolution times and pulled
-          experienced engineers away from higher-value work.
+          Every ticket needed a human first pass: read it, figure out what's actually broken,
+          decide who fixes it. That work landed on the most senior engineers, and it pulled them
+          away from the work only they could do.
         </p>
-        <h4 class="pt-2 font-serif text-lg text-foreground">Key Challenges</h4>
-        <ul class="list-disc space-y-1 pl-5">
-          <li>High ticket volume with inconsistent categorization</li>
-          <li>Senior engineers spending hours on triage instead of engineering</li>
-          <li>Long mean time to resolution (MTTR) on common issues</li>
-          <li>Knowledge silos — only senior staff could accurately route tickets</li>
-          <li>No automated first-pass analysis or prioritization</li>
-        </ul>
       </CaseSection>
 
-      <CaseSection label="Solution">
+      <CaseSection label="Fix">
         <p>
-          We designed and deployed a custom AI agent purpose-built for IU's data engineering
-          workflow. The agent integrates directly with their ticketing system and performs an
-          intelligent first-pass analysis on every incoming issue.
+          We built an agent that reads every incoming ticket and does the first pass:
+          categorizes it, scores priority, identifies the likely root cause from their history
+          of past tickets, and routes it to the right engineer with that context attached.
         </p>
         <p>
-          Using their institutional knowledge base and historical ticket data, the agent
-          categorizes issues, identifies likely root causes, suggests resolution paths, and routes
-          tickets to the appropriate engineer with full context attached.
+          It draws on their institutional knowledge base and years of ticket history, so the
+          routing matches how IU's own senior engineers would have handled it. And it learns
+          from how each ticket gets resolved.
         </p>
-        <h4 class="pt-2 font-serif text-lg text-foreground">Agent Capabilities</h4>
-        <ul class="list-disc space-y-1 pl-5">
-          <li>Automatic ticket categorization and priority scoring</li>
-          <li>Root cause analysis based on historical patterns</li>
-          <li>Context-rich routing with suggested resolution steps</li>
-          <li>Continuous learning from resolution outcomes</li>
-          <li>Integration with existing tooling and documentation</li>
-        </ul>
       </CaseSection>
 
       {/* process */}
@@ -121,10 +103,10 @@ export default function IuCaseStudy() {
         <Separator class="my-6" />
         <div class="grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
           {[
-            ["01", "Discovery", "Deep-dive into IU's ticketing data, workflows, team structure, and pain points."],
-            ["02", "Intelligence Layer", "Built the knowledge base from historical tickets, runbooks, and institutional docs."],
-            ["03", "Agent Development", "Designed and trained the autonomous agent with custom workflows for triage and routing."],
-            ["04", "Deployment", "Rolled out incrementally, measured impact across Q2—Q3, iterated on feedback."],
+            ["01", "Discovery", "We sat with their ticket data, workflows, and team structure until we knew where the time went."],
+            ["02", "Intelligence Layer", "We turned their ticket history, runbooks, and internal docs into a knowledge base the agent could reason over."],
+            ["03", "Agent Development", "Then we built the agent around their triage rules: categorize, prioritize, find the likely cause, route."],
+            ["04", "Deployment", "It went live incrementally through Q2 and Q3, and we tuned it against real outcomes."],
           ].map(([num, title, body]) => (
             <div>
               <div class="font-serif text-2xl text-signal">{num}</div>
@@ -135,36 +117,16 @@ export default function IuCaseStudy() {
         </div>
       </section>
 
-      {/* quote */}
-      <section class="mx-auto max-w-3xl px-6 py-20 text-center">
-        <blockquote class="font-serif text-2xl leading-snug md:text-3xl">
-          "The agent handles the first pass on every ticket. My team now <em>focuses on
-          engineering</em>, not inbox management."
-        </blockquote>
-        <cite class="mt-6 block font-sans text-xs uppercase tracking-[0.25em] text-muted-foreground not-italic">
-          Data Engineering Lead, Indiana University
-        </cite>
-      </section>
-
       <CaseSection label="Results">
         <p>
-          Measured over Q2 and Q3, the agent's impact was immediate and substantial. Overall team
-          productivity increased by 45%, driven primarily by the elimination of manual triage and
-          faster routing accuracy.
+          Over Q2 and Q3, team productivity rose 45%. Engineers stopped doing manual triage:
+          tickets now arrive sorted, prioritized, and already carrying the likely cause and a
+          suggested fix.
         </p>
         <p>
-          Mean time to resolution dropped significantly as engineers received tickets that were
-          already categorized, prioritized, and enriched with likely root causes and suggested
-          fixes.
+          Mean time to resolution dropped because the first pass no longer waits for a senior
+          engineer's calendar.
         </p>
-        <h4 class="pt-2 font-serif text-lg text-foreground">Impact Summary</h4>
-        <ul class="list-disc space-y-1 pl-5">
-          <li>45% increase in team productivity across Q2—Q3</li>
-          <li>Significant reduction in mean time to resolution (MTTR)</li>
-          <li>Senior engineers reclaimed architecture and systems time</li>
-          <li>Ticket routing accuracy improved with context-rich handoffs</li>
-          <li>Agent accuracy continued to improve through continuous learning</li>
-        </ul>
       </CaseSection>
 
       {/* CTA */}
@@ -175,11 +137,11 @@ export default function IuCaseStudy() {
           <em>your team?</em>
         </h2>
         <p class="mx-auto mt-4 max-w-md font-sans text-base text-muted-foreground">
-          Get a free audit of your business operations. We'll show you exactly where an AI agent
-          can make the biggest impact.
+          Tell us how your business runs. We'll send you a free game plan for where AI pays off
+          first, with the prompts and steps to build it yourself.
         </p>
-        <Button as="a" href="/brain" class="mt-8" size="lg">
-          {"{ GET YOUR COMPANY BRAIN }"}
+        <Button as="a" href="/gift" class="mt-8" size="lg">
+          {"{ CLAIM YOUR GAME PLAN }"}
         </Button>
       </section>
     </Page>

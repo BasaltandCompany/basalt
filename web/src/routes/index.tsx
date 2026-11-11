@@ -11,9 +11,25 @@ import { initHeroVideo } from "@/routes/site-state"
  */
 const MESSAGES: Message[] = [
   {
-    title: "We embed custom AI solutions into your business.",
-    body: "We focus on revenue per work-hour, letting your team of five operate like a team of twenty-five with AI-driven systems and solutions built by our consultants. Learn more about why we focus on this metric",
-    link: { href: "/thesis", label: "here." },
+    title: "We put AI to work inside your business.",
+    body:
+      "We measure one number: revenue per work-hour. Build AI into the work your team already does, and five people produce what twenty-five used to.",
+    link: { href: "/thesis", label: "Why this metric" },
+  },
+  {
+    title: "Proven in production.",
+    proof: [
+      {
+        client: "Indiana University",
+        stat: "2.75x",
+        line: "revenue per work-hour, with AI agents running their outbound and a third of their time back.",
+      },
+      {
+        client: "Customs Data Lock",
+        stat: "+200%",
+        line: "response rates from the cold-outreach dashboard, plus coding-agent training and prospect research that grew sales.",
+      },
+    ],
   },
   {
     title: "Proven in production.",
@@ -31,9 +47,10 @@ const MESSAGES: Message[] = [
     ],
   },
   {
-    title: "Start with 3 months of Claude, free.",
-    body: "A $60 value, no strings. Most owners are AI-curious with no way in — this is the way in. Use it on your real work, and when you notice it going slow, cluttered, and dumb again because nothing around it is set up right, that's the problem we solve for a living.",
-    cta: { href: "/gift", label: "Claim your Claude gift" },
+    title: "Get your AI game plan. Free.",
+    body:
+      "Tell us what your business does and where the work piles up. Collin sends back where AI pays off first, how to build it, the exact prompts, and 3 months of Claude to run it.",
+    cta: { href: "/gift", label: "Claim your game plan" },
   },
 ]
 

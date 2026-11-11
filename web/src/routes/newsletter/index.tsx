@@ -53,7 +53,7 @@ export default function Newsletter() {
 	return (
 		<MarketingPage
 			title="The Basalt Dispatch | Basalt"
-			description="Weekly AI teardowns for business owners. Real deployments, real numbers, and the blueprint your team needs to build the same thing."
+			description="Weekly AI teardowns for business owners. Real deployments, real numbers, and how to do the same thing."
 		>
 			<Header />
 
@@ -66,10 +66,10 @@ export default function Newsletter() {
 							<br />
 							<em>from our real clients.</em>
 						</h1>
-						<p class="hero-body">
-							Weekly breakdowns of real AI deployments. What we built, what it cost, and the blueprint to do the
-							same thing. Higher margins, more revenue, no new headcount.
-						</p>
+							<p class="hero-body">
+								Weekly breakdowns of real AI deployments. What we built, what it cost, and how to do the
+								same thing yourself. Higher margins, more revenue, no new headcount.
+							</p>
 
 						<form class="signup-form" id="signupForm">
 							<input type="email" name="email" placeholder="your@email.com" required autocomplete="email" spellcheck={false} />
@@ -92,7 +92,7 @@ export default function Newsletter() {
 						<div class="feature-num">01</div>
 						<h3>The story</h3>
 						<p>
-							The company, the problem, why it mattered. What we deployed and where it moved the needle.
+							The company, the problem, why it mattered. What we deployed and what changed.
 						</p>
 					</div>
 					<div class="feature-col">
@@ -106,7 +106,7 @@ export default function Newsletter() {
 					<div class="feature-col">
 						<div class="feature-num">03</div>
 						<h3>The numbers</h3>
-						<p>Real cost, real hours saved, real revenue. No hypotheticals — what actually happened when it shipped.</p>
+						<p>Real cost, real hours saved, real revenue. No hypotheticals. What actually happened when it shipped.</p>
 					</div>
 				</div>
 			</section>
