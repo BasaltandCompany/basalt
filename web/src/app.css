@@ -1813,3 +1813,92 @@ html:has(.home-narrative) {
         transform: translateY(5px);
     }
 }
+
+/* ═════ Mobile admin (≤900px): off-canvas drawer + fit-the-viewport pass ═════
+   The 236px sticky sidebar eats 59% of an iPhone viewport and its
+   height:100vh breaks the scroll feel — below 900px it slides over a
+   backdrop behind a compact top bar. Usable, not redesigned. */
+
+.mobile-topbar { display: none; }
+.sidebar-backdrop { display: none; }
+
+@media (max-width: 900px) {
+  .layout { display: block; }
+
+  .mobile-topbar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background: var(--background);
+    border-bottom: 1px solid var(--border);
+    padding: 4px 8px 4px 0;
+    padding-top: calc(4px + env(safe-area-inset-top));
+  }
+  .mobile-menu {
+    width: 44px; /* iOS hit target */
+    height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 0;
+    color: var(--foreground);
+    cursor: pointer;
+  }
+  .mobile-topbar .sidebar-logo-text { font-size: 16px; }
+
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    height: 100dvh;
+    width: 280px;
+    max-width: 86vw;
+    z-index: 60;
+    background: var(--background);
+    box-shadow: 8px 0 32px rgba(0, 0, 0, 0.5);
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    padding-top: calc(16px + env(safe-area-inset-top));
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+  .layout.mobile-open .sidebar { transform: none; }
+
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background: rgba(0, 0, 0, 0.55);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+  }
+  .layout.mobile-open .sidebar-backdrop { opacity: 1; pointer-events: auto; }
+
+  .sidebar-collapse { display: none; }
+
+  /* a desktop-collapsed state must not shrink the drawer — restore the base look */
+  .layout.collapsed .sidebar { width: 280px; }
+  .layout.collapsed .sidebar-logo { padding: 4px 8px; justify-content: flex-start; }
+  .layout.collapsed .sidebar-logo-text,
+  .layout.collapsed .nav-label { display: inline; }
+  .layout.collapsed .sidebar-hints { display: flex; }
+  .layout.collapsed .sidebar-email,
+  .layout.collapsed .timer-widget { display: block; }
+  .layout.collapsed .nav-link { padding: 7px 10px; justify-content: flex-start; }
+  .layout.collapsed .sidebar-footer { padding-top: 12px; }
+  .layout.collapsed .sidebar-footer-actions { flex-direction: row; align-items: stretch; gap: 14px; }
+  .layout.collapsed .sidebar-footer-actions [data-feedback-widget] { font-size: revert; }
+  .layout.collapsed .sidebar-footer-actions [data-feedback-widget]::before { content: none; }
+
+  .content { padding: 20px 16px 48px; }
+  .board { margin-inline: -16px; padding-inline: 16px; }
+  .form-row { grid-template-columns: 1fr; }
+  /* wide tables scroll in place instead of blowing out the viewport */
+  .table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+}

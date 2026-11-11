@@ -6,6 +6,7 @@ import Brand from "~/components/Brand";
 import CommandPalette from "~/components/CommandPalette";
 import Toaster from "~/components/Toaster";
 import { getDueOutreachCountQuery } from "~/lib/admin-queries";
+import { useLiveQueries } from "~/lib/live-queries";
 
 // clientOnly: the widget mounts via <Portal> and throws during hydration in
 // dev ("create new DOM elements during hydration") — render it post-hydration.
@@ -42,10 +43,15 @@ const NavIcon: ParentComponent<{ d: string }> = (p) => (
 
 const Layout: ParentComponent<{ user?: { id?: string; email?: string } | null }> = (props) => {
 	const dueOutreach = createAsync(() => getDueOutreachCountQuery(), { deferStream: true });
-	// ponytail: collapsed state loads after mount — SSR always renders expanded,
-	// so a saved collapse flashes for one frame. Move to a cookie if that bugs you.
+	useLiveQueries(); // poll /api/changes → revalidate() so agent edits appear without refresh
+	// ponytail: sidebar state loads after mount — SSR always renders expanded, so
+	// a saved collapse/open flashes for one frame. Move to cookies if that bugs you.
 	const [collapsed, setCollapsed] = createSignal(false);
-	onMount(() => setCollapsed(localStorage.getItem("sidebar-collapsed") === "1"));
+	const [mobileOpen, setMobileOpen] = createSignal(false);
+	onMount(() => {
+		setCollapsed(localStorage.getItem("sidebar-collapsed") === "1");
+		setMobileOpen(localStorage.getItem("sidebar-mobile-open") === "1");
+	});
 
 	function toggleCollapsed() {
 		const next = !collapsed();
@@ -53,14 +59,34 @@ const Layout: ParentComponent<{ user?: { id?: string; email?: string } | null }>
 		localStorage.setItem("sidebar-collapsed", next ? "1" : "0");
 	}
 
+	function setMobile(open: boolean) {
+		setMobileOpen(open);
+		localStorage.setItem("sidebar-mobile-open", open ? "1" : "0");
+	}
+
 	function handleLogoutForm(e: Event) {
 		// posthog never loads on /admin (owner traffic isn't tracked) — nothing to reset
 	}
 
 	return (
-		<div class="layout" classList={{ collapsed: collapsed() }}>
+		<div class="layout" classList={{ collapsed: collapsed(), "mobile-open": mobileOpen() }}>
 			<CommandPalette />
 			<Toaster />
+			<div class="mobile-topbar">
+				<button
+					type="button"
+					class="mobile-menu"
+					aria-label={mobileOpen() ? "Close menu" : "Open menu"}
+					aria-expanded={mobileOpen()}
+					onClick={() => setMobile(!mobileOpen())}
+				>
+					<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+						<path d="M3 6h18M3 12h18M3 18h18" />
+					</svg>
+				</button>
+				<div class="sidebar-logo-text"><Brand suffix="Portal" /></div>
+			</div>
+			<div class="sidebar-backdrop" aria-hidden="true" onClick={() => setMobile(false)} />
 			<aside class="sidebar">
 				<button
 					type="button"
@@ -84,7 +110,8 @@ const Layout: ParentComponent<{ user?: { id?: string; email?: string } | null }>
 								end={link.href === "/admin"}
 								class="nav-link"
 								activeClass="active"
-								title={link.label}
+							title={link.label}
+							onClick={() => setMobile(false)} // drawer closes on navigation
 							>
 								<NavIcon d={link.icon} />
 								<span class="nav-label">{link.label}</span>

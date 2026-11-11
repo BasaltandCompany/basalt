@@ -1,5 +1,6 @@
 import {
 	pgTable,
+	bigserial,
 	uuid,
 	text,
 	timestamp,
@@ -1214,6 +1215,24 @@ export const videos = pgTable(
 		index("idx_videos_prospect").on(t.prospectId),
 	],
 );
+
+// ── Change events (live admin feed) ───────────────────────────────
+// Written by the basalt_notify_change() trigger (attached at boot by
+// lib/live-server.ts — triggers aren't representable in drizzle schema).
+// One row per INSERT/UPDATE/DELETE on any registry component table;
+// the admin polls /api/changes?since=<id> and revalidates.
+export const changeEvents = pgTable(
+	"change_events",
+	{
+		id: bigserial("id", { mode: "number" }).primaryKey(),
+		table: text("table").notNull(),
+		op: text("op").notNull(),
+		rowId: text("row_id"),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(t) => [index("idx_change_events_created").on(t.createdAt)],
+);
+
 
 // ── Inferred types (replaces hand-maintained interfaces) ───────────
 
