@@ -1,9 +1,10 @@
-// /gift — the ONE lead magnet: "3 months of Claude, free ($60 value)."
-// The problem it solves: AI-curious owners with no way in. They give their
-// info, Collin sends the Claude gift manually (email alert), and real usage
-// teaches them where AI goes slow and dumb without setup — that's the Basalt
-// conversation. Posts to /api/gift-request (same-origin today; CORS makes it
-// survive the domain flip).
+// /gift — the ONE lead magnet: the free AI game plan. The problem it solves:
+// AI-curious owners with no way in. They tell us what the business does and
+// where work piles up; Collin reads it and sends a game plan manually (email
+// alert): where AI pays off first, step-by-step how, the exact prompts and
+// templates, plus 3 months of Claude. Real usage teaches them where AI goes
+// slow and dumb without setup — that's the Basalt conversation. Posts to
+// /api/gift-request (same-origin today; CORS makes it survive the domain flip).
 import { DASHBOARD } from "@/lib/dashboard"
 import { createSignal, Show } from "solid-js"
 import { Page } from "@/components/site"
@@ -50,30 +51,50 @@ export default function GiftLanding() {
 			setDone(true)
 		} else {
 			const body = (await res.json().catch(() => ({}))) as { error?: string }
-			setError(body.error ?? "Something broke — try again.")
+			setError(body.error ?? "Something broke. Try again.")
 		}
 	}
 
 	return (
 		<Page
-			title="Get 3 Months of Claude, Free | Basalt & Company"
-			description="Claim 3 months of Claude free ($60 value). The fastest way to feel where AI actually helps your business, and where it goes slow without the right setup."
+			title="Your AI Game Plan, Free | Basalt & Company"
+			description="Tell us how your business runs. Collin sends back a free game plan: where AI pays off first, how to build it step by step, the exact prompts, and 3 months of Claude to run it."
 		>
 			<section class="mx-auto max-w-2xl px-6 pb-24 pt-10">
 				<h1 class="font-serif text-4xl leading-tight md:text-5xl">
-					3 months of Claude, <em>free</em>.
+					Your AI game plan, <em>free</em>.
 				</h1>
 				<p class="mt-4 font-sans text-base leading-relaxed text-muted-foreground">
-					A $60 value, no strings. Most owners are AI-curious with no way in — this is the way in.
-					Use it on your real work. And when you notice it going slow, cluttered, and dumb again
-					because nothing around it is set up right… that's the problem we solve for a living.
+					Tell us what your business does and where the work piles up. Collin reads it
+					and sends back your game plan:
+				</p>
+				<ul class="mt-4 list-disc space-y-3 pl-5 font-sans text-base leading-relaxed text-muted-foreground">
+					<li>
+						<strong class="font-medium text-foreground">Where to start.</strong> The two or
+						three places AI pays off fastest in a business like yours (the inbox that eats
+						your afternoons, the follow-ups nobody has time to send, the answers stuck in
+						your head).
+					</li>
+					<li>
+						<strong class="font-medium text-foreground">How to build it.</strong> Step by
+						step, with the exact prompts and the templates, written so your team can run
+						it without hiring anyone.
+					</li>
+					<li>
+						<strong class="font-medium text-foreground">The subscription.</strong> 3 months
+						of Claude, on us, so you can start the day it arrives.
+					</li>
+				</ul>
+				<p class="mt-4 font-sans text-base leading-relaxed text-muted-foreground">
+					No strings. If you'd rather we build it for you, we can talk about that too.
+					If not, the plan is yours to keep.
 				</p>
 
 				<Show
 					when={!done()}
 					fallback={
 						<p class="mt-10 font-serif text-lg leading-relaxed">
-							You're in. I'll email your Claude gift within a day. — Collin
+								You're in. I'll read what you sent and send your game plan within a couple of days. — Collin
 						</p>
 					}
 				>
@@ -122,11 +143,20 @@ export default function GiftLanding() {
 							</Field>
 						</div>
 
+					<div class="space-y-6">
+						<Field id="gift-about" label="What does your business do?" required>
+							<Textarea id="gift-about" name="about" rows={3} required />
+						</Field>
+						<Field id="gift-bottleneck" label="Where does work pile up or slow down?">
+							<Textarea id="gift-bottleneck" name="bottleneck" rows={3} />
+						</Field>
+					</div>
+
 						<p class="min-h-5 font-sans text-sm text-destructive" role="alert">
 							{error()}
 						</p>
 						<Button type="submit" size="lg" disabled={sending()}>
-							{sending() ? "{ SENDING }" : "{ CLAIM MY CLAUDE GIFT }"}
+							{sending() ? "{ SENDING }" : "{ CLAIM MY GAME PLAN }"}
 						</Button>
 					</form>
 				</Show>

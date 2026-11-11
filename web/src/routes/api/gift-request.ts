@@ -1,6 +1,6 @@
 // /api/gift-request — the /gift lead-magnet form target. Validates, stores the
 // row (answers verbatim in jsonb + extracted queryable columns), and alerts
-// Collin, who sends the 3-month Claude gift manually. Spam defense: per-IP
+// Collin, who builds and sends the AI game plan manually. Spam defense: per-IP
 // rate limit + honeypot field, no captcha dependency.
 import type { APIEvent } from "@solidjs/start/server";
 import { db } from "~/db";
@@ -79,6 +79,8 @@ export const POST = async (event: APIEvent) => {
 		company,
 		email: contactEmail,
 		heardAbout: str("heardAbout"),
+		about: str("about"),
+		bottleneck: str("bottleneck"),
 	};
 
 	const [row] = await db
@@ -94,13 +96,15 @@ export const POST = async (event: APIEvent) => {
 
 	const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
 	await alertEmail(
-		`New Claude gift request: ${company}`,
-		`<p><strong>${esc(contactName)}</strong> (${esc(str("jobTitle") || "—")}) at <strong>${esc(company)}</strong> claimed the Claude gift.</p>
+		`New AI game plan request: ${company}`,
+		`<p><strong>${esc(contactName)}</strong> (${esc(str("jobTitle") || "—")}) at <strong>${esc(company)}</strong> claimed the game plan.</p>
 		 <p><a href="mailto:${esc(contactEmail)}">${esc(contactEmail)}</a> · phone ${esc(str("phone") || "—")}</p>
 		 <ul>
 			<li><strong>Heard about us:</strong> ${esc(str("heardAbout") || "—")}</li>
+			<li><strong>What the business does:</strong> ${esc(str("about") || "—")}</li>
+			<li><strong>Where work piles up:</strong> ${esc(str("bottleneck") || "—")}</li>
 		 </ul>
-		 <p>Send the 3-month Claude gift, then manage it in the dashboard → Lead magnet requests (row ${row.id}).</p>`,
+		 <p>Build the game plan (where AI pays off first, steps, prompts, templates + the Claude gift), then manage it in the dashboard → Lead magnet requests (row ${row.id}).</p>`,
 	);
 
 	return json({ ok: true });
