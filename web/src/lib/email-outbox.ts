@@ -12,7 +12,88 @@ import { getPrimaryAccount, threadWithMessages, sendGmail } from "~/lib/gmail";
 import { trackText } from "~/lib/crdt-text-db";
 import { lintVoiceText, recordLintOverrides } from "~/lib/voice-lint-db";
 import { SIGNATURES } from "~/lib/email-signature";
+import { supabaseService } from "~/lib/supabase";
+import { toBase64 } from "~/lib/crypto";
+import type { OutboxAttachment } from "~/db/schema";
+import type { MimeAttachment } from "~/lib/gmail";
 import type { LintViolation } from "~/lib/voice-lint";
+
+const ATT_BUCKET = "portal-docs";
+const ATT_PREFIX = "email-attachments";
+const MAX_FILE_BYTES = 20 * 1024 * 1024;
+// Gmail hard-rejects messages over 25MB — refuse before sending, not after
+const MAX_TOTAL_BYTES = 24 * 1024 * 1024;
+
+/**
+ * Core: append file bytes to a draft's attachments (storage upload + metadata).
+ * Callers: human HTTP upload (Blob) and agent MCP (local path).
+ */
+export async function attachBytes(
+	outboxId: string,
+	files: { bytes: ArrayBuffer; filename: string; mimeType: string }[],
+): Promise<{ ok: true; attachments: OutboxAttachment[] } | { ok: false; error: string }> {
+	const [row] = await db
+		.select({ attachments: emailOutbox.attachments })
+		.from(emailOutbox)
+		.where(eq(emailOutbox.id, outboxId));
+	if (!row) return { ok: false, error: "draft not found" };
+	const svc = supabaseService();
+	const added: OutboxAttachment[] = [];
+	for (const f of files) {
+		if (f.bytes.byteLength > MAX_FILE_BYTES) return { ok: false, error: `${f.filename}: ${(f.bytes.byteLength / 1048576).toFixed(1)}MB exceeds the 20MB per-file cap` };
+		const meta: OutboxAttachment = {
+			// uuid prefix so duplicate filenames never collide in storage
+			path: `${ATT_PREFIX}/${outboxId}/${crypto.randomUUID()}-${f.filename}`,
+			filename: f.filename,
+			mimeType: f.mimeType || "application/octet-stream",
+			size: f.bytes.byteLength,
+		};
+		const { error } = await svc.storage.from(ATT_BUCKET).upload(meta.path, f.bytes, { contentType: meta.mimeType });
+		if (error) return { ok: false, error: `${f.filename}: ${error.message}` };
+		added.push(meta);
+	}
+	const attachments = [...(row.attachments ?? []), ...added];
+	await db.update(emailOutbox).set({ attachments }).where(eq(emailOutbox.id, outboxId));
+	return { ok: true, attachments };
+}
+
+/** Agent path: absolute local file paths (agent + server share the host). */
+export async function attachLocalFiles(
+	outboxId: string,
+	paths: string[],
+): Promise<{ ok: true; attachments: OutboxAttachment[] } | { ok: false; error: string }> {
+	const files: { bytes: ArrayBuffer; filename: string; mimeType: string }[] = [];
+	for (const p of paths) {
+		const f = Bun.file(p);
+		if (!(await f.exists())) return { ok: false, error: `cannot read ${p} (missing or unreadable)` };
+		files.push({ bytes: await f.arrayBuffer(), filename: p.split("/").pop() || "attachment", mimeType: f.type });
+	}
+	return attachBytes(outboxId, files);
+}
+
+/** Remove one attachment: storage object + metadata entry. */
+export async function removeOutboxAttachment(outboxId: string, path: string): Promise<boolean> {
+	const [row] = await db.select({ attachments: emailOutbox.attachments }).from(emailOutbox).where(eq(emailOutbox.id, outboxId));
+	if (!row) return false;
+	const next = (row.attachments ?? []).filter((a) => a.path !== path);
+	if (next.length === row.attachments.length) return false;
+	if (path.startsWith(`${ATT_PREFIX}/`)) await supabaseService().storage.from(ATT_BUCKET).remove([path]);
+	await db.update(emailOutbox).set({ attachments: next }).where(eq(emailOutbox.id, outboxId));
+	return true;
+}
+
+/** Fetch attachment bytes from storage → MIME parts. Fails on the first missing file. */
+async function loadAttachments(list: OutboxAttachment[]): Promise<MimeAttachment[]> {
+	if (!list.length) return [];
+	const svc = supabaseService();
+	return Promise.all(
+		list.map(async (a): Promise<MimeAttachment> => {
+			const { data, error } = await svc.storage.from(ATT_BUCKET).download(a.path);
+			if (error || !data) throw new Error(`attachment unavailable: ${a.filename} (${error?.message ?? "not found"})`);
+			return { filename: a.filename, mimeType: a.mimeType, base64: toBase64(new Uint8Array(await data.arrayBuffer())) };
+		}),
+	);
+}
 
 export type SendResult =
 	| { ok: true; gmailMessageId: string }
@@ -87,6 +168,11 @@ export async function sendOutboxInner(
 	const [row] = await db.select().from(emailOutbox).where(eq(emailOutbox.id, outboxId));
 	if (!row) return { ok: false, error: "draft not found" };
 	if (row.status === "sent") return { ok: false, error: "already sent" };
+	// attachment budget: refusing here keeps a too-big send out of Gmail's reject path
+	if (row.attachments.reduce((s, a) => s + a.size, 0) > MAX_TOTAL_BYTES) {
+		return { ok: false, error: `attachments total ${(row.attachments.reduce((s, a) => s + a.size, 0) / 1048576).toFixed(1)}MB — Gmail rejects sends over 25MB` };
+	}
+
 
 	const body = bodyOverride ?? row.body;
 
@@ -121,6 +207,9 @@ export async function sendOutboxInner(
 	const deliveredBody = sig ? `${body}\n\n${SIGNATURES[sig].plain}` : body;
 
 	try {
+		// a missing/corrupt attachment file fails the send — never deliver the
+		// email without what it promises (the row lands as failed, retryable)
+		const mimeAttachments = await loadAttachments(row.attachments);
 		const { id: gmailMessageId, threadId: gmailThreadId } = await sendGmail(account, {
 			to: row.toEmail,
 			cc: row.ccEmail,
@@ -129,6 +218,7 @@ export async function sendOutboxInner(
 			body,
 			signature: sig,
 			inReplyToGmailId,
+			attachments: mimeAttachments.length ? mimeAttachments : undefined,
 		});
 		// the sent body lands as its own tracked version (human author).
 		// Best-effort: Gmail already accepted the send, so a version-history
@@ -219,7 +309,9 @@ export async function createEmailDraft(input: {
 	campaignCompanyId?: string;
 	campaignStep?: number;
 	signature?: "full" | "plain" | "none";
-}): Promise<{ outboxId: string }> {
+	// absolute local file paths — the agent and server share the host
+	attachments?: string[];
+}): Promise<{ outboxId: string; attachmentError?: string }> {
 	"use server";
 	const [outbox] = await db
 		.insert(emailOutbox)
@@ -244,6 +336,12 @@ export async function createEmailDraft(input: {
 			.set({ loroSnapshot: tracked.loroSnapshot, version: tracked.version })
 			.where(eq(emailOutbox.id, outbox.id));
 	}
+	if (input.attachments?.length) {
+		const att = await attachLocalFiles(outbox.id, input.attachments);
+		// the draft exists — a failed upload must NOT nuke it into a retry that
+		// creates a duplicate row; the agent revises via draft_id instead
+		if (!att.ok) return { outboxId: outbox.id, attachmentError: att.error };
+	}
 	return { outboxId: outbox.id };
 }
 
@@ -262,7 +360,8 @@ export async function updateEmailDraft(input: {
 	campaignCompanyId?: string;
 	campaignStep?: number;
 	signature?: "full" | "plain" | "none";
-}): Promise<{ outboxId: string; updated: true; version: number | null } | { error: string }> {
+	attachments?: string[];
+}): Promise<{ outboxId: string; updated: true; version: number | null; attachmentError?: string } | { error: string }> {
 	"use server";
 	const [row] = await db.select().from(emailOutbox).where(eq(emailOutbox.id, input.outboxId));
 	if (!row) return { error: "draft not found — call create_email_draft without draft_id to make a new one" };
@@ -279,6 +378,10 @@ export async function updateEmailDraft(input: {
 		})
 		.where(eq(emailOutbox.id, input.outboxId));
 	const version = await saveDraftBody(input.outboxId, input.body, "agent");
+	if (input.attachments?.length) {
+		const att = await attachLocalFiles(input.outboxId, input.attachments);
+		if (!att.ok) return { outboxId: input.outboxId, updated: true, version, attachmentError: att.error };
+	}
 	return { outboxId: input.outboxId, updated: true, version };
 }
 
