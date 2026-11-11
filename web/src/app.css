@@ -1901,4 +1901,19 @@ html:has(.home-narrative) {
   .form-row { grid-template-columns: 1fr; }
   /* wide tables scroll in place instead of blowing out the viewport */
   .table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  /* ── Docs pass: flowing full-width editor — no letter sheets, panels stack ── */
+  .doc-shell { flex-direction: column; gap: 20px; }
+  .doc-history {
+    width: auto;
+    position: static;
+    max-height: none;
+    border-left: none;
+    padding-left: 0;
+  }
+  .doc-pager { width: auto; margin: 8px 0 20px; padding-top: 0; }
+  .doc-sheet { display: none; }
+  .doc-title, .doc-editor { width: 100%; }
+  .doc-firstcomment { flex-wrap: wrap; }
+  .doc-topbar { gap: 8px; }
 }

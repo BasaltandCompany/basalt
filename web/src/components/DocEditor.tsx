@@ -146,6 +146,16 @@ export const DocEditor = (props: { id: string; doc: NonNullable<Awaited<ReturnTy
 	};
 	const runLayout = () => {
 		if (!docApi || !pagerEl || !editorRoot) return;
+		// mobile: no letter-page geometry — strip sheets + pushes, flow full-width
+		// (resize re-runs this, so crossing 900px restores desktop pagination)
+		if (window.matchMedia("(max-width: 900px)").matches) {
+			pagerEl.querySelectorAll(".doc-sheet").forEach((s) => s.remove());
+			for (const b of [titleEl ?? null, ...Array.from(editorRoot.childNodes)].filter(
+				(n): n is HTMLElement => n instanceof HTMLElement,
+			)) b.style.removeProperty("margin-top");
+			pagerEl.style.removeProperty("min-height");
+			return;
+		}
 		// re-paginating moves blocks — scroll-compensate so the caret stays
 		// visually planted (text snaps around it, no teleport); only while the
 		// caret is live in the editor — a stale selection must not scroll-jack
