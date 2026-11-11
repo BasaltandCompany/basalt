@@ -477,7 +477,45 @@ export async function performUnsubscribe(account: EmailAccount, info: UnsubInfo)
 
 // ── Send ───────────────────────────────────────────────────────────
 
-export function buildMime(input: { to: string; cc?: string | null; bcc?: string | null; subject: string; body: string; signature?: "full" | "plain" }): string {
+export type MimeAttachment = { filename: string; mimeType: string; base64: string };
+
+// the body's own MIME section — its Content-Type line onward (everything that
+// sits inside the enclosing multipart/mixed when attachments are present)
+function bodySection(body: string, signature?: "full" | "plain"): string {
+	if (!signature) {
+		return ['Content-Type: text/plain; charset="UTF-8"', "Content-Transfer-Encoding: 8bit", "", body].join("\r\n");
+	}
+	// signature present → multipart/alternative: plain body + signature text,
+	// and an HTML part with the branded signature block.
+	const sig = SIGNATURES[signature];
+	return [
+		'Content-Type: multipart/alternative; boundary="_basalt_sig"',
+		"",
+		"--_basalt_sig",
+		'Content-Type: text/plain; charset="UTF-8"',
+		"Content-Transfer-Encoding: 8bit",
+		"",
+		`${body}\n\n${sig.plain}`,
+		"--_basalt_sig",
+		'Content-Type: text/html; charset="UTF-8"',
+		"Content-Transfer-Encoding: 8bit",
+		"",
+		`<html><body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111111;line-height:1.5;margin:0;padding:24px;">${escapeBodyHtml(body)}${sig.html}</body></html>`,
+		"--_basalt_sig--",
+	].join("\r\n");
+}
+
+// RFC 2045: quoted-string header param — drop chars that break the quoting
+function mimeFilename(name: string): string {
+	return name.replace(/[\r\n\\"]/g, "").trim() || "attachment";
+}
+
+// RFC 2045: base64 lines max 76 chars
+function wrap76(b64: string): string {
+	return (b64.match(/.{1,76}/g) ?? []).join("\r\n");
+}
+
+export function buildMime(input: { to: string; cc?: string | null; bcc?: string | null; subject: string; body: string; signature?: "full" | "plain"; attachments?: MimeAttachment[] }): string {
 	const headers = [
 		`To: ${input.to}`,
 		...(input.cc ? [`Cc: ${input.cc}`] : []),
@@ -489,39 +527,41 @@ export function buildMime(input: { to: string; cc?: string | null; bcc?: string 
 		`Subject: ${input.subject}`,
 		"MIME-Version: 1.0",
 	];
-	if (!input.signature) {
+	if (!input.signature && !input.attachments?.length) {
+		// legacy bare path — byte-identical output
 		headers.push('Content-Type: text/plain; charset="UTF-8"', "Content-Transfer-Encoding: 8bit");
 		return `${headers.join("\r\n")}\r\n\r\n${input.body}`;
 	}
-	// signature present → multipart/alternative: plain body + signature text,
-	// and an HTML part with the branded signature block.
-	const sig = SIGNATURES[input.signature];
+	if (input.attachments?.length) {
+		// attachments → multipart/mixed: body section first, one base64 part per file
+		headers.push('Content-Type: multipart/mixed; boundary="_basalt_att"');
+		const lines = ["--_basalt_att", bodySection(input.body, input.signature)];
+		for (const a of input.attachments) {
+			const name = mimeFilename(a.filename);
+			lines.push(
+				"--_basalt_att",
+				`Content-Type: ${a.mimeType || "application/octet-stream"}; name="${name}"`,
+				"Content-Transfer-Encoding: base64",
+				`Content-Disposition: attachment; filename="${name}"`,
+				"",
+				wrap76(a.base64),
+			);
+		}
+		lines.push("--_basalt_att--");
+		return [headers.join("\r\n"), "", ...lines].join("\r\n");
+	}
 	headers.push('Content-Type: multipart/alternative; boundary="_basalt_sig"');
-	return [
-		headers.join("\r\n"),
-		"",
-		"--_basalt_sig",
-		'Content-Type: text/plain; charset="UTF-8"',
-		"Content-Transfer-Encoding: 8bit",
-		"",
-		`${input.body}\n\n${sig.plain}`,
-		"--_basalt_sig",
-		'Content-Type: text/html; charset="UTF-8"',
-		"Content-Transfer-Encoding: 8bit",
-		"",
-		`<html><body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111111;line-height:1.5;margin:0;padding:24px;">${escapeBodyHtml(input.body)}${sig.html}</body></html>`,
-		"--_basalt_sig--",
-	].join("\r\n");
+	return [headers.join("\r\n"), "", bodySection(input.body, input.signature)].join("\r\n");
 }
 
 /** Send via Gmail. Returns the new message id + its Gmail thread id. */
 export async function sendGmail(
 	account: EmailAccount,
-	input: { to: string; cc?: string | null; bcc?: string | null; subject: string; body: string; signature?: "full" | "plain"; inReplyToGmailId?: string },
+	input: { to: string; cc?: string | null; bcc?: string | null; subject: string; body: string; signature?: "full" | "plain"; inReplyToGmailId?: string; attachments?: MimeAttachment[] },
 ): Promise<{ id: string; threadId: string }> {
 	// Gmail threads replies via the threadId param — no In-Reply-To guessing
 	const threadId = input.inReplyToGmailId ? await threadIdOf(account, input.inReplyToGmailId) : undefined;
-	const raw = toBase64Url(buildMime({ to: input.to, cc: input.cc, bcc: input.bcc, subject: input.subject, body: input.body, signature: input.signature }));
+	const raw = toBase64Url(buildMime({ to: input.to, cc: input.cc, bcc: input.bcc, subject: input.subject, body: input.body, signature: input.signature, attachments: input.attachments }));
 	const res = await gmail<{ id: string; threadId: string }>(account, "/messages/send", {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
