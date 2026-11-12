@@ -131,3 +131,40 @@ test("renderDocx: DIRECT run formatting + exact leading (Apple's importer ignore
 	expect(xml).toContain('w:lineRule="exact"'); // editor-density leading on paragraphs
 	expect(xml).toContain("<w:b/>"); // bold directly on the run
 });
+
+// ── fragmented tables + cell blank markers (BCW quote regression) ──
+const FRAG_MD = `Intro
+
+| # | Item | Hours | Price |
+| --- | --- | --- | --- |
+| 1 | First row | 8 | $960 |
+
+| 2 | Second row | 14 | $1,680 |
+| <!-- blank --> | Total | 22 | $2,640 |
+`;
+
+test("parseBlocks: blank-line-split table rejoined into ONE table, cell marker → empty cell", () => {
+	const tables = parseBlocks(FRAG_MD).filter((b) => b.t === "table");
+	expect(tables.length).toBe(1);
+	if (tables[0]?.t !== "table") throw new Error("unreachable");
+	expect(tables[0].rows.length).toBe(3); // rows 2 + Total used to fall out as raw pipe text
+	expect(tables[0].rows[2][0].map((s) => s.text).join("")).toBe(""); // `<!-- blank -->` cell → empty
+});
+
+const TALL_TABLE_MD = `| # | Item | Hours | Price |
+| --- | --- | --- | --- |
+${Array.from({ length: 40 }, (_, i) => `| ${i + 1} | Row with a reasonably long description that wraps a couple of lines in an equal-width column, pushing each row up so the table must cross page boundaries | 4 | $480 |`).join("\n")}
+`;
+
+test("renderPdf: table taller than a page splits at row edges, valid pdf ≥2 pages", async () => {
+	const buf = await renderPdf("T", TALL_TABLE_MD);
+	expect(new TextDecoder().decode(buf.slice(0, 5))).toBe("%PDF-");
+	const pages = (new TextDecoder().decode(buf).match(/\/Type\s*\/Page[^s]/g) ?? []).length;
+	expect(pages).toBeGreaterThanOrEqual(2);
+});
+
+test("computePageMap: block after a multi-page table lands on the table's END page", async () => {
+	const map = await computePageMap("T", TALL_TABLE_MD + "\n\nAfter the table.\n");
+	expect(map.length).toBe(3); // title + table + para
+	expect(map[2]).toBeGreaterThan(0); // the para starts where the table ended, not where it began
+});

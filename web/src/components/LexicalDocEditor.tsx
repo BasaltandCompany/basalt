@@ -8,7 +8,7 @@
 // Node registry + markdown transformers (GFM tables, page breaks) live in
 // ~/lib/doc-markdown so they stay testable headless.
 import { onCleanup, onMount, createEffect, createSignal, Show, For } from "solid-js";
-import { DOC_NODES, DOC_TRANSFORMERS, $isAtEmptyListItemStart, MentionNode, $isMentionNode } from "~/lib/doc-markdown";
+import { DOC_NODES, DOC_TRANSFORMERS, $isAtEmptyListItemStart, MentionNode, $isMentionNode, normalizeDocMarkdown } from "~/lib/doc-markdown";
 import { TableCellNode, TableRowNode, TableNode, $isTableNode, $createTableNode, $isTableCellNode, $isTableRowNode } from "@lexical/table";
 import type { LexicalNode } from "lexical";
 import { $convertFromMarkdownString, $convertToMarkdownString, registerMarkdownShortcuts } from "@lexical/markdown";
@@ -290,7 +290,7 @@ export default function LexicalDocEditor(props: {
 			const md = props.markdown;
 			if (md === currentMd()) return;
 			ed.update(() => {
-				$convertFromMarkdownString(md, DOC_TRANSFORMERS);
+				$convertFromMarkdownString(normalizeDocMarkdown(md), DOC_TRANSFORMERS);
 			});
 		});
 

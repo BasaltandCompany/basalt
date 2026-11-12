@@ -28,6 +28,7 @@ import {
 	type IParagraphOptions,
 } from "docx";
 import { SPEC, pt, CONTENT_W, CONTENT_H } from "~/lib/page-spec";
+import { normalizeDocMarkdown } from "~/lib/doc-markdown";
 
 export const PAGEBREAK_MD = "<!-- pagebreak -->";
 
@@ -120,7 +121,7 @@ function parseTokens(tokens: Token[]): Block[] {
 }
 
 export function parseBlocks(md: string): Block[] {
-	return parseTokens(marked.lexer(md));
+	return parseTokens(marked.lexer(normalizeDocMarkdown(md)));
 }
 
 // ── shared layout walk ────────────────────────────────────────────────────
@@ -224,9 +225,21 @@ function walkBlocks(blocks: Block[], st: St, doc: PDFKit.PDFDocument, emit: Emit
 				const cellTextW = colW - 2 * SPEC.tablePadX;
 				const rowH = (cells: Span[][], head: boolean) =>
 					Math.max(...cells.map((c) => doc.font(head ? "Helvetica-Bold" : "Helvetica").fontSize(pt(SPEC.tableFont)).heightOfString(plain(c), { width: pt(cellTextW) }) / 0.75)) + 2 * SPEC.tablePadY;
-				const rows = [{ cells: b.header, head: true, h: rowH(b.header, true) }, ...b.rows.map((r) => ({ cells: r, head: false, h: rowH(r, false) }))];
-				fit(rows.reduce((n, r) => n + r.h, 0) + SPEC.tableAfter); // tables never split across pages
+				const headRow = { cells: b.header, head: true, h: rowH(b.header, true) };
+				const rows = [headRow, ...b.rows.map((r) => ({ cells: r, head: false, h: rowH(r, false) }))];
+				// split at row boundaries (matches the editor pager + Word); continuation
+				// pages repeat the header. ponytail: a single row taller than a full page
+				// still overflows that page — no such cell exists today, revisit if one does
 				for (const r of rows) {
+					if (st.y > 0 && st.y + r.h > CONTENT_H) {
+						emit.newPage();
+						st.page++;
+						st.y = 0;
+						if (!r.head) {
+							emit.tableRow(headRow.cells, true, headRow.h, colW);
+							st.y += headRow.h;
+						}
+					}
 					emit.tableRow(r.cells, r.head, r.h, colW);
 					st.y += r.h;
 				}
