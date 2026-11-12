@@ -151,6 +151,23 @@ test("normalizeDocMarkdown: joins blank-line-split fragments, strips cell marker
 	expect(lines).toEqual(["| # | Item |", "| --- | --- |", "| 1 | A |", "| 2 | B |", "|  | Total |", "", "After.", ""]);
 });
 
+test("pager-split serialization: headerless continuation fragment joins back into one table", () => {
+	// what the pager's splitTables exports as: two adjacent pipe tables, the
+	// continuation without a divider — saving must store one table, not fragments
+	const pagerSplitExport = [
+		"| Part | Line item | Hours | Price |",
+		"| --- | --- | --- | --- |",
+		"| 1 | alpha | 8 | $960 |",
+		"",
+		"| 2 | beta | 14 | $1,680 |",
+		"|  | subtotal | 22 | $2,640 |",
+	].join("\n");
+	const out = normalizeDocMarkdown(pagerSplitExport);
+	expect(out.split("\n\n").length).toBe(1);
+	expect(out).toContain("| 2 | beta | 14 | $1,680 |");
+	expect(out).toContain("|  | subtotal | 22 | $2,640 |");
+});
+
 test("normalizeDocMarkdown: leaves fenced code untouched", () => {
 	const md = "| a |\n\n```\n| x |\n\n| y |\n```\n";
 	expect(normalizeDocMarkdown(md)).toBe(md);

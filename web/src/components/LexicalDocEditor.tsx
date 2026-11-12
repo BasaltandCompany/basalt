@@ -146,7 +146,7 @@ export default function LexicalDocEditor(props: {
 
 		// pager API — DocEditor.runLayout drives these
 		const splitTables = (candidates: TableSplit[]): boolean => {
-			let any = false;
+			let progress = false;
 			for (const { el, avail } of candidates) {
 				const rows = Array.from(el.querySelectorAll("tr"));
 				if (rows.length < 2) continue;
@@ -163,14 +163,20 @@ export default function LexicalDocEditor(props: {
 				ed.update(
 					() => {
 						const table = $getNearestNodeFromDOMNode(el);
-						if (!$isTableNode(table)) return;
+						if (!$isTableNode(table)) {
+							// stale el (Lexical replaced the DOM during an earlier split):
+							// report progress so the caller re-measures fresh DOM and
+							// retries, instead of breaking with stale-simulation pushes
+							progress = true;
+							return;
+						}
 						const allRows = table.getChildren().filter($isTableRowNode);
 						const moved = allRows.slice(cut);
 						if (!moved.length) return;
 						const rest = $createTableNode();
 						for (const r of moved) rest.append(r);
 						table.insertAfter(rest);
-						any = true;
+						progress = true;
 					},
 					// discrete: commit + reconcile synchronously so the pager can
 					// re-measure in the same pass; history-merge: the split rides
@@ -178,7 +184,7 @@ export default function LexicalDocEditor(props: {
 					{ discrete: true, tag: "history-merge" },
 				);
 			}
-			return any;
+			return progress;
 		};
 
 		props.onReady?.({
@@ -278,7 +284,10 @@ export default function LexicalDocEditor(props: {
 		const currentMd = () => {
 			let md = "";
 			ed.read(() => {
-				md = $convertToMarkdownString(DOC_TRANSFORMERS);
+				// normalize on the way out, mirroring import: pager table splits
+				// (separate TableNodes) must never persist as blank-line fragments,
+				// and legacy fragmented docs heal on the next save
+				md = normalizeDocMarkdown($convertToMarkdownString(DOC_TRANSFORMERS));
 			});
 			return md;
 		};
