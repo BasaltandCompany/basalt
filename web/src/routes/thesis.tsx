@@ -1,4 +1,4 @@
-// /thesis — the company thesis. The homepage's "Why this metric" link
+// /thesis — the company thesis. The homepage's "Why this metric?" link
 // deep-links to the revenue-per-work-hour section anchor.
 import { Page } from "@/components/site"
 
@@ -15,72 +15,45 @@ export default function Thesis() {
         </p>
 
         <div class="mt-12 space-y-10">
-        <section id="revenue-per-work-hour">
+          <section id="revenue-per-work-hour">
             <h2 class="font-serif text-3xl leading-tight">Revenue per work-hour</h2>
             <p class="mt-4 font-sans text-base leading-relaxed text-muted-foreground">
-              Revenue is the scoreboard. Hours are the input. Divide one by the other and you get the
-              only number that tells the truth about a small company: how much outcome each hour of
-              human work actually produces.
+              Revenue is the scoreboard. Hours are the input. Divide one by the other and you get
+              the only number that tells the truth about a small company: how much outcome each
+              hour of human work actually produces.
             </p>
             <p class="mt-4 font-sans text-base leading-relaxed text-muted-foreground">
-              We chose it because it can't be faked. Revenue alone grows when you hire more hours —
-              that's just buying growth with payroll. Hours saved alone is a cost story that never
-              reaches the P&amp;L. Revenue per work-hour only moves when the same people produce more,
-              which is exactly what embedding AI into real workflows does.
+              We chose it because it can't be faked. Revenue alone grows when you hire more hours,
+              and that's just buying growth with payroll. Hours saved alone is a cost story that
+              never reaches the P&amp;L. Revenue per work-hour only moves when the same people
+              produce more, which is exactly what embedding AI into real workflows does.
             </p>
             <p class="mt-4 font-sans text-base leading-relaxed text-muted-foreground">
-              "A team of five operating like a team of twenty-five" is not a metaphor. It's five times
-              the revenue per work-hour, and it's the bar every engagement has to clear.
+              "A team of five operating like a team of twenty-five" is five times the revenue per
+              work-hour, and it's the bar every engagement has to clear.
             </p>
           </section>
 
-
-			<section>
-				<h2 class="font-serif text-3xl leading-tight">We go first.</h2>
-				<p class="mt-4 font-sans text-base leading-relaxed text-muted-foreground">
-					Most agencies ask for trust up front: the call, the deck, the pilot proposal. We'd
-					rather owe you than pitch you. So we build a working piece of your company's brain
-					from public data — your industry's filings, deadlines, price movements, the questions
-					your team asks every week — and give it to you before we've ever spoken. It keeps
-					working whether or not you ever hire us.
-				</p>
-				<p class="mt-4 font-sans text-base leading-relaxed text-muted-foreground">
-					The first email carries no ask. The ask comes later, smaller, and bounded: if your
-					team isn't running what we built within ninety days, we keep working until they are.
-					We'd rather stack the proof and let it pull than push.
-				</p>
-			</section>
-
-			<section>
-				<h2 class="font-serif text-3xl leading-tight">Why we work with companies that have no CTO.</h2>
-				<p class="mt-4 font-sans text-base leading-relaxed text-muted-foreground">
-					The companies we help best share a shape: owner-run, knowledge-heavy, and nobody
-					technical in the building. The AI opportunity is real, the work is buried in inboxes
-					and spreadsheets and heads, and there's no one whose job it is to grab it.
-				</p>
-				<p class="mt-4 font-sans text-base leading-relaxed text-muted-foreground">
-					Above a certain size there's an IT director whose job is to say no. Below a certain
-					size there isn't enough scatter to matter. In between is the owner who feels it
-					personally — every hour their people spend hunting for the same answer. That's who
-					we build for, because that's where the metric actually moves.
-				</p>
-			</section>
-
-			<section>
-				<h2 class="font-serif text-3xl leading-tight">Why Indiana.</h2>
-				<p class="mt-4 font-sans text-base leading-relaxed text-muted-foreground">
-					Because this is where the work is, and where the proof is. Indiana runs on
-					owner-operated companies doing knowledge-heavy work — logistics, law, public
-					affairs, insurance, staffing, construction — exactly the shapes the brains we've
-					already built fit.
-				</p>
-				<p class="mt-4 font-sans text-base leading-relaxed text-muted-foreground">
-					One room beats a hundred rooms. Every brain we give away in this state makes the
-					next one better and the next introduction warmer. 2.75x at Indiana University
-					wasn't a demo for a stranger; it was a neighbor. We'd rather be the obvious choice
-					in one place than an option in every place.
-				</p>
-			</section>
+          <section>
+            <h2 class="font-serif text-3xl leading-tight">Why custom deployments.</h2>
+            <p class="mt-4 font-sans text-base leading-relaxed text-muted-foreground">
+              Small companies move first. They can decide on a Tuesday and have something running
+              by Friday. Big companies have committees and procurement cycles, so they wait to see
+              the movement before they move.
+            </p>
+            <p class="mt-4 font-sans text-base leading-relaxed text-muted-foreground">
+              But the movement doesn't come off the shelf. A specialized team's value lives in its
+              own data, its own judgment, and its own relationships. Generic tools can't reach any
+              of that. Real gains take a custom deployment: custom training on the company's own
+              data, custom renderings of information it already owns, and harnesses that let the
+              whole team scale faster.
+            </p>
+            <p class="mt-4 font-sans text-base leading-relaxed text-muted-foreground">
+              That's the work. We build AI into the jobs a team already does, using the company's
+              own data and its own language, and then the number at the top of this page tells us
+              whether it worked.
+            </p>
+          </section>
         </div>
       </section>
     </Page>

@@ -193,7 +193,7 @@ export function Site(props: { heroVideo: string | null }) {
                 <Show when={msg.link}>
                   {(l) => (
                     <a
-                      class="text-foreground/80 underline underline-offset-4 hover:text-foreground"
+                      class="pointer-events-auto text-foreground/80 underline underline-offset-4 hover:text-foreground"
                       href={l().href}
                     >
                       {l().label}
