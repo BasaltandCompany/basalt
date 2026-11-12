@@ -20,7 +20,7 @@ export default defineConfig({
 		// run under Bun (bun --bun vite build): nitro's prerenderer executes in
 		// worker_threads of the CURRENT runtime, and db/index.ts needs Bun SQL.
 		// /newsletter and /newsletter/:id stay SSR (live DB archive + issues).
-		nitro({ prerender: { crawlLinks: false, routes: ["/", "/scorecard", "/iu"] } }),
+		nitro({ prerender: { crawlLinks: false, routes: ["/", "/scorecard", "/case-study"] } }),
 		tailwindcss(),
 	],
   // `bun` is a runtime builtin on the oven/bun image (API routes use Bun.$);

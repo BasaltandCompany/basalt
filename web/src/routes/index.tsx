@@ -20,12 +20,12 @@ const MESSAGES: Message[] = [
     title: "Proven in production.",
     proof: [
       {
-        client: "Indiana University",
+        client: "A public university",
         stat: "2.75x",
         line: "revenue per work-hour, with AI agents running their outbound and a third of their time back.",
       },
       {
-        client: "Customs Data Lock",
+        client: "A data privacy provider",
         stat: "+200%",
         line: "response rates from the cold-outreach dashboard, plus coding-agent training and prospect research that grew sales.",
       },
@@ -35,12 +35,12 @@ const MESSAGES: Message[] = [
     title: "Proven in production.",
     proof: [
       {
-        client: "Indiana University",
+        client: "A public university",
         stat: "2.75x",
         line: "revenue per work-hour, with AI agents running their outbound and a third of their time back.",
       },
       {
-        client: "Customs Data Lock",
+        client: "A data privacy provider",
         stat: "+200%",
         line: "response rates from the cold-outreach dashboard, plus coding-agent training and prospect identification that grew sales and outreach.",
       },
