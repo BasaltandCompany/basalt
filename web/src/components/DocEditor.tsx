@@ -161,10 +161,13 @@ export const DocEditor = (props: { id: string; doc: NonNullable<Awaited<ReturnTy
 		// caret is live in the editor — a stale selection must not scroll-jack
 		const anchor = editing() ? caretViewAnchor() : null;
 		let r = computeBreaks(pagerEl, titleEl ?? null, editorRoot);
-		// tables that cross a boundary split at a row edge, then re-layout;
-		// capped — a degenerate table (one huge row) just overflows like before
-		for (let i = 0; i < 4 && r.splits.length; i++) {
-			if (!docApi.splitTables(r.splits)) break;
+		for (let i = 0; i < 40 && r.splits.length; i++) {
+			if (!docApi.splitTables(r.splits)) {
+				// nothing splittable — still re-measure so pushes reflect the final DOM
+				// instead of a simulation from before any pending reconciliation
+				r = computeBreaks(pagerEl, titleEl ?? null, editorRoot);
+				break;
+			}
 			r = computeBreaks(pagerEl, titleEl ?? null, editorRoot);
 		}
 		if (anchor !== null) {

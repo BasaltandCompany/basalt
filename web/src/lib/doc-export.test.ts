@@ -6,7 +6,7 @@ import { $convertFromMarkdownString, $convertToMarkdownString } from "@lexical/m
 // DOC_NODES/DOC_TRANSFORMERS from the editor component (solid import is inert in bun)
 import { DOC_NODES, DOC_TRANSFORMERS } from "~/lib/doc-markdown";
 import JSZip from "jszip";
-import { computePageMap, parseBlocks, renderDocx, renderPdf } from "~/lib/doc-export";
+import { computePageMap, numericCols, parseBlocks, renderDocx, renderPdf } from "~/lib/doc-export";
 
 const MD = `# Title
 
@@ -111,6 +111,18 @@ test("renderDocx: exactly one explicit page break for a 2-page doc", async () =>
 	const zip = await JSZip.loadAsync(buf);
 	const xml = (await zip.file("word/document.xml")?.async("text")) ?? "";
 	expect((xml.match(/<w:br w:type="page"\/>/g) ?? []).length).toBe(1);
+});
+
+test("numericCols: numeric columns detected, prose columns left-aligned", () => {
+	const header = [[{ text: "Part" }], [{ text: "Line item" }], [{ text: "Hours" }], [{ text: "Price" }]];
+	const rows = [
+		[[{ text: "1" }], [{ text: "Data foundation for forms" }], [{ text: "8" }], [{ text: "$960" }]],
+		[[{ text: "" }], [{ text: "Base subtotal" }], [{ text: "196" }], [{ text: "$23,520" }]],
+	];
+	expect(numericCols(header, rows)).toEqual([true, false, true, true]);
+	// a prose-looking column never centers
+	const prose = [[[{ text: "3" }], [{ text: "Five hours of work" }]]];
+	expect(numericCols([[{ text: "A" }], [{ text: "B" }]], prose)[1]).toBe(false);
 });
 
 test("renderDocx: Heading2 style is Arial 16pt bold near-black", async () => {
