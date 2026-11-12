@@ -1,6 +1,5 @@
-// /thesis — the company thesis. The homepage links here ("why revenue per
-// work-hour"). Collin writes the real thesis here — the metric section is a
-// working draft, the rest is scaffolding to fill in.
+// /thesis — the company thesis. The homepage's "Why this metric" link
+// deep-links to the revenue-per-work-hour section anchor.
 import { Page } from "@/components/site"
 
 export default function Thesis() {
@@ -16,7 +15,7 @@ export default function Thesis() {
         </p>
 
         <div class="mt-12 space-y-10">
-          <section>
+        <section id="revenue-per-work-hour">
             <h2 class="font-serif text-3xl leading-tight">Revenue per work-hour</h2>
             <p class="mt-4 font-sans text-base leading-relaxed text-muted-foreground">
               Revenue is the scoreboard. Hours are the input. Divide one by the other and you get the
@@ -35,17 +34,53 @@ export default function Thesis() {
             </p>
           </section>
 
-          {/* TODO(collin): the rest of the thesis — the give-first philosophy,
-              why no-CTO companies, why Indiana. Keep the same section shape. */}
-          <section>
-            <h2 class="font-serif text-3xl leading-tight text-muted-foreground">
-              The rest, as I write it.
-            </h2>
-            <p class="mt-4 font-sans text-sm leading-relaxed text-muted-foreground/60">
-              This page is where the full company thesis lives. Edit{" "}
-              <code class="font-mono text-xs">web/src/routes/thesis.tsx</code>.
-            </p>
-          </section>
+
+			<section>
+				<h2 class="font-serif text-3xl leading-tight">We go first.</h2>
+				<p class="mt-4 font-sans text-base leading-relaxed text-muted-foreground">
+					Most agencies ask for trust up front: the call, the deck, the pilot proposal. We'd
+					rather owe you than pitch you. So we build a working piece of your company's brain
+					from public data — your industry's filings, deadlines, price movements, the questions
+					your team asks every week — and give it to you before we've ever spoken. It keeps
+					working whether or not you ever hire us.
+				</p>
+				<p class="mt-4 font-sans text-base leading-relaxed text-muted-foreground">
+					The first email carries no ask. The ask comes later, smaller, and bounded: if your
+					team isn't running what we built within ninety days, we keep working until they are.
+					We'd rather stack the proof and let it pull than push.
+				</p>
+			</section>
+
+			<section>
+				<h2 class="font-serif text-3xl leading-tight">Why we work with companies that have no CTO.</h2>
+				<p class="mt-4 font-sans text-base leading-relaxed text-muted-foreground">
+					The companies we help best share a shape: owner-run, knowledge-heavy, and nobody
+					technical in the building. The AI opportunity is real, the work is buried in inboxes
+					and spreadsheets and heads, and there's no one whose job it is to grab it.
+				</p>
+				<p class="mt-4 font-sans text-base leading-relaxed text-muted-foreground">
+					Above a certain size there's an IT director whose job is to say no. Below a certain
+					size there isn't enough scatter to matter. In between is the owner who feels it
+					personally — every hour their people spend hunting for the same answer. That's who
+					we build for, because that's where the metric actually moves.
+				</p>
+			</section>
+
+			<section>
+				<h2 class="font-serif text-3xl leading-tight">Why Indiana.</h2>
+				<p class="mt-4 font-sans text-base leading-relaxed text-muted-foreground">
+					Because this is where the work is, and where the proof is. Indiana runs on
+					owner-operated companies doing knowledge-heavy work — logistics, law, public
+					affairs, insurance, staffing, construction — exactly the shapes the brains we've
+					already built fit.
+				</p>
+				<p class="mt-4 font-sans text-base leading-relaxed text-muted-foreground">
+					One room beats a hundred rooms. Every brain we give away in this state makes the
+					next one better and the next introduction warmer. 2.75x at Indiana University
+					wasn't a demo for a stranger; it was a neighbor. We'd rather be the obvious choice
+					in one place than an option in every place.
+				</p>
+			</section>
         </div>
       </section>
     </Page>
