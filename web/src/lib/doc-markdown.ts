@@ -225,7 +225,12 @@ const PAGEBREAK: ElementTransformer = {
 const BLANK: ElementTransformer = {
 	type: "element",
 	dependencies: [],
-	export: (node) => ($isParagraphNode(node) && !node.getTextContent().trim() ? "<!-- blank -->" : null),
+	export: (node) =>
+		// inside a table cell an empty paragraph is just an empty cell — emitting the
+		// marker here is how `<!-- blank -->` leaked into stored table rows
+		$isParagraphNode(node) && !node.getTextContent().trim() && !$isTableCellNode(node.getParent())
+			? "<!-- blank -->"
+			: null,
 	regExp: /^<!--\s*blank\s*-->$/,
 	replace: (parentNode) => {
 		const p = $createParagraphNode();
@@ -358,7 +363,32 @@ export const DOC_NODES = [
 	MentionNode,
 ];
 
+// GFM table fragments joined + cell markers stripped BEFORE anything parses a
+// doc: blank lines between row lines split one table into stacked fragments
+// (marked and the Lexical table importer both end a table at the first blank
+// line → raw-pipe text in PDF/DOCX exports, doubled borders in the editor),
+// and the `<!-- blank -->` marker only means "empty line" as a standalone
+// paragraph — inside a cell it leaks as literal text everywhere. Fence-aware
+// so code blocks keep their content verbatim.
+const TABLE_ROW_LINE = /^\s*\|/;
+const FENCE_LINE = /^\s*```/;
+const BLANK_CELL = /<!--\s*blank\s*-->/g;
 
+export function normalizeDocMarkdown(md: string): string {
+	const lines = md.split("\n");
+	const out: string[] = [];
+	let inFence = false;
+	for (let i = 0; i < lines.length; i++) {
+		let line = lines[i];
+		if (FENCE_LINE.test(line)) inFence = !inFence;
+		if (!inFence) {
+			if (line.trim() === "" && TABLE_ROW_LINE.test(lines[i - 1] ?? "") && TABLE_ROW_LINE.test(lines[i + 1] ?? "")) continue;
+			if (TABLE_ROW_LINE.test(line)) line = line.replace(BLANK_CELL, "");
+		}
+		out.push(line);
+	}
+	return out.join("\n");
+}
 
 export const DOC_TRANSFORMERS = [
 	HEADING,

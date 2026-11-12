@@ -6,7 +6,7 @@ import { $convertFromMarkdownString } from "@lexical/markdown";
 import { INSERT_PARAGRAPH_COMMAND, $getRoot, $getSelection, $isRangeSelection, $isTextNode } from "lexical";
 import { registerList } from "@lexical/list";
 import { registerRichText } from "@lexical/rich-text";
-import { DOC_NODES, DOC_TRANSFORMERS, $isAtEmptyListItemStart } from "~/lib/doc-markdown";
+import { DOC_NODES, DOC_TRANSFORMERS, $isAtEmptyListItemStart, normalizeDocMarkdown } from "~/lib/doc-markdown";
 
 const setup = (md: string) => {
 	const ed = createHeadlessEditor({ nodes: DOC_NODES, onError: (e) => { throw e; } });
@@ -140,4 +140,27 @@ test("mention clone/importJSON keeps kind+id", () => {
 	expect(clonedId).toBe("abcdef01-2345-6789-abcd-ef0123456789");
 	expect(importedKind).toBe("doc");
 	expect(importedId).toBe("abcdef01-2345-6789-abcd-ef0123456789");
+});
+
+// ── table-fragment normalization + empty-cell export guard ──
+
+test("normalizeDocMarkdown: joins blank-line-split fragments, strips cell markers", () => {
+	const md = "| # | Item |\n| --- | --- |\n| 1 | A |\n\n| 2 | B |\n| <!-- blank --> | Total |\n\nAfter.\n";
+	const out = normalizeDocMarkdown(md);
+	const lines = out.split("\n");
+	expect(lines).toEqual(["| # | Item |", "| --- | --- |", "| 1 | A |", "| 2 | B |", "|  | Total |", "", "After.", ""]);
+});
+
+test("normalizeDocMarkdown: leaves fenced code untouched", () => {
+	const md = "| a |\n\n```\n| x |\n\n| y |\n```\n";
+	expect(normalizeDocMarkdown(md)).toBe(md);
+});
+
+test("empty table cell exports as empty pipe cell, not <!-- blank -->", () => {
+	const ed = createHeadlessEditor({ nodes: DOC_NODES, onError: (e) => { throw e; } });
+	ed.update(() => $convertFromMarkdownString("| # | Item |\n| --- | --- |\n|  | Total |\n", DOC_TRANSFORMERS), { discrete: true });
+	let out = "";
+	ed.read(() => (out = $convertToMarkdownString(DOC_TRANSFORMERS)));
+	expect(out).not.toContain("blank");
+	expect(out).toContain("|  | Total |");
 });
