@@ -71,7 +71,6 @@ const Layout: ParentComponent<{ user?: { id?: string; email?: string } | null }>
 	return (
 		<div class="layout" classList={{ collapsed: collapsed(), "mobile-open": mobileOpen() }}>
 			<CommandPalette />
-			<Toaster />
 			<div class="mobile-topbar">
 				<button
 					type="button"
