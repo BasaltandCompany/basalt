@@ -1,1 +1,1 @@
-ALTER TABLE "email_outbox" ADD COLUMN "signature" text;
+ALTER TABLE "email_outbox" ADD COLUMN IF NOT EXISTS "signature" text;

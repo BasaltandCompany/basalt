@@ -1,1 +1,1 @@
-ALTER TABLE "email_outbox" ADD COLUMN "attachments" jsonb DEFAULT '[]'::jsonb NOT NULL;
+ALTER TABLE "email_outbox" ADD COLUMN IF NOT EXISTS "attachments" jsonb DEFAULT '[]'::jsonb NOT NULL;
