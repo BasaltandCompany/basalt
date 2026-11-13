@@ -1,5 +1,5 @@
 // AI-signal scoring — pure functions, no IO. The locked promotion rule (see
-// ICP.md): an employee who self-labels AI on LinkedIn is the ONLY promotion
+// outreach/ICP.md): an employee who self-labels AI on LinkedIn is the ONLY promotion
 // signal, any role — a small technical team using AI is the good case, not a
 // disqualifier. The website scan corroborates only (upgrades some→high); a
 // vendor hint (brand-matched .ai product domain, AI-product marketing) is

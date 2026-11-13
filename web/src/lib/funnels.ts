@@ -1,13 +1,15 @@
-// Funnels shared logic: the Freight ICP stage list (from ICP.md), lazy seed,
+// Funnels shared logic: the Freight ICP stage list (from outreach/ICP.md), lazy seed,
 // and the promote/un-approve moves shared by the API routes.
 import { and, eq, ilike, inArray, sql } from "drizzle-orm";
 import { db } from "~/db";
-import { campaigns, entityLinks } from "~/db/schema";
 import { checkApiKey } from "~/lib/api-key";
 import { getAuthedClient } from "~/lib/session";
 import {
+	campaigns,
+	entityLinks,
 	funnelItems,
 	funnelRuns,
+	funnelSchedules,
 	funnelStageResults,
 	funnels,
 	outreachProspects,
@@ -207,7 +209,7 @@ export async function ensureFreightFunnel() {
 	if (!existing.some((f) => f.name === "Freight ICP")) {
 		await db.insert(funnels).values({
 			name: "Freight ICP",
-			description: "Owner-led Indiana freight brokers/3PLs, $10-70M, no tech team (see ICP.md)",
+			description: "Owner-led Indiana freight brokers/3PLs, $10-70M, no tech team (see outreach/ICP.md)",
 			stages: FREIGHT_STAGES,
 		}).onConflictDoNothing();
 	}
@@ -221,6 +223,31 @@ export async function ensureFreightFunnel() {
 			await db.update(funnels).set({ stages: merged }).where(eq(funnels.id, f.id));
 		}
 	}
+}
+
+/** Insert the Made in Indiana funnel + its monthly discovery schedule if
+ * missing (same lazy-seed contract as ensureFreightFunnel). Discovery pulls
+ * Purdue MEP's manufacturer directory every 30 days; enrichment budgets are
+ * 0 — no Prospeo spend. Humans review the funnel board and promote by hand. */
+export async function ensureMepFunnel() {
+	const [existing] = await db.select().from(funnels).where(eq(funnels.name, "Made in Indiana ICP")).limit(1);
+	let funnelId = existing?.id;
+	if (!funnelId) {
+		const [created] = await db
+			.insert(funnels)
+			.values({
+				name: "Made in Indiana ICP",
+				description: "Purdue MEP Made-in-Indiana manufacturers (BCW lookalikes) — monthly directory pull, human-promoted",
+				stages: FREIGHT_STAGES,
+			})
+			.returning({ id: funnels.id });
+		funnelId = created.id;
+	}
+	// schedule row: enabled, mep rail, monthly, zero paid enrichment
+	await db
+		.insert(funnelSchedules)
+		.values({ funnelId, enabled: true, discoverySource: "mep", discoveryIntervalDays: 30, enrichPerDay: 0, techPerDay: 0 })
+		.onConflictDoNothing({ target: funnelSchedules.funnelId });
 }
 
 export async function getFunnel(funnelId: string) {
