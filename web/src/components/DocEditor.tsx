@@ -146,15 +146,28 @@ export const DocEditor = (props: { id: string; doc: NonNullable<Awaited<ReturnTy
 	};
 	const runLayout = () => {
 		if (!docApi || !pagerEl || !editorRoot) return;
+		// mobile: no letter-page geometry — strip sheets + pushes, flow full-width
+		// (resize re-runs this, so crossing 900px restores desktop pagination)
+		if (window.matchMedia("(max-width: 900px)").matches) {
+			pagerEl.querySelectorAll(".doc-sheet").forEach((s) => s.remove());
+			for (const b of [titleEl ?? null, ...Array.from(editorRoot.childNodes)].filter(
+				(n): n is HTMLElement => n instanceof HTMLElement,
+			)) b.style.removeProperty("margin-top");
+			pagerEl.style.removeProperty("min-height");
+			return;
+		}
 		// re-paginating moves blocks — scroll-compensate so the caret stays
 		// visually planted (text snaps around it, no teleport); only while the
 		// caret is live in the editor — a stale selection must not scroll-jack
 		const anchor = editing() ? caretViewAnchor() : null;
 		let r = computeBreaks(pagerEl, titleEl ?? null, editorRoot);
-		// tables that cross a boundary split at a row edge, then re-layout;
-		// capped — a degenerate table (one huge row) just overflows like before
-		for (let i = 0; i < 4 && r.splits.length; i++) {
-			if (!docApi.splitTables(r.splits)) break;
+		for (let i = 0; i < 40 && r.splits.length; i++) {
+			if (!docApi.splitTables(r.splits)) {
+				// nothing splittable — still re-measure so pushes reflect the final DOM
+				// instead of a simulation from before any pending reconciliation
+				r = computeBreaks(pagerEl, titleEl ?? null, editorRoot);
+				break;
+			}
 			r = computeBreaks(pagerEl, titleEl ?? null, editorRoot);
 		}
 		if (anchor !== null) {

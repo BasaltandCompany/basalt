@@ -1,5 +1,9 @@
 {
   "name": "madcactus",
   "private": true,
-  "workspaces": ["web", "packages/ui"]
+  "workspaces": ["web", "packages/ui"],
+  "patchedDependencies": {
+    "solid-js@1.9.17": "patches/solid-js@1.9.17.patch",
+    "nitro@3.0.260610-beta": "patches/nitro@3.0.260610-beta.patch"
+  }
 }

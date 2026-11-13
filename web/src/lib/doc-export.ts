@@ -12,6 +12,7 @@ import { marked, type Token } from "marked";
 import type PDFKit from "pdfkit";
 import {
 	BorderStyle,
+	AlignmentType,
 	Document,
 	ExternalHyperlink,
 	HeadingLevel,
@@ -28,6 +29,7 @@ import {
 	type IParagraphOptions,
 } from "docx";
 import { SPEC, pt, CONTENT_W, CONTENT_H } from "~/lib/page-spec";
+import { normalizeDocMarkdown } from "~/lib/doc-markdown";
 
 export const PAGEBREAK_MD = "<!-- pagebreak -->";
 
@@ -60,6 +62,14 @@ function spans(md: string): Span[] {
 }
 
 const plain = (ss: Span[]) => ss.map((s) => s.text).join("");
+
+// A table column whose body cells are all numeric-ish ($120, 196, 8, blank)
+// centers — header included. Prose columns (line items) stay left-aligned.
+const NUMERIC_CELL = /^[\s$,.0-9-]*$/;
+export const numericCols = (header: Span[][], rows: Span[][][]): boolean[] => {
+	const cols = Math.max(1, header.length);
+	return Array.from({ length: cols }, (_, c) => rows.every((r) => NUMERIC_CELL.test(plain(r[c] ?? []))));
+};
 
 // ── block parse ───────────────────────────────────────────────────────────
 type Block =
@@ -120,7 +130,7 @@ function parseTokens(tokens: Token[]): Block[] {
 }
 
 export function parseBlocks(md: string): Block[] {
-	return parseTokens(marked.lexer(md));
+	return parseTokens(marked.lexer(normalizeDocMarkdown(md)));
 }
 
 // ── shared layout walk ────────────────────────────────────────────────────
@@ -138,7 +148,7 @@ interface Emit {
 	quotePara(spans: Span[]): void;
 	listItem(marker: string, spans: Span[]): void;
 	code(text: string, h: number): void;
-	tableRow(cells: Span[][], head: boolean, h: number, colW: number): void;
+	tableRow(cells: Span[][], head: boolean, h: number, colW: number, numeric?: boolean[]): void;
 	hr(): void;
 }
 
@@ -221,13 +231,26 @@ function walkBlocks(blocks: Block[], st: St, doc: PDFKit.PDFDocument, emit: Emit
 			case "table": {
 				const cols = Math.max(1, b.header.length);
 				const colW = CONTENT_W / cols;
+				const numeric = numericCols(b.header, b.rows);
 				const cellTextW = colW - 2 * SPEC.tablePadX;
 				const rowH = (cells: Span[][], head: boolean) =>
 					Math.max(...cells.map((c) => doc.font(head ? "Helvetica-Bold" : "Helvetica").fontSize(pt(SPEC.tableFont)).heightOfString(plain(c), { width: pt(cellTextW) }) / 0.75)) + 2 * SPEC.tablePadY;
-				const rows = [{ cells: b.header, head: true, h: rowH(b.header, true) }, ...b.rows.map((r) => ({ cells: r, head: false, h: rowH(r, false) }))];
-				fit(rows.reduce((n, r) => n + r.h, 0) + SPEC.tableAfter); // tables never split across pages
+				const headRow = { cells: b.header, head: true, h: rowH(b.header, true) };
+				const rows = [headRow, ...b.rows.map((r) => ({ cells: r, head: false, h: rowH(r, false) }))];
+				// split at row boundaries (matches the editor pager + Word); continuation
+				// pages repeat the header. ponytail: a single row taller than a full page
+				// still overflows that page — no such cell exists today, revisit if one does
 				for (const r of rows) {
-					emit.tableRow(r.cells, r.head, r.h, colW);
+					if (st.y > 0 && st.y + r.h > CONTENT_H) {
+						emit.newPage();
+						st.page++;
+						st.y = 0;
+						if (!r.head) {
+							emit.tableRow(headRow.cells, true, headRow.h, colW, numeric);
+							st.y += headRow.h;
+						}
+					}
+					emit.tableRow(r.cells, r.head, r.h, colW, numeric);
 					st.y += r.h;
 				}
 				st.y += SPEC.tableAfter;
@@ -370,19 +393,20 @@ function docxBlocks(blocks: Block[]): (Paragraph | Table)[] {
 			case "table": {
 				const cols = b.header.length || 1;
 				const width = { size: Math.floor(100 / cols), type: WidthType.PERCENTAGE };
-				const cell = (ss: Span[], head: boolean) =>
+				const numeric = numericCols(b.header, b.rows);
+				const cell = (ss: Span[], head: boolean, center = false) =>
 					new TableCell({
 						width,
 						margins: { top: 80, bottom: 80, left: 120, right: 120 },
-						shading: head ? { type: ShadingType.CLEAR, fill: "EFEADD" } : undefined,
-						children: [para(ss.map((s) => ({ ...s, bold: s.bold || head })), { spacing: { ...line(SPEC.tableFont) } }, { size: 19 })],
+						shading: head ? { type: ShadingType.CLEAR, fill: "D9D9D9" } : undefined,
+						children: [para(ss.map((s) => ({ ...s, bold: s.bold || head })), { alignment: center ? AlignmentType.CENTER : undefined, spacing: { ...line(SPEC.tableFont) } }, { size: 19 })],
 					});
 				out.push(
 					new Table({
 						width: { size: 100, type: WidthType.PERCENTAGE },
 						rows: [
-							new TableRow({ tableHeader: true, children: b.header.map((c) => cell(c, true)) }),
-							...b.rows.map((r) => new TableRow({ children: r.map((c) => cell(c, false)) })),
+							new TableRow({ tableHeader: true, children: b.header.map((c, ci) => cell(c, true, numeric[ci])) }),
+							...b.rows.map((r) => new TableRow({ children: r.map((c, ci) => cell(c, false, numeric[ci])) })),
 						],
 					}),
 				);
@@ -488,7 +512,7 @@ export async function renderPdf(title: string, md: string): Promise<Uint8Array<A
 			const st: St = { page: 0, y: 0 };
 			const absY = (px: number) => pt(SPEC.pad + px);
 
-			const write = (ss: Span[], opts: { x?: number; width?: number; size: number; bold?: boolean; italic?: boolean; color?: string }) => {
+			const write = (ss: Span[], opts: { x?: number; width?: number; size: number; bold?: boolean; italic?: boolean; color?: string; align?: "center" }) => {
 				const x = LEFT + pt(opts.x ?? 0);
 				const width = pt(opts.width ?? CONTENT_W);
 				let first = true;
@@ -498,7 +522,7 @@ export async function renderPdf(title: string, md: string): Promise<Uint8Array<A
 						.fontSize(pt(opts.size))
 						.fillColor(opts.color ?? "#111");
 					// editor link look: dark text, gold underline (not blue)
-					doc.text(s.text, x, first ? absY(st.y) : undefined, { width, continued: s !== ss[ss.length - 1], ...(s.href ? { link: s.href, underline: true, underlineColor: GOLD_PDF } : {}) });
+					doc.text(s.text, x, first ? absY(st.y) : undefined, { width, align: opts.align, continued: s !== ss[ss.length - 1], ...(s.href ? { link: s.href, underline: true, underlineColor: GOLD_PDF } : {}) });
 					first = false;
 				}
 			};
@@ -514,11 +538,11 @@ export async function renderPdf(title: string, md: string): Promise<Uint8Array<A
 					doc.rect(LEFT + pt(-SPEC.codePadX), absY(st.y - SPEC.codePadY), pt(CONTENT_W + 2 * SPEC.codePadX), pt(h)).fill("#f4f4f4");
 					doc.font("Courier").fontSize(pt(SPEC.codeFont)).fillColor("#333").text(text, LEFT + pt(SPEC.codePadX), absY(st.y + SPEC.codePadY), { width: pt(innerW) });
 				},
-				tableRow: (cells, head, rowH, colW) => {
-					if (head) doc.rect(LEFT, absY(st.y), CW, pt(rowH)).fill("#efeadd");
+				tableRow: (cells, head, rowH, colW, numeric) => {
+					if (head) doc.rect(LEFT, absY(st.y), CW, pt(rowH)).fill("#d9d9d9");
 					cells.forEach((c, ci) => {
 						doc.rect(LEFT + pt(ci * colW), absY(st.y), pt(colW), pt(rowH)).lineWidth(0.5).strokeColor("#bbb").stroke();
-						write(c, { size: SPEC.tableFont, bold: head, x: ci * colW + SPEC.tablePadX, width: colW - 2 * SPEC.tablePadX });
+						write(c, { size: SPEC.tableFont, bold: head, x: ci * colW + SPEC.tablePadX, width: colW - 2 * SPEC.tablePadX, align: numeric?.[ci] ? "center" : undefined });
 					});
 				},
 				hr: () => doc.moveTo(LEFT, absY(st.y + SPEC.hrBefore)).lineTo(LEFT + CW, absY(st.y + SPEC.hrBefore)).lineWidth(1).strokeColor("#ccc").stroke(),

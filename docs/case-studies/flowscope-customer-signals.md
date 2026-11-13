@@ -1,6 +1,6 @@
 # Flowscope customer signals — reverse-engineering their buying triggers
 
-**Date:** Oct 2026 · **Method:** ran our ICP.md hard filters + scorecard against every named Flowscope customer · **Confidence labels:** (H)igh / (M)edium / (L)ow · **Sample size warning:** n=3 named customers. Every finding is labeled n-supported vs single-company anecdote.
+**Date:** Oct 2026 · **Method:** ran our outreach/ICP.md hard filters + scorecard against every named Flowscope customer · **Confidence labels:** (H)igh / (M)edium / (L)ow · **Sample size warning:** n=3 named customers. Every finding is labeled n-supported vs single-company anecdote.
 
 **Verdict up front: our current filters would have caught at most 1 of Flowscope's 3 named customers (Trace, and only barely — it's likely under our revenue floor). Rush Resources fails our `ai_signal` promotion gate outright (zero employee AI self-labels anywhere), and Momento fails the no-tech-team hard filter (in-house engineers, proprietary AI models). Flowscope is winning companies our funnel is built to skip. The gap is motion-driven, not list-driven — details in §4.**
 
@@ -59,7 +59,7 @@ Selection-bias caveat: all 3 showcased quotes are founder/CEO voices because tha
 
 ## 3. Filter crosswalk (geography recorded, never scored)
 
-Hard filters (ICP.md):
+Hard filters (outreach/ICP.md):
 
 | Filter | Rush Resources | Momento | Trace Services |
 | --- | --- | --- | --- |
@@ -100,7 +100,7 @@ Scorecard rows:
 
 **(d) The motion lesson (bigger than any single signal):** Flowscope barely does signals-based sourcing at all. Their stated channels are **warm intros** ("if you know CEOs/CFOs at mid-market enterprises or PE operating partners, we'd love an intro" — [YC launch](https://www.ycombinator.com/launches/QJe-flowscope-agentic-process-mining-and-automation)), the **PE operating-partner channel** ("we work with some of the largest private equity firms in the US" — [seed post](https://www.flowscope.com/blog/seed-round)), and SEO. One customer (Momento) plausibly came through the YC graph. Notably, their flagship channel — PE portfolios — is exactly what our owner-operated filter excludes. We run an outbound machine they don't have; they run a trust graph we don't have. What transfers is their *trigger-event* lens, not their channel.
 
-## 5. ICP.md recommendations (not applied)
+## 5. outreach/ICP.md recommendations (not applied)
 
 1. **Add a scorecard row: Finance-ops trigger.** 3 = new CFO/Controller/ops-exec hire or visible AP/AR/close pain (job postings for AP clerks, staff-accountant churn, transaction-heavy ops); 0 = nothing visible. Evidence source: LinkedIn job-change posts, Indeed postings — same 5-minute pass as the tech-gap check.
 2. **Add a scorecard row: Manual hiring machine.** 3 = high-volume hiring run on SMS/email/spreadsheets with no ATS visible; 0 = no hiring or real tooling. This makes "visible scatter" concrete.

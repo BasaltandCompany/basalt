@@ -1,5 +1,5 @@
 // /writing — everything published, one index. The Dispatch archive plus the
-// IU case study. Same issues API as /newsletter.
+// anonymized public-university case study. Same issues API as /newsletter.
 import { createAsync } from "@solidjs/router"
 import { For, Show } from "solid-js"
 import { Page } from "@/components/site"
@@ -24,12 +24,12 @@ export default function Writing() {
         <h1 class="font-serif text-5xl leading-[1.05] tracking-[-0.01em]">Writing</h1>
 
         <div class="mt-12">
-          <a href="/iu" class="group block border-b border-border py-6">
+          <a href="/case-study" class="group block border-b border-border py-6">
             <p class="font-sans text-xs uppercase tracking-[0.25em] text-muted-foreground">
               Case Study
             </p>
             <h2 class="mt-2 font-serif text-2xl transition-colors group-hover:text-foreground">
-              Indiana <em>University</em> — the autonomous ticket agent
+              A public <em>university</em>: the autonomous ticket agent
             </h2>
             <p class="mt-1 font-sans text-sm text-muted-foreground">
               45% productivity increase, measured across Q2—Q3.

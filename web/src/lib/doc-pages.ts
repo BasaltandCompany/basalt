@@ -56,11 +56,13 @@ export function computeBreaks(pager: HTMLElement, title: HTMLElement | null, edi
 			// rows that fit the current page stay, the rest continue after the
 			// gap (DocEditor asks the editor to split, then re-runs this)
 			const avail = CONTENT_H - vY;
-			if (avail >= 100) {
+			const firstRowH = m.el.querySelector("tr")?.getBoundingClientRect().height ?? 0;
+			if (avail >= 100 && firstRowH <= avail) {
 				splits.push({ el: m.el, avail });
 			} else {
-				// too little space left to be worth a split — push whole, then
-				// split at a full page if it's taller than one
+				// too little space (or the first row can't fit it — splitTables would
+				// decline and the table would straddle the boundary unpushed): push
+				// whole, then split at a full page if it's taller than one
 				page++;
 				vY = 0;
 				if (m.h > CONTENT_H) splits.push({ el: m.el, avail: CONTENT_H });
@@ -72,10 +74,21 @@ export function computeBreaks(pager: HTMLElement, title: HTMLElement | null, edi
 
 		const targetTop = page * (SPEC.pageH + SPEC.gap) + SPEC.pad + vY;
 		if (placedBottom !== null) {
-			// rendered gap with mt=0 is the previous margin-bottom (no collapse);
-			// a larger mt swallows it, so setting mt = needed gap lands exactly
+			// Margins collapse: a positive mt floors at the previous margin-bottom
+			// (max(prev, mt)); a negative mt SUMS with it (prev + mt). So:
+			// - needed > placedGap → mt = needed swallows the gap, lands exactly
+			// - needed ≤ placedGap (a trailing margin carried this block past the
+			//   sheet top — table-split continuations) → mt = needed - placedGap,
+			//   negative, collapses to exactly `needed`
+			const needed = targetTop - placedBottom;
 			const naturalNext = placedBottom + placedGap;
-			if (targetTop - naturalNext > 0.5) m.el.style.marginTop = `${(targetTop - placedBottom).toFixed(2)}px`;
+			if (Math.abs(targetTop - naturalNext) > 0.5) {
+				// clamp negatives: a legit pull-up is never more than one gap; anything
+				// larger means the simulation disagrees with the DOM — degrade to the
+				// old overflow-at-sheet-edge instead of stacking blocks on each other
+				const mt = Math.max(needed > placedGap ? needed : needed - placedGap, -2 * SPEC.gap - placedGap);
+				m.el.style.marginTop = `${mt.toFixed(2)}px`;
+			}
 		}
 		placedBottom = targetTop + m.h;
 		placedGap = m.gap;

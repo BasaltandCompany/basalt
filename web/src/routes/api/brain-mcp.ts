@@ -2,7 +2,7 @@ import type { APIEvent } from "@solidjs/start/server";
 import { eq, and, desc, inArray, sql, ilike, lte, isNotNull } from "drizzle-orm";
 import { hashKey } from "~/lib/crypto";
 import { db } from "~/db";
-import { apiKeys, companies, outreachProspects, OUTREACH_STAGES, campaigns, campaignCompanies, videos, funnels, funnelRuns, funnelItems, funnelStageResults } from "~/db/schema";
+import { apiKeys, companies, outreachProspects, OUTREACH_STAGES, campaigns, campaignCompanies, videos, funnels, funnelRuns, funnelItems, funnelStageResults, funnelSchedules } from "~/db/schema";
 import { brainQuery, entityFacts } from "~/lib/brain/search";
 import { brainJobs, docs, shortLinks } from "~/db/schema";
 import { agentWrite, createDoc, getDoc, getDocVersionDiff, listDocVersions, listDocs, renameDoc, setDocAppendix } from "~/lib/docs";
@@ -590,7 +590,7 @@ lessons_reviewed: { type: "boolean", description: "true = you called get_voice_l
 	{
 		name: "create_email_draft",
 		description:
-			"Create an email for Collin to review in the dashboard Drafts tab. Read get_voice_lessons FIRST and pre-check with lint_voice_text (surface=email). HARD GATE: any avoid-violation REJECTS the call before anything is saved — fix the flagged text and resubmit; nothing lands until it's clean. First write attempt auto-no's: the call bounces with the top voice lessons ranked for YOUR text — apply them, then resubmit with lessons_applied=true. To revise a draft you already created, pass its draft_id (same fields) instead of creating a new one. The human sends by default; pass send_at (ISO) to schedule auto-send via the outbox ticker — the voice gate applies either way. Pass chat_uuid = your session id for provenance.",
+			"Create an email for Collin to review in the dashboard Drafts tab. Read get_voice_lessons FIRST and pre-check with lint_voice_text (surface=email). HARD GATE: any avoid-violation REJECTS the call before anything is saved — fix the flagged text and resubmit; nothing lands until it's clean. First write attempt auto-no's: the call bounces with the top voice lessons ranked for YOUR text — apply them, then resubmit with lessons_applied=true. To revise a draft you already created, pass its draft_id (same fields) instead of creating a new one. The human sends by default; pass send_at (ISO) to schedule auto-send via the outbox ticker — the voice gate applies either way. Pass chat_uuid = your session id for provenance. Attachments: pass absolute server-local file paths; each caps at 20MB, total at ~24MB (Gmail's send limit).",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -606,6 +606,8 @@ chat_uuid: { type: "string" },
 				send_at: { type: "string", description: "ISO timestamp — schedules the draft for auto-send via the outbox ticker; omit for a plain draft" },
 				campaign_company_id: { type: "string", description: "campaign_companies id — links this send to its campaign company for Gmail-grounded stats (list_campaigns has ids)" },
 				campaign_step: { type: "number", description: "which touch of the campaign sequence this email is (1-based)" },
+				signature: { type: "string", enum: ["full", "plain", "none"], description: "outbound footer: full (branded), plain (just 'Collin'), none. Omit = auto: campaign drafts get plain, everything else full" },
+				attachments: { type: "array", items: { type: "string" }, description: "absolute server-local file paths to attach (works on create AND draft_id revisions; ≤20MB each, ≤24MB total)" },
 			},
 			required: ["to", "subject", "body"],
 		},
@@ -803,6 +805,26 @@ chat_uuid: { type: "string" },
 				limit: { type: "number", description: "default 50, max 500" },
 			},
 			required: ["run_id", "stage"],
+		},
+	},
+	{
+		name: "list_funnel_schedules",
+		description:
+			"Every funnel with its automation schedule — enabled is the running switch the scheduler obeys (discovery pulls + daily paid enrichment). Call before/after set_funnel_schedule to see what's running.",
+		inputSchema: { type: "object", properties: {} },
+	},
+	{
+		name: "set_funnel_schedule",
+		description:
+			"Enable or disable a funnel's automation schedule — this IS the running switch for scheduled discovery + paid enrichment (Prospeo credits). Pass funnel_name (case-insensitive) or funnel_id, plus enabled true|false. Disabling stops future scheduler ticks; a batch already in flight finishes.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				funnel_name: { type: "string" },
+				funnel_id: { type: "string" },
+				enabled: { type: "boolean", description: "true = running, false = stopped" },
+			},
+			required: ["enabled"],
 		},
 	},
 	{
@@ -1559,6 +1581,12 @@ export async function POST(event: APIEvent) {
 								}
 							}
 						}
+						// tolerate a single string or an array of paths
+						const attPaths = Array.isArray(toolArgs.attachments)
+							? toolArgs.attachments.map(String)
+							: toolArgs.attachments
+								? [String(toolArgs.attachments)]
+								: undefined;
 						if (toolArgs.draft_id) {
 							const upd = await updateEmailDraft({
 								outboxId: String(toolArgs.draft_id),
@@ -1568,8 +1596,10 @@ export async function POST(event: APIEvent) {
 								subject: String(toolArgs.subject ?? ""),
 								body: draftBody,
 								...(campaignCompanyId ? { campaignCompanyId, campaignStep } : {}),
+								...(attPaths ? { attachments: attPaths } : {}),
+								...(toolArgs.signature ? { signature: toolArgs.signature as "full" | "plain" | "none" } : {}),
 							});
-							result = upd;
+						result = upd;
 							if (!(upd && typeof upd === "object" && "outboxId" in upd)) break;
 							if (toolArgs.send_at) await scheduleDraftResult(String(upd.outboxId));
 							break;
@@ -1583,6 +1613,8 @@ export async function POST(event: APIEvent) {
 							chatUuid: String(toolArgs.chat_uuid ?? ""),
 							threadId: toolArgs.thread_id ? String(toolArgs.thread_id) : undefined,
 							...(campaignCompanyId ? { campaignCompanyId, campaignStep } : {}),
+							...(attPaths ? { attachments: attPaths } : {}),
+							...(toolArgs.signature ? { signature: toolArgs.signature as "full" | "plain" | "none" } : {}),
 						});
 						result = created;
 						if (toolArgs.send_at) await scheduleDraftResult(created.outboxId);
@@ -1945,6 +1977,51 @@ export async function POST(event: APIEvent) {
 							String(toolArgs.stage ?? ""),
 							Number(toolArgs.limit ?? 50) || 50,
 						);
+						break;
+					}
+					case "list_funnel_schedules": {
+						const rows = await db
+							.select({
+								funnelId: funnels.id,
+								funnelName: funnels.name,
+								enabled: funnelSchedules.enabled,
+								discoverySource: funnelSchedules.discoverySource,
+								discoveryIntervalDays: funnelSchedules.discoveryIntervalDays,
+								enrichPerDay: funnelSchedules.enrichPerDay,
+								techPerDay: funnelSchedules.techPerDay,
+								lastDiscoveryAt: funnelSchedules.lastDiscoveryAt,
+								lastEnrichAt: funnelSchedules.lastEnrichAt,
+							})
+							.from(funnels)
+							.leftJoin(funnelSchedules, eq(funnelSchedules.funnelId, funnels.id))
+							.orderBy(funnels.name);
+						result = { funnels: rows.map((r) => ({ ...r, running: r.enabled === true })) };
+						break;
+					}
+					case "set_funnel_schedule": {
+						const enabledArg = toolArgs.enabled;
+						const enabled = enabledArg === true || String(enabledArg) === "true";
+						if (enabledArg === undefined || enabledArg === null || !["true", "false"].includes(String(enabledArg))) {
+							result = { error: "enabled (true|false) is required — this flips live paid enrichment" };
+							break;
+						}
+						let target: { id: string; name: string } | undefined;
+						if (toolArgs.funnel_id) {
+							[target] = await db.select({ id: funnels.id, name: funnels.name }).from(funnels).where(eq(funnels.id, String(toolArgs.funnel_id))).limit(1);
+						} else if (toolArgs.funnel_name) {
+							[target] = await db.select({ id: funnels.id, name: funnels.name }).from(funnels).where(ilike(funnels.name, String(toolArgs.funnel_name))).limit(1);
+						}
+						if (!target) {
+							result = { error: "funnel not found — list_funnel_schedules has ids and names" };
+							break;
+						}
+						const [existing] = await db.select({ id: funnelSchedules.id }).from(funnelSchedules).where(eq(funnelSchedules.funnelId, target.id)).limit(1);
+						if (existing) {
+							await db.update(funnelSchedules).set({ enabled, updatedAt: new Date() }).where(eq(funnelSchedules.id, existing.id));
+						} else {
+							await db.insert(funnelSchedules).values({ funnelId: target.id, enabled });
+						}
+						result = { funnelId: target.id, funnelName: target.name, enabled, running: enabled };
 						break;
 					}
 					case "record_funnel_verdict": {

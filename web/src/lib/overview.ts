@@ -40,7 +40,7 @@ function notConfigured<T>(): ExternalResult<T> {
 	return { ok: false, reason: "not_configured" };
 }
 
-async function resendLeads(): Promise<ExternalResult<{ subscribers: number; overflow?: boolean }>> {
+async function resendLeads(): Promise<ExternalResult<{ subscribers: number; overflow?: boolean; audienceUrl?: string }>> {
 	const key = process.env.RESEND_API_KEY;
 	if (!key) return notConfigured();
 	try {
@@ -48,14 +48,14 @@ async function resendLeads(): Promise<ExternalResult<{ subscribers: number; over
 		const { data, error } = await resend.contacts.list({ limit: 100 });
 		if (error) return { ok: false, reason: "error", message: error.message };
 		const count = data?.data?.length ?? 0;
-		return { ok: true, data: { subscribers: count, overflow: data?.has_more } };
+		return { ok: true, data: { subscribers: count, overflow: data?.has_more, audienceUrl: process.env.RESEND_AUDIENCE_ID ? `https://resend.com/audiences/${process.env.RESEND_AUDIENCE_ID}` : undefined } };
 	} catch (e) {
 		return { ok: false, reason: "error", message: errMsg(e) };
 	}
 }
 
 async function posthogStats(): Promise<
-	ExternalResult<{ pageviews30d: number; uniqueUsers30d: number; pageviews7d: number }>
+	ExternalResult<{ pageviews30d: number; uniqueUsers30d: number; pageviews7d: number; dashboardUrl: string }>
 > {
 	// ponytail: PostHog Cloud is single-region (us/eu); host is a stable default
 	// rather than a required secret. Override via POSTHOG_HOST only if on EU cloud.
@@ -102,6 +102,8 @@ async function posthogStats(): Promise<
 				pageviews30d: Number(row[0] ?? 0),
 				uniqueUsers30d: Number(row[1] ?? 0),
 				pageviews7d: Number(row[2] ?? 0),
+				// API host is us.i.posthog.com; the app lives on the same host minus .i.
+				dashboardUrl: `https://${new URL(host).host.replace(/\.i\./, ".")}/project/${projectId}`,
 			},
 		};
 	} catch (e) {
@@ -113,6 +115,7 @@ async function linearIssues(): Promise<
 	ExternalResult<{
 		openIssues: number;
 		issues: { id: string; identifier: string; title: string; state: string; priority: number }[];
+		workspaceUrl?: string;
 	}>
 > {
 	const key = process.env.LINEAR_API_KEY;
@@ -127,7 +130,8 @@ async function linearIssues(): Promise<
 			signal: AbortSignal.timeout(FETCH_TIMEOUT),
 			body: JSON.stringify({
 				query:
-					`{ issues(filter: { assignee: { isMe: { eq: true } }, ` +
+					`{ organization { urlKey } ` +
+					`issues(filter: { assignee: { isMe: { eq: true } }, ` +
 					`state: { type: { neq: "completed" } } }, orderBy: updatedAt) ` +
 					`{ nodes { id identifier title priority state { name } } } }`,
 			}),
@@ -140,6 +144,9 @@ async function linearIssues(): Promise<
 			ok: true,
 			data: {
 				openIssues: nodes.length,
+				workspaceUrl: json.data?.organization?.urlKey
+					? `https://linear.app/${json.data.organization.urlKey}`
+					: undefined,
 				issues: nodes.slice(0, 8).map((n) => ({
 					id: n.id,
 					identifier: n.identifier,
@@ -191,11 +198,13 @@ export interface OverviewData {
 			pageviews30d: number;
 			uniqueUsers30d: number;
 			pageviews7d: number;
-		}>;
-		resend: ExternalResult<{ subscribers: number; overflow?: boolean }>;
+			dashboardUrl: string;
+		}>
+		resend: ExternalResult<{ subscribers: number; overflow?: boolean; audienceUrl?: string }>;
 		linear: ExternalResult<{
 			openIssues: number;
 			issues: { id: string; identifier: string; title: string; state: string; priority: number }[];
+			workspaceUrl?: string;
 		}>;
 	};
 }

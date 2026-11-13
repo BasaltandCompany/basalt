@@ -15,6 +15,7 @@ import { importRunItems } from "~/lib/funnels";
 import { runStageBatch } from "~/lib/funnel-stages";
 import { discoverIndianaBrokers } from "~/lib/fmcsa";
 import { discoverAiPeople, discoverCompanies } from "~/lib/prospeo-discovery";
+import { discoverMepCompanies } from "~/lib/mep-discovery";
 
 // ponytail: Rail-B industries keyed by funnel name — add a row when industry
 // #2 (accounting/insurance/staffing) gets its own funnel.
@@ -64,11 +65,13 @@ export async function runScheduledFunnels(): Promise<{ funnels: number; discover
 				schedule.discoverySource !== null &&
 				(!schedule.lastDiscoveryAt || Date.now() - schedule.lastDiscoveryAt.getTime() >= schedule.discoveryIntervalDays * DAY_MS);
 			if (discoveryDue) {
-				const companies =
-					schedule.discoverySource === "fmcsa"
-						? await discoverIndianaBrokers(200)
-						: schedule.discoverySource === "prospeo_ai"
-							? await discoverAiPeople()
+			const companies =
+				schedule.discoverySource === "fmcsa"
+					? await discoverIndianaBrokers(200)
+					: schedule.discoverySource === "prospeo_ai"
+						? await discoverAiPeople()
+						: schedule.discoverySource === "mep"
+							? await discoverMepCompanies()
 							: await discoverCompanies(railBIndustry(funnel.name));
 				const res = await importRunItems(run.id, companies);
 				discovered += res.imported;

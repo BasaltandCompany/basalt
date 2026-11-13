@@ -1,14 +1,14 @@
-// Tests for the /brain funnel edges: brain-request validation (400/honeypot
+// Tests for the /gift funnel edges: gift-request validation (400/honeypot
 // paths — the insert needs a real DB, out of scope for this suite). Open/click
 // tracking is native now: seal pixel (/api/track/open) + /l/?r={{email}} into
 // short_link_clicks — no Resend webhook in the loop.
 import { describe, expect, test } from "bun:test";
-import { POST as brainRequest } from "../routes/api/brain-request";
+import { POST as giftRequest } from "../routes/api/gift-request";
 
-describe("brain-request validation", () => {
+describe("gift-request validation", () => {
 	const call = (payload: Record<string, unknown>) =>
-		brainRequest({
-			request: new Request("http://x/api/brain-request", {
+		giftRequest({
+			request: new Request("http://x/api/gift-request", {
 				method: "POST",
 				body: JSON.stringify(payload),
 				headers: { "Content-Type": "application/json", "x-forwarded-for": "10.0.0.9" },
@@ -31,7 +31,7 @@ describe("brain-request validation", () => {
 	});
 
 	test("malformed JSON → 400", async () => {
-		const res = brainRequest({
+		const res = giftRequest({
 			request: new Request("http://x", { method: "POST", body: "not json" }),
 		} as never);
 		expect((await res).status).toBe(400);

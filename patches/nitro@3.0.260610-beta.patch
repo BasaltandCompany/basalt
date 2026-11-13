@@ -1,0 +1,21 @@
+diff --git a/dist/runtime/internal/vite/dev-worker.mjs b/dist/runtime/internal/vite/dev-worker.mjs
+index bfc182bce14a25194c85538439ca9e7f7d55e25b..ea7529d487392ec1c19e97119bc208a1cd19204b 100644
+--- a/dist/runtime/internal/vite/dev-worker.mjs
++++ b/dist/runtime/internal/vite/dev-worker.mjs
+@@ -67,9 +67,13 @@ class ViteEnvRunner {
+   // they propagate to the caller (the nitro app's error handler or the
+   // env-runner fetch boundary below).
+   async fetch(req, init) {
+-    for (let i = 0; i < 5 && !(this.entry || this.entryError); i++) {
+-      await new Promise((r) => setTimeout(r, 100 * Math.pow(2, i)));
+-    }
++  // ponytail patch: cold SSR-entry imports can exceed the stock 3.1s wait on
++  // fresh installs — first requests then 503 "ssr is unavailable". Wait up to
++  // ~14s instead (100+200+400ms, then 500ms steps); a failed import still
++  // throws immediately via entryError.
++  for (let i = 0; i < 30 && !(this.entry || this.entryError); i++) {
++    await new Promise((r) => setTimeout(r, Math.min(100 * Math.pow(2, i), 500)));
++  }
+     if (this.entryError) {
+       throw this.entryError;
+     }

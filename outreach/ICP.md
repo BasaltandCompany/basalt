@@ -136,3 +136,29 @@ Rules this forces:
 2. The gift is the proof: a brain full of their numbers demonstrates the outcome before anyone says "artificial intelligence."
 3. AI self-label ≠ buyer readiness — hence the second promotion path above. Flowscope's buyers weren't AI-enthusiasts; they had ops pain and a trigger event.
 4. The dispatcher hard rule stands: `ai_interest` is filled only from observed behavior. This section changes the PITCH, not the measurement.
+
+## Importer-exporter LinkedIn channel (Nov 2026) — steady sourcing, US-only
+
+Grounded in Eric Brownell's (BCW) actual graph: his interests, comments, reactions, groups, and the BCW company page. Working files in `linkedin-prep/` (CUSTOM-FEED.md is the map).
+
+**US-only rule:** outreach targets US companies only — non-US can't pay the prices (Collin, Nov 2026).
+
+**Channels, ranked by yield (measured Nov 8 2026):**
+1. **Purdue MEP Made in Indiana database** (350 self-registered IN manufacturers, mep.purdue.edu) + monthly "Manufacturer of the Month" — third-party-curated BCW lookalikes. 95 Indy-metro enriched → 40 fit → top 20 ranked (MEP-TOP20.md), owners found for 19/20 (MEP-OWNERS.md). Auto-refresh: the "Made in Indiana ICP" funnel in the basalt dashboard (in-app scheduler, `mep` discovery rail, monthly, zero paid enrichment) — manual fallback `outreach/mep-refresh.py`.
+2. **Regional business-journal award lists** — BizTimes Future 50 (Milwaukee; found WeldFab there via profile review), IBJ equivalents. Curated owner-led fast growers, any metro. Free.
+3. **LinkedIn group member-mining** — Magento Commerce Professionals yielded Eric himself + 21 merchants in 873 scanned (~2.4%); Indiana AI Innovation Network 13/245 (~5%, rest vendors). Slow steady channel; members-page caps at ~146/load (bypass: single-letter name searches).
+4. **Tariff-pain posts** — LinkedIn posts search "tariff surcharge"/"tariff refund" = importers announcing margin pain (BCW's own story: surcharge then millions refunded to 4,000 customers).
+5. **Competitor-adjacency** — Ultra PRO / Beckett / Slab Strong followers; Brett McGrath (Stacking Slabs) is the hobby-vertical comment room.
+
+**Pattern warnings:** every visible room (AI influencers, Magento groups, Indiana AI group) is 95-97% vendors/competitors — clients are the silent members; mine member lists, don't post into them. Consolidation (Trane/BCW-adjacent acquirers) eats the owner-operated pool yearly — independents are a shrinking, more valuable set. PE-owned and acquired companies stay in the funnel anyway (Collin: try them, we don't know for sure) — flag ownership in notes.
+
+**Funnel intake tags** (source_note): `mep-madefit`, `mep-monthly`, `mep-monthly-winner`, `li-group-mining arm A|B`, `li-manual`. Compare accept/reply rates per tag against the ~1% cold-email baseline.
+
+## Small-list personalization doctrine ($100M Leads logic)
+
+The list is small by design (tens, not hundreds) and LTV is high — so per Hormozi's hedge-fund-manager example: personalize every single one. Cadence 1-2 touches/day alongside other commitments.
+
+- Connect note or follow-up references something real: their MEP write-up, their tariff story, their job posts (ERP/automation/quality hires are buying signals — WeldFab hired an "ERP & Automation Specialist").
+- Rung-2 stays the Loom (dispatcher step 5 preps the script from verified numbers). $100M Leads framing: give-first at maximum depth per lead.
+- Lead-magnet ceiling: a paid Claude subscription + starter prompt kit per prospect is in-budget at this LTV (Collin, Nov 2026) — the gift proves the outcome before any pitch.
+- Logging workflow lives in `linkedin-prep/OUTREACH-PLAYBOOK.md`.

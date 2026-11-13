@@ -79,11 +79,100 @@ describe("buildMime", () => {
 		expect(mime).toContain("text/plain");
 		expect(mime).toContain("\r\n\r\nline one\nline two");
 	});
+	test("From + Reply-To on every send", () => {
+		const mime = buildMime({ to: "a@b.c", subject: "Hi", body: "b" });
+		expect(mime).toContain("From: Collin Pfeifer <cpfeifer@basalt.ac>");
+		expect(mime).toContain("Reply-To: cpfeifer@basalt.ac");
+	});
 	test("cc/bcc headers, omitted when empty", () => {
 		const mime = buildMime({ to: "a@b.c", cc: "c@d.e, f@g.h", bcc: "x@y.z", subject: "Hi", body: "b" });
 		expect(mime).toContain("Cc: c@d.e, f@g.h");
 		expect(mime).toContain("Bcc: x@y.z");
 		expect(buildMime({ to: "a@b.c", subject: "Hi", body: "b" })).not.toContain("Cc:");
+	});
+	test("no signature → single plain part (machine sends stay bare)", () => {
+		const mime = buildMime({ to: "a@b.c", subject: "Hi", body: "b" });
+		expect(mime).toContain('Content-Type: text/plain; charset="UTF-8"');
+		expect(mime).not.toContain("multipart");
+		expect(mime).not.toContain("-- \n");
+	});
+	test("full signature → multipart/alternative with branded html part", () => {
+		const mime = buildMime({ to: "a@b.c", subject: "Hi", body: "line one\n<script>alert(1)</script> & more", signature: "full" });
+		expect(mime).toContain('Content-Type: multipart/alternative; boundary="_basalt_sig"');
+		// plain part: body + text signature
+		expect(mime).toContain("line one\n<script>alert(1)</script> & more\n\n-- \nCollin Pfeifer");
+		// html part: escaped body + logo + disclaimer, in order
+		const htmlStart = mime.indexOf("<html><body");
+		expect(htmlStart).toBeGreaterThan(-1);
+		expect(mime.indexOf("line one<br>&lt;script&gt;")).toBeGreaterThan(htmlStart);
+		expect(mime).toContain("/logo-email.png");
+		expect(mime).toContain("cpfeifer@basalt.ac");
+		expect(mime).toContain("confidential");
+		expect(mime).toContain("--_basalt_sig--");
+	});
+	test("plain signature → just Collin, no logo or disclaimer", () => {
+		const mime = buildMime({ to: "a@b.c", subject: "Hi", body: "quick note", signature: "plain" });
+		expect(mime).toContain("multipart/alternative");
+		expect(mime).toContain("quick note\n\n-- \nCollin");
+		expect(mime).toContain(">Collin</div>");
+		expect(mime).not.toContain("logo-email.png");
+		expect(mime).not.toContain("confidential");
+	});
+
+	// ── attachments ──
+	test("attachments → multipart/mixed, body section first, one base64 part per file", () => {
+		const b64 = toBase64("PDFBYTES");
+		const mime = buildMime({
+			to: "a@b.c",
+			subject: "Proposal",
+			body: "attached",
+			attachments: [{ filename: "BCW Projects — Proposal.pdf", mimeType: "application/pdf", base64: b64 }],
+		});
+		expect(mime).toContain('Content-Type: multipart/mixed; boundary="_basalt_att"');
+		// body stays the first part, text/plain, unharmed
+		expect(mime.indexOf("--_basalt_att")).toBeLessThan(mime.indexOf("Content-Type: text/plain"));
+		expect(mime).toContain("\r\n\r\nattached\r\n--_basalt_att");
+		expect(mime).toContain('Content-Disposition: attachment; filename="BCW Projects — Proposal.pdf"');
+		expect(mime).toContain('Content-Type: application/pdf; name="BCW Projects — Proposal.pdf"');
+		expect(mime).toContain("Content-Transfer-Encoding: base64");
+		expect(mime).toContain(b64);
+		expect(mime.trimEnd().endsWith("--_basalt_att--")).toBe(true);
+	});
+
+	test("base64 lines wrapped at 76 chars (RFC 2045)", () => {
+		const long = "Q".repeat(200);
+		const mime = buildMime({ to: "a@b.c", subject: "Hi", body: "b", attachments: [{ filename: "x.txt", mimeType: "text/plain", base64: long }] });
+		for (const line of mime.split("\r\n")) {
+			if (/^[A-Za-z0-9+/]+=*$/.test(line)) expect(line.length).toBeLessThanOrEqual(76);
+		}
+		expect(mime).toContain("Q".repeat(76));
+	});
+
+	test("attachments + signature → alternative nested inside mixed", () => {
+		const mime = buildMime({
+			to: "a@b.c",
+			subject: "Hi",
+			body: "b",
+			signature: "plain",
+			attachments: [{ filename: "a.pdf", mimeType: "application/pdf", base64: toBase64("x") }],
+		});
+		expect(mime).toContain("multipart/mixed");
+		expect(mime).toContain("multipart/alternative");
+		expect(mime.indexOf("multipart/alternative")).toBeGreaterThan(mime.indexOf("multipart/mixed"));
+		expect(mime).toContain("--_basalt_sig--");
+		expect(mime.trimEnd().endsWith("--_basalt_att--")).toBe(true);
+	});
+
+	test("filename header-breaking chars stripped", () => {
+		const mime = buildMime({ to: "a@b.c", subject: "Hi", body: "b", attachments: [{ filename: 'bad\r\n"name".pdf', mimeType: "application/pdf", base64: "eA==" }] });
+		expect(mime).toContain('filename="badname.pdf"');
+		expect(mime).not.toContain('"name"');
+	});
+	test("no attachments → output byte-identical to the legacy single-part path", () => {
+		const plain = buildMime({ to: "a@b.c", subject: "Hi", body: "b" });
+		const empty = buildMime({ to: "a@b.c", subject: "Hi", body: "b", attachments: [] });
+		expect(empty).toBe(plain);
+		expect(plain).not.toContain("multipart");
 	});
 });
 
