@@ -167,6 +167,9 @@ export const funnels = pgTable("funnels", {
 	description: text("description"),
 	stages: jsonb("stages").$type<FunnelStage[]>().notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+	// archive (never delete) — enriched rawData is too expensive to lose; a
+	// finished funnel greys out and drops out of the New-run dropdown
+	archivedAt: timestamp("archived_at", { withTimezone: true }),
 });
 
 export const funnelRuns = pgTable(

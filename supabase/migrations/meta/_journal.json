@@ -386,6 +386,13 @@
       "when": 1794581549898,
       "tag": "20261113145229_lucky_firebrand",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1794587092798,
+      "tag": "20261113162452_gigantic_bloodscream",
+      "breakpoints": true
     }
   ]
 }
