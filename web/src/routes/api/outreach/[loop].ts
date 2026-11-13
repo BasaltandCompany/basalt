@@ -10,7 +10,7 @@
 // queue, and the automation (not this API) enforces the daily invite cap and
 // the abort conditions.
 import type { APIEvent } from "@solidjs/start/server";
-import { and, asc, eq, ilike, inArray, isNull } from "drizzle-orm";
+import { and, asc, count, eq, gt, ilike, inArray, isNotNull, isNull } from "drizzle-orm";
 import { db } from "~/db";
 import { outreachProspects } from "~/db/schema";
 import { isAdminApiKey, json } from "~/lib/admin-api";
@@ -104,9 +104,18 @@ export const GET = async (event: APIEvent) => {
 		)
 		.orderBy(asc(outreachProspects.createdAt))
 		.limit(25);
+	// 20/day ceiling, 100/week budget — the server enforces both (the automation
+	// trusts this cap; weekday-only pacing comes from the Orca schedule)
+	const weekAgo = new Date(Date.now() - 7 * 86_400_000);
+	const [{ invitedLast7Days }] = await db
+		.select({ invitedLast7Days: count() })
+		.from(outreachProspects)
+		.where(and(isNotNull(outreachProspects.invitedAt), gt(outreachProspects.invitedAt, weekAgo)));
+	const cap = Math.max(0, Math.min(20, 100 - Number(invitedLast7Days)));
 	return json({
 		queue: rows,
-		cap: 5,
+		cap,
+		invitedLast7Days,
 		hint: "Send at most cap invites this run. Abort on any CAPTCHA, login wall, or warning banner — report nothing, rows stay in the queue.",
 	});
 };

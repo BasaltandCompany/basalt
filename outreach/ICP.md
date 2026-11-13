@@ -14,7 +14,7 @@ The funnel records a pass/fail per filter as enrichment data for every company; 
 | $10-70M revenue | IBJ/Inc/Buzzfile/ZoomInfo estimate; sanity-check rev/employee $150-500k | recorded |
 | Owner-operated | Founder/CEO still running it, not PE roll-up with shared corporate IT | recorded |
 | No real tech team | LinkedIn people search: ≤6 hits for CTO/VP Engineering/IT Director/"software engineer"/"developer" | recorded |
-| Knowledge-heavy | Their product is judgment, relationships, data-wrangling, compliance — not physical goods or software | deprioritize |
+| Knowledge-heavy | Their product is judgment, relationships, data-wrangling, compliance — not physical goods or software. Exception: BCW-lookalike importers (ICP-BCW.md, Oct 2026) | deprioritize |
 
 **Two pain axes (Oct 2026, Flowscope study):** knowledge scatter (what our brains fix) and transaction volume (what process agents fix — invoices, AP/AR, month-end close, hiring). Score both; a company with both axes is a top target. Transaction-only companies are process-automation wins (Flowscope's game), not brain wins.
 
@@ -28,6 +28,7 @@ The three shipped brains are templates. A new target in the same industry = swap
 4. **Insurance brokerage** — benefits/Medicare/Medicare-adjacent regulatory watch + rate data (ESG Insurance profile).
 5. **Staffing firms** — labor-market + compliance data (NCW profile).
 6. **Specialty construction / MEP & industrial-services contractors** — permits, tariffs, materials-price data. Promoted Oct 2026: 2 of Flowscope's 3 named customers are contractors (Rush Resources, Trace Services), both founder-led, zero tech staff — the archetype buys (n=2; re-test the brain-reuse assumption).
+7. **Importer / wholesale product companies (BCW-lookalikes)** — NEW Oct 2026 sub-ICP on the transaction-volume axis: tariffs/customs ops, product content, B2B order processing. Anchor + proof: BCW Supplies (gift → client). See ICP-BCW.md.
 
 ## Where to find the lists
 

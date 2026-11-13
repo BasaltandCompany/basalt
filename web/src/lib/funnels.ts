@@ -120,15 +120,46 @@ export async function importRunItems(
 	return { imported, duplicated, skippedPromoted };
 }
 
+/** Splice extra (custom) stages into a skeleton. Pure — exported for tests.
+ * Extra stages are always soft (signal-only) and insert after the stage whose
+ * key matches `position` (default: hq_state); a missing anchor appends at the
+ * end. Keys colliding with the skeleton are rejected. Custom-key funnels are
+ * exempt from ensureFreightFunnel's skeleton sync by design. */
+export function spliceStages(skeleton: FunnelStage[], extra: unknown): FunnelStage[] {
+	if (!Array.isArray(extra) || extra.length === 0) return skeleton;
+	const keys = new Set(skeleton.map((s) => s.key));
+	const stages: (FunnelStage & { position: string })[] = [];
+	for (const e of extra) {
+		const s = e as { key?: unknown; label?: unknown; gate?: unknown; method?: unknown; position?: unknown };
+		const key = typeof s.key === "string" ? s.key.trim() : "";
+		const label = typeof s.label === "string" ? s.label.trim() : "";
+		const gate = typeof s.gate === "string" ? s.gate.trim() : "";
+		if (!key || !label || !gate) throw new Error("extra stages need key, label, and gate strings");
+		if (keys.has(key)) throw new Error(`extra stage key '${key}' collides with the skeleton`);
+		keys.add(key);
+		const method: FunnelStage["method"] = typeof s.method === "string" && FUNNEL_METHODS.includes(s.method as never)
+			? (s.method as FunnelStage["method"])
+			: "source";
+		stages.push({ key, label, gate, method, soft: true, position: typeof s.position === "string" ? s.position : "hq_state" });
+	}
+	const out = [...skeleton];
+	for (const { position, ...s } of stages) {
+		const idx = out.findIndex((o) => o.key === position);
+		out.splice(idx === -1 ? out.length : idx + 1, 0, s);
+	}
+	return out;
+}
+
 /** New funnel, idempotent on name (existing row wins — safe to re-call).
- *  Stages clone the ungated freight skeleton as-is. */
-export async function createFunnel(name: string, description?: string | null) {
+ * Stages clone the ungated freight skeleton, plus any extra custom stages
+ * (see spliceStages). */
+export async function createFunnel(name: string, description?: string | null, extraStages?: unknown) {
 	const trimmed = name.trim();
 	const [existing] = await db.select().from(funnels).where(eq(funnels.name, trimmed)).limit(1);
 	if (existing) return existing;
 	const [row] = await db
 		.insert(funnels)
-		.values({ name: trimmed, description: description?.trim() || null, stages: FREIGHT_STAGES })
+		.values({ name: trimmed, description: description?.trim() || null, stages: spliceStages(FREIGHT_STAGES, extraStages) })
 		.onConflictDoNothing({ target: funnels.name })
 		.returning();
 	return row ?? (await db.select().from(funnels).where(eq(funnels.name, trimmed)).limit(1))[0];
