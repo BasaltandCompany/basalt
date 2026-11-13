@@ -2,9 +2,9 @@
 // GET  /api/funnels                → { funnels, runs }
 // POST /api/funnels {funnelId, source?, note?} → { run }
 import type { APIEvent } from "@solidjs/start/server";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, count } from "drizzle-orm";
 import { db } from "~/db";
-import { funnelRuns, funnels } from "~/db/schema";
+import { funnelItems, funnelRuns, funnels } from "~/db/schema";
 import { ensureFreightFunnel, ensureMepFunnel, funnelAuthed } from "~/lib/funnels";
 
 function json(body: unknown, status = 200) {
@@ -32,7 +32,14 @@ export const GET = async (event: APIEvent) => {
 			.innerJoin(funnels, eq(funnelRuns.funnelId, funnels.id))
 			.orderBy(desc(funnelRuns.createdAt)),
 	]);
-	return json({ funnels: funnelRows, runs: runRows });
+	// per-funnel item counts for the archive confirm() — runs are counted client-side from runs[]
+	const itemRows = await db
+		.select({ funnelId: funnelRuns.funnelId, items: count() })
+		.from(funnelItems)
+		.innerJoin(funnelRuns, eq(funnelItems.runId, funnelRuns.id))
+		.groupBy(funnelRuns.funnelId);
+	const itemCounts = Object.fromEntries(itemRows.map((r) => [r.funnelId, Number(r.items)]));
+	return json({ funnels: funnelRows, runs: runRows, itemCounts });
 };
 
 export const POST = async (event: APIEvent) => {

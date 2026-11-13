@@ -1,0 +1,33 @@
+{
+	"manifest_version": 3,
+	"name": "MadCactus LinkedIn",
+	"version": "0.1.1",
+	"description": "Today's approved connect list, and add any profile to the basalt.ac outreach funnel.",
+	"permissions": [
+		"storage"
+	],
+	"host_permissions": [
+		"https://basalt.ac/*",
+		"http://localhost:3001/*"
+	],
+	"background": {
+		"service_worker": "background.js"
+	},
+	"action": {
+		"default_title": "MadCactus connect queue",
+		"default_popup": "popup.html"
+	},
+	"content_scripts": [
+		{
+			"matches": [
+				"https://www.linkedin.com/in/*"
+			],
+			"js": [
+				"content.js"
+			],
+			"css": [
+				"content.css"
+			]
+		}
+	]
+}
