@@ -23,13 +23,15 @@ function SourceTile(props: {
 	result: ExternalResult<Record<string, number>> | undefined;
 	value: (d: any) => string;
 	sub?: (d: any) => string;
+	/** when set (and the source is connected), the whole tile links out in a new tab */
+	href?: string;
 }) {
 	// Precompute display state so the discriminated-union narrowing stays simple.
 	const r = props.result;
 	const isError = !!r && !r.ok && r.reason === "error";
 	const isOk = !!r && r.ok;
-	return (
-		<div class="stat-card">
+	const content = (
+		<>
 			<div class="label">{props.label}</div>
 			<Show
 				when={isOk}
@@ -57,7 +59,14 @@ function SourceTile(props: {
 					</Show>
 				</div>
 			</Show>
-		</div>
+		</>
+	);
+	return props.href && isOk ? (
+		<a href={props.href} target="_blank" rel="noreferrer" class="stat-card">
+			{content}
+		</a>
+	) : (
+		<div class="stat-card">{content}</div>
 	);
 }
 
@@ -114,20 +123,23 @@ export default function Home() {
 									result={ov().external.posthog as any}
 									value={(d) => fmt(d.pageviews30d)}
 									sub={(d) => `${fmt(d.pageviews7d)} this week · ${fmt(d.uniqueUsers30d)} unique`}
+									href={ov().external.posthog.ok ? (ov().external.posthog as any).data.dashboardUrl : undefined}
 								/>
 								<SourceTile
 									label="Newsletter Leads"
 									result={ov().external.resend as any}
 									value={(d) => fmt(d.subscribers) + (d.overflow ? "+" : "")}
 									sub={() => "subscribers"}
+									href={ov().external.resend.ok ? (ov().external.resend as any).data.audienceUrl : undefined}
 								/>
 								<SourceTile
 									label="Open Issues"
 									result={ov().external.linear as any}
 									value={(d) => fmt(d.openIssues)}
 									sub={() => "assigned to you"}
+									href={ov().external.linear.ok ? (ov().external.linear as any).data.workspaceUrl : undefined}
 								/>
-								<div class="stat-card">
+								<a class="stat-card" href="/admin/projects" target="_blank" rel="noreferrer">
 									<div class="label">Active Contracts</div>
 									<div class="value">
 										{ov().companies.total}
@@ -135,7 +147,7 @@ export default function Home() {
 									<div class="sub">
 										{ov().companies.total} compan{ov().companies.total === 1 ? "y" : "ies"} · {ov().deliverables.total} deliverable{ov().deliverables.total === 1 ? "" : "s"}
 									</div>
-								</div>
+								</a>
 							</div>
 
 							{/* Sources not yet wired — muted placeholders */}
@@ -147,13 +159,13 @@ export default function Home() {
 										<div class="sub">Needs Plaid</div>
 									</div>
 								</div>
-								<div class="stat-card">
+								<a class="stat-card" href="/admin/docs" target="_blank" rel="noreferrer">
 									<div class="label">Docs</div>
 									<div class="value">
 										{ov().docs.total}
 									</div>
 									<div class="sub">documents in the workspace</div>
-								</div>
+								</a>
 								<Show
 									when={ov().email.connected}
 									fallback={
@@ -166,7 +178,7 @@ export default function Home() {
 										</div>
 									}
 								>
-									<div class="stat-card">
+										<a class="stat-card" href="/admin/email" target="_blank" rel="noreferrer">
 										<div class="label">Email</div>
 										<div class="value">
 											{ov().email.unread}
@@ -175,7 +187,7 @@ export default function Home() {
 											unread · {ov().email.total} threads · synced
 											{ov().email.lastSyncAt?.toLocaleTimeString() ?? "never"}
 										</div>
-									</div>
+										</a>
 								</Show>
 							</div>
 
@@ -305,7 +317,7 @@ export default function Home() {
 							{/* Retainer caps */}
 							<Show when={d().caps.length > 0}>
 								<div class="section-heading">Monthly Retainer Caps</div>
-								<Card>
+								<Card class="p-6">
 									<For each={d().caps}>
 										{(cap) => {
 											const pct = Math.min((cap.used / cap.cap) * 100, 100);
@@ -337,7 +349,7 @@ export default function Home() {
 
 							{/* Quick log */}
 							<div class="section-heading">Log Time</div>
-							<Card>
+							<Card class="p-6">
 								<form onSubmit={handleLog}>
 									<div class="form-row">
 										<div class="form-group">

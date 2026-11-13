@@ -1,5 +1,6 @@
 import {
 	pgTable,
+	bigserial,
 	uuid,
 	text,
 	timestamp,
@@ -1036,6 +1037,12 @@ export const emailOutbox = pgTable(
 			onDelete: "set null",
 		}),
 		campaignStep: integer("campaign_step"),
+		// outbound signature choice: 'full' | 'plain' | 'none'; NULL = auto
+		// (campaign draft → plain, otherwise full). Resolved at send time.
+		signature: text("signature"),
+		// outbound attachments: bytes in portal-docs storage under
+		// email-attachments/<draftId>/, metadata only here so list queries stay light
+		attachments: jsonb("attachments").$type<OutboxAttachment[]>().notNull().default([]),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 		updatedAt: timestamp("updated_at", { withTimezone: true })
 			.notNull()
@@ -1212,6 +1219,24 @@ export const videos = pgTable(
 	],
 );
 
+// ── Change events (live admin feed) ───────────────────────────────
+// Written by the basalt_notify_change() trigger (attached at boot by
+// lib/live-server.ts — triggers aren't representable in drizzle schema).
+// One row per INSERT/UPDATE/DELETE on any registry component table;
+// the admin polls /api/changes?since=<id> and revalidates.
+export const changeEvents = pgTable(
+	"change_events",
+	{
+		id: bigserial("id", { mode: "number" }).primaryKey(),
+		table: text("table").notNull(),
+		op: text("op").notNull(),
+		rowId: text("row_id"),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(t) => [index("idx_change_events_created").on(t.createdAt)],
+);
+
+
 // ── Inferred types (replaces hand-maintained interfaces) ───────────
 
 export type Company = typeof companies.$inferSelect;
@@ -1244,6 +1269,10 @@ export type Doc = typeof docs.$inferSelect;
 export type TextVersion = typeof textVersions.$inferSelect;
 export type EmailAccount = typeof emailAccounts.$inferSelect;
 export type EmailThread = typeof emailThreads.$inferSelect;
+// one outbound attachment on an outbox draft — metadata only; bytes live in
+// portal-docs storage at `path`
+export type OutboxAttachment = { path: string; filename: string; mimeType: string; size: number };
+
 export type EmailMessage = typeof emailMessages.$inferSelect;
 export type EmailOutbox = typeof emailOutbox.$inferSelect;
 export type BrainRequest = typeof brainRequests.$inferSelect;

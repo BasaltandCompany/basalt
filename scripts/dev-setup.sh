@@ -83,7 +83,7 @@ if [[ "${ROWCOUNT// /}" -eq 0 ]]; then
 	fi
 fi
 
-cd dashboard
+cd web
 [ -d node_modules ] || { echo "→ bun install"; bun install; }
 
 ROWCOUNT=$(sql -c 'select count(*) from companies;' 2>/dev/null || echo 0)
@@ -145,7 +145,7 @@ curl -s -o /dev/null -m 10 -X POST "$API_URL/auth/v1/signup" \
 cat <<TIP
 
 Dev environment ready (DATABASE_URL → shared stack Postgres :54322).
-  cd dashboard && bun run dev   → http://localhost:3000/admin   (login: admin@madcactus.org / cactus-local-dev)
+  cd web && bun run dev   → http://localhost:3001/admin   (login: admin@madcactus.org / cactus-local-dev)
   Supabase Studio               → http://localhost:54323        (storage, auth users, table editor)
 
 web/.env holds the REAL prod keys (Gmail OAuth, Slack, LLM, Resend…).

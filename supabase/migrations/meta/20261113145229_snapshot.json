@@ -1,6 +1,6 @@
 {
-  "id": "a0eec6b7-d738-46ce-87a1-3074ce80d23d",
-  "prevId": "9c1f0e21-72eb-4fc5-8a6f-9a96d83cb578",
+  "id": "16481551-7104-49d6-ace8-86d45b0f9501",
+  "prevId": "3e3d64a6-d019-4cc3-820b-51ba6e265132",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1487,6 +1487,66 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.change_events": {
+      "name": "change_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "table": {
+          "name": "table",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "op": {
+          "name": "op",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "row_id": {
+          "name": "row_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_change_events_created": {
+          "name": "idx_change_events_created",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.client_company_members": {
       "name": "client_company_members",
       "schema": "",
@@ -2453,6 +2513,19 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": false
+        },
+        "signature": {
+          "name": "signature",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "attachments": {
+          "name": "attachments",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
         },
         "created_at": {
           "name": "created_at",

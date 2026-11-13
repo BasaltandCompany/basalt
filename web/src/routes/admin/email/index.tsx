@@ -63,11 +63,41 @@ export default function AdminEmail() {
 	const [compose, setCompose] = createSignal<{ to: string; cc?: string; bcc?: string; subject: string; body: string; threadId?: string; draftId?: string } | null>(null);
 	// Cc/Bcc inputs stay hidden until toggled (or already filled) — Gmail pattern
 	const [showCcBcc, setShowCcBcc] = createSignal(false);
+	// attachments: compose-side files ride client-side until the draft row exists;
+	// the draft editor uploads/removes immediately via the attachments API
+	const [composeFiles, setComposeFiles] = createSignal<File[]>([]);
+	const ATTACH_MAX_FILE = 20 * 1024 * 1024;
+	const ATTACH_MAX_TOTAL = 24 * 1024 * 1024; // Gmail rejects sends over 25MB
+	const uploadAttachment = async (draftId: string, file: File): Promise<string | null> => {
+		const fd = new FormData();
+		fd.set("file", file);
+		const res = await fetch(`/api/email/drafts/${draftId}/attachments`, { method: "POST", body: fd });
+		const j = (await res.json().catch(() => ({}))) as { error?: string };
+		if (!res.ok) return j.error ?? "attach failed";
+		void revalidate("email-inbox");
+		return null;
+	};
+	const removeAttachment = async (draftId: string, path: string) => {
+		await fetch(`/api/email/drafts/${draftId}/attachments?path=${encodeURIComponent(path)}`, { method: "DELETE" });
+		void revalidate("email-inbox");
+	};
+	const addComposeFiles = (list: FileList) => {
+		const next = [...composeFiles()];
+		for (const f of list) {
+			if (f.size > ATTACH_MAX_FILE) flash(`${f.name}: over the 20MB per-file cap`);
+			else next.push(f);
+		}
+		if (next.reduce((s, f) => s + f.size, 0) > ATTACH_MAX_TOTAL) {
+			flash("Attachments total over 24MB — Gmail rejects sends that big");
+			return;
+		}
+		setComposeFiles(next);
+	};
 	// client-side windowing over the full local corpus — no server pagination
 	const [visibleCount, setVisibleCount] = createSignal(50);
 	const [editBody, setEditBody] = createSignal<Record<string, string>>({});
 	// locally edited to/subject — shown until the next list revalidate
-	const [editMeta, setEditMeta] = createSignal<Record<string, { to?: string; subject?: string; cc?: string; bcc?: string }>>({});
+	const [editMeta, setEditMeta] = createSignal<Record<string, { to?: string; subject?: string; cc?: string; bcc?: string; signature?: string }>>({});
 	const [sendStatus, setSendStatus] = createSignal("");
 	const [connecting, setConnecting] = createSignal(false);
 	// per-draft CRDT history (Drafts tab); clicking a draft row opens the
@@ -331,12 +361,12 @@ export default function AdminEmail() {
 
 	// draft autosave — debounced PUT for body/to/subject; body is CRDT-tracked
 	// server-side (hunks into the Loro snapshot, coalesced version rows)
-	const editDraft = (outboxId: string, patch: { body?: string; to?: string; subject?: string; cc?: string; bcc?: string }) => {
+	const editDraft = (outboxId: string, patch: { body?: string; to?: string; subject?: string; cc?: string; bcc?: string; signature?: string }) => {
 		if (patch.body !== undefined) {
 			setEditBody({ ...editBody(), [outboxId]: patch.body });
 			lintDraft(outboxId, patch.body);
 		}
-		if (patch.to !== undefined || patch.subject !== undefined || patch.cc !== undefined || patch.bcc !== undefined) {
+	if (patch.to !== undefined || patch.subject !== undefined || patch.cc !== undefined || patch.bcc !== undefined || patch.signature !== undefined) {
 			setEditMeta({ ...editMeta(), [outboxId]: { ...editMeta()[outboxId], ...patch } });
 		}
 		clearTimeout(draftSaveTimers[outboxId]);
@@ -349,6 +379,7 @@ export default function AdminEmail() {
 			if (m?.subject !== undefined) payload.subject = m.subject;
 			if (m?.cc !== undefined) payload.cc = m.cc;
 			if (m?.bcc !== undefined) payload.bcc = m.bcc;
+			if (m?.signature !== undefined) payload.signature = m.signature;
 			const res = await fetch(`/api/email/drafts/${outboxId}`, {
 				method: "PUT",
 				headers: { "Content-Type": "application/json" },
@@ -484,7 +515,14 @@ export default function AdminEmail() {
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify(c),
 		});
+		const row = (await res.json()) as { id?: string };
+		// attachments upload onto the now-existing draft row (id required)
+		for (const f of composeFiles()) {
+			const err = await uploadAttachment(row.id ?? "", f);
+			if (err) flash(err);
+		}
 		setCompose(null);
+		setComposeFiles([]);
 		// drafts are drafts: they land in the Drafts tab for review + the real
 		// send (voice-lint gate included), they don't fire straight out
 		void revalidate("email-inbox");
@@ -512,6 +550,15 @@ export default function AdminEmail() {
 			}
 			draftId = row.id;
 			setCompose({ ...c, draftId });
+			// files were held client-side until the row existed — upload them onto it
+			for (const f of composeFiles()) {
+				const err = await uploadAttachment(draftId, f);
+				if (err) {
+					setSendStatus(`failed: ${err}`);
+					return;
+				}
+			}
+			setComposeFiles([]);
 		}
 		// sendDraft reads the (possibly edited) body from editBody
 		setEditBody({ ...editBody(), [draftId]: c.body });
@@ -1075,6 +1122,19 @@ export default function AdminEmail() {
 								onInput={(e) => editDraft(d.id, { subject: e.currentTarget.value })}
 								style={{ width: "100%", "margin-bottom": "8px", padding: "8px", border: "1px solid rgba(0,0,0,0.12)" }}
 							/>
+							<label style={{ display: "flex", "align-items": "center", gap: "6px", "margin-bottom": "8px", "font-size": "12px", color: "#6b6455" }}>
+								Footer
+								<select
+									value={editMeta()[d.id]?.signature ?? d.signature ?? ""}
+									onChange={(e) => editDraft(d.id, { signature: e.currentTarget.value })}
+									style={{ padding: "4px", border: "1px solid rgba(0,0,0,0.12)" }}
+								>
+									<option value="">Auto ({d.campaignCompanyId ? "plain" : "full"})</option>
+									<option value="full">Full signature</option>
+									<option value="plain">Plain (Collin)</option>
+									<option value="none">None</option>
+								</select>
+							</label>
 							<LintedTextarea
 								ariaLabel="Draft body"
 								value={editBody()[d.id] ?? d.body}
@@ -1083,6 +1143,35 @@ export default function AdminEmail() {
 								rows={12}
 							/>
 							<VoiceLintPanel result={draftLint()[d.id] ?? null} stale={lintStale()[d.id]} />
+							<div style={{ display: "flex", gap: "6px", "flex-wrap": "wrap", "align-items": "center", margin: "8px 0" }}>
+								<For each={d.attachments ?? []}>
+									{(a) => (
+										<span style={{ "font-size": "12px", padding: "2px 8px", border: "1px solid rgba(0,0,0,0.12)", "border-radius": "12px", display: "inline-flex", gap: "6px", "align-items": "center" }}>
+											{a.filename} ({(a.size / 1048576).toFixed(1)}MB)
+											<button type="button" style={{ border: "0", background: "none", cursor: "pointer", padding: "0", "font-size": "14px", "line-height": "1" }} onClick={() => void removeAttachment(d.id, a.path)}>×</button>
+										</span>
+									)}
+								</For>
+								<label style={{ "font-size": "12px", color: "#6b6455", cursor: "pointer" }}>
+									Attach
+									<input
+										type="file"
+										multiple
+										style={{ display: "none" }}
+										onChange={async (e) => {
+											const files = [...e.currentTarget.files!];
+											e.currentTarget.value = "";
+											for (const f of files) {
+												if (f.size > ATTACH_MAX_FILE) flash(`${f.name}: over the 20MB per-file cap`);
+												else {
+													const err = await uploadAttachment(d.id, f);
+													if (err) flash(err);
+												}
+											}
+										}}
+									/>
+								</label>
+							</div>
 							<div style={{ display: "flex", gap: "8px", "align-items": "center", "flex-wrap": "wrap" }}>
 								<Button variant="outline" size="sm" type="button"  classList={{ active: openDraftHistory() === d.id }} onClick={() => void toggleDraftHistory(d.id)}>
 									History
@@ -1187,18 +1276,35 @@ export default function AdminEmail() {
 							onInput={(e) => setCompose({ ...compose()!, subject: e.currentTarget.value })}
 							style={{ width: "100%", "margin-bottom": "8px", padding: "8px", border: "1px solid rgba(0,0,0,0.12)" }}
 						/>
-						<textarea
-							placeholder="Body"
-							value={compose()!.body}
-							onInput={(e) => setCompose({ ...compose()!, body: e.currentTarget.value })}
-							rows={10}
-							style={{ width: "100%", "margin-bottom": "8px", padding: "8px", "font-family": "inherit", border: "1px solid rgba(0,0,0,0.12)" }}
-						/>
+						<Show when={composeFiles().length}>
+							<div style={{ display: "flex", gap: "6px", "flex-wrap": "wrap", "margin-bottom": "8px" }}>
+								<For each={composeFiles()}>
+									{(f, i) => (
+										<span style={{ "font-size": "12px", padding: "2px 8px", border: "1px solid rgba(0,0,0,0.12)", "border-radius": "12px", display: "inline-flex", gap: "6px", "align-items": "center" }}>
+											{f.name} ({(f.size / 1048576).toFixed(1)}MB)
+											<button type="button" style={{ border: "0", background: "none", cursor: "pointer", padding: "0", "font-size": "14px", "line-height": "1" }} onClick={() => setComposeFiles(composeFiles().filter((_, j) => j !== i()))}>×</button>
+										</span>
+									)}
+								</For>
+							</div>
+						</Show>
+						<label style={{ "font-size": "12px", color: "#6b6455", cursor: "pointer", "margin-bottom": "8px", display: "inline-block" }}>
+							Attach
+							<input
+								type="file"
+								multiple
+								style={{ display: "none" }}
+								onChange={(e) => {
+									if (e.currentTarget.files?.length) addComposeFiles(e.currentTarget.files);
+									e.currentTarget.value = "";
+								}}
+							/>
+						</label>
 						<div style={{ display: "flex", gap: "8px", "justify-content": "flex-end" }}>
 							<Show when={lintBlockedDraft() && lintBlockedDraft() === compose()!.draftId} fallback={<Button size="sm" type="button"  onClick={() => sendCompose()}>Send</Button>}>
 								<Button variant="outline" size="sm" type="button"  style={{ "border-color": "#a33", color: "#a33" }} onClick={() => sendCompose(true)}>Send anyway (ignores voice lint)</Button>
 							</Show>
-							<Button variant="outline" size="sm" type="button"  onClick={() => setCompose(null)}>Esc</Button>
+							<Button variant="outline" size="sm" type="button"  onClick={() => { setCompose(null); setComposeFiles([]); }}>Esc</Button>
 							<Button variant="outline" size="sm" type="button"  onClick={manualCompose}>Save draft</Button>
 						</div>
 					</div>

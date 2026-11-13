@@ -29,12 +29,13 @@ export default function ConfirmButton(props: {
 	class?: string;
 	style?: JSX.CSSProperties;
 }) {
-	const [state, setState] = createSignal<"busy" | "done" | "error">("busy");
+	const [state, setState] = createSignal<"idle" | "busy" | "done" | "error">("idle");
 	const [msg, setMsg] = createSignal("");
 	const [open, setOpen] = createSignal(false);
 
 	async function run() {
 		setMsg("");
+		setState("busy");
 		try {
 			const res = await props.onConfirm();
 			if (res?.error) {
@@ -47,7 +48,7 @@ export default function ConfirmButton(props: {
 			setState("done");
 			setOpen(false);
 			revalidate();
-			setTimeout(() => setState("busy"), 1200);
+			setTimeout(() => setState("idle"), 1200);
 		} catch (e) {
 			setState("error");
 			setMsg(e instanceof Error ? e.message : "Something went wrong");
@@ -60,7 +61,7 @@ export default function ConfirmButton(props: {
 				open={open()}
 				onOpenChange={(o: boolean) => {
 					setOpen(o);
-					if (o) setState("busy");
+					if (o) setState("idle");
 				}}
 			>
 				<AlertDialogTrigger

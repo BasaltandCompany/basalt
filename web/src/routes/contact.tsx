@@ -27,7 +27,7 @@ export default function Contact() {
     if (res.ok) setDone(true)
     else {
       const body = (await res.json().catch(() => ({}))) as { error?: string }
-      setError(body.error ?? "Something broke — try again.")
+      setError(body.error ?? "Something broke. Try again.")
     }
   }
 
