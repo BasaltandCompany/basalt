@@ -1,6 +1,6 @@
 # BCW-Lookalike ICP — importer / wholesale product companies
 
-**Added Oct 2026.** Sub-ICP alongside the knowledge-heavy ICP (ICP.md). Different pain axis — **transaction volume**, not knowledge scatter — so the sell is process automation, not a radar brain. Anchor: **BCW Supplies, the gift-first play that converted** (bcw-hub-mcp → client). This doc exists because the current ICP.md "knowledge-heavy" filter would deprioritize exactly these companies, and one of them is now our best client.
+**Added Oct 2026.** Sub-ICP alongside the knowledge-heavy ICP (outreach/ICP.md). Different pain axis — **transaction volume**, not knowledge scatter — so the sell is process automation, not a radar brain. Anchor: **BCW Supplies, the gift-first play that converted** (bcw-hub-mcp → client). This doc exists because the current ICP.md "knowledge-heavy" filter would deprioritize exactly these companies, and one of them is now our best client.
 
 ## The anchor: BCW Supplies
 
@@ -23,10 +23,10 @@
 | Shape | Importer or wholesale distributor of physical goods, or manufacturer with its own ecommerce storefront; Asia/China sourcing; large SKU catalog (100+) |
 | Size | $10-70M revenue, 11-200 employees, rev/employee $150-500k sanity check |
 | Owner-operated | Founder/CEO still running it — family-held legacy companies dominate this vertical (BCW: 45 years) |
-| No real tech team | Same 5-min check (ICP.md): ≤6 tech titles in LinkedIn people search |
+| No real tech team | Same 5-min check (outreach/ICP.md): ≤6 tech titles in LinkedIn people search |
 | Ecommerce evidence | Magento / Shopify / BigCommerce storefront; Amazon / eBay presence |
 | Customs evidence | Consignee in public bills-of-lading data (free — see rails) |
-| ai_signal | **Unchanged — still the only promotion gate** (ICP.md) |
+| ai_signal | **Unchanged — still the only promotion gate** (outreach/ICP.md) |
 | Ops layer | CFO / controller / ecommerce director / ops manager visible (`ops_trigger`) |
 
 **Adjacent verticals, not BCW competitors:** same shape, different product category — pet supplies, promotional products, party supplies, hobby, automotive aftermarket, industrial consumables. Competitors (Ultra PRO etc.) are the fallback, not the target: they watch each other and are the most clued-in buyers. Collin's call, Oct 2026.

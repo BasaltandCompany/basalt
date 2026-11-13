@@ -1,4 +1,4 @@
-// One-off seed: the "Importers ICP" funnel (BCW-lookalikes, ICP-BCW.md).
+// One-off seed: the "Importers ICP" funnel (BCW-lookalikes, outreach/ICP-BCW.md).
 // Freight skeleton + a customs_evidence source-stage at position 2 — funnels
 // with extra stage keys are deliberately left alone by ensureFreightFunnel's
 // skeleton sync. Idempotent on name. Promotion attaches to a campaign whose
@@ -23,7 +23,7 @@ const inserted = await db
 	.insert(funnels)
 	.values({
 		name: "Importers ICP",
-		description: "Owner-led IN/Midwest importer-wholesalers with ecommerce, $10-70M, no tech team (see ICP-BCW.md)",
+		description: "Owner-led IN/Midwest importer-wholesalers with ecommerce, $10-70M, no tech team (see outreach/ICP-BCW.md)",
 		stages,
 	})
 	.onConflictDoNothing({ target: funnels.name })

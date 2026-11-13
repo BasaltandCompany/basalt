@@ -2,7 +2,7 @@
 // de-gated). Built, NOT run: no stage execution, no Prospeo calls — zero credit
 // burn by design (Collin's rule, Nov 2026). Discovery plan: Prospeo company
 // search (wholesale/distribution, 11-200 headcount, Midwest geo preference);
-// ImportYeti demoted to enrichment. See ICP-BCW.md "BCW similarity profile".
+// ImportYeti demoted to enrichment. See outreach/ICP-BCW.md "BCW similarity profile".
 //   cd web && bun scripts/importers-v2-seed.ts
 // Replicate on prod after deploy via basalt_create_funnel extra_stages.
 import { db } from "~/db";
@@ -12,7 +12,7 @@ const stages: FunnelStage[] = [
 	{
 		key: "hq_state",
 		label: "Region (recorded, never gates)",
-		gate: "Region note only: IN tier-1, OH/IL/MI/KY/WI tier-2, elsewhere recorded. Location is a discovery preference, NOT a filter (ICP-BCW.md v2)",
+		gate: "Region note only: IN tier-1, OH/IL/MI/KY/WI tier-2, elsewhere recorded. Location is a discovery preference, NOT a filter (outreach/ICP-BCW.md v2)",
 		method: "source",
 		soft: true,
 	},
@@ -76,7 +76,7 @@ const inserted = await db
 	.insert(funnels)
 	.values({
 		name: "Importers Similarity ICP",
-		description: "BCW-similarity funnel (ICP-BCW.md v2): headcount 15-60, $8-70M, tech ≤6, light-or-no BOL volume, ai_signal gate. Location de-gated. BUILT NOT RUN — no credits burned.",
+		description: "BCW-similarity funnel (outreach/ICP-BCW.md v2): headcount 15-60, $8-70M, tech ≤6, light-or-no BOL volume, ai_signal gate. Location de-gated. BUILT NOT RUN — no credits burned.",
 		stages,
 	})
 	.onConflictDoNothing({ target: funnels.name })
