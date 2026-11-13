@@ -4,8 +4,9 @@
 // dropped, soft everywhere — without losing runtime-tuned params.
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { FREIGHT_STAGES, mergeStages } from "./funnels";
+import { FREIGHT_STAGES, mergeStages, spliceStages } from "./funnels";
 import type { FunnelStage } from "~/db/schema";
+import { describe, it } from "bun:test";
 
 // A Legal-ICP-shaped legacy row: old order, gated (no soft except owner_led),
 // custom industry gate, tuned headcount params.
@@ -47,4 +48,44 @@ test("mergeStages preserves tuned params and applies soft from code", () => {
 test("mergeStages is idempotent on an already-synced row", () => {
 	const once = mergeStages(FREIGHT_STAGES, legacyRow);
 	assert.deepEqual(mergeStages(FREIGHT_STAGES, once), once);
+});
+
+// spliceStages (createFunnel extra_stages) — pure stage-splicing for custom-stage
+// funnels. No DB, no network.
+describe("spliceStages", () => {
+	it("returns the skeleton unchanged with no extras", () => {
+		assert.deepEqual(spliceStages(FREIGHT_STAGES, undefined), FREIGHT_STAGES);
+		assert.deepEqual(spliceStages(FREIGHT_STAGES, []), FREIGHT_STAGES);
+	});
+
+	it("inserts an extra stage after hq_state by default, soft, method source", () => {
+		const stages = spliceStages(FREIGHT_STAGES, [
+			{ key: "customs_evidence", label: "Customs evidence", gate: "BOL consignee" },
+		]);
+		assert.equal(stages[1]!.key, "customs_evidence");
+		assert.equal(stages[1]!.method, "source");
+		assert.equal(stages[1]!.soft, true);
+		assert.equal(stages[0]!.key, "hq_state");
+		assert.equal(stages[2]!.key, "ai_signal");
+		assert.equal(stages.length, FREIGHT_STAGES.length + 1);
+		assert.ok(!Object.keys(stages[1]!).includes("position"), "position marker must not leak into the stored stage");
+	});
+
+	it("honors an explicit position anchor and appends on a missing anchor", () => {
+		const anchored = spliceStages(FREIGHT_STAGES, [{ key: "x", label: "X", gate: "g", position: "owner_led" }]);
+		assert.equal(anchored.at(-1)!.key, "x");
+		const appended = spliceStages(FREIGHT_STAGES, [{ key: "y", label: "Y", gate: "g", position: "nope" }]);
+		assert.equal(appended.at(-1)!.key, "y");
+	});
+
+	it("rejects key collisions and missing fields", () => {
+		assert.throws(() => spliceStages(FREIGHT_STAGES, [{ key: "hq_state", label: "dup", gate: "g" }]));
+		assert.throws(() => spliceStages(FREIGHT_STAGES, [{ key: "", label: "no key", gate: "g" }]));
+		assert.throws(() => spliceStages(FREIGHT_STAGES, [{ key: "ok", label: "no gate" }]));
+	});
+
+	it("coerces an unknown method to source", () => {
+		const stages = spliceStages(FREIGHT_STAGES, [{ key: "z", label: "Z", gate: "g", method: "bogus" }]);
+		assert.equal(stages[1]!.method, "source");
+	});
 });
