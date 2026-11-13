@@ -13,23 +13,39 @@
 	const clean = (s) => s.replace(/\s+/g, " ").trim();
 	const text = (sel) => (document.querySelector(sel)?.textContent ?? "");
 
-	function scrapeName() {
-		return clean(text("main h1")) || null;
+	// 2026 LinkedIn top card (verified against the live DOM): class names are
+	// hashed garbage and there is no <h1> — the stable shape is
+	// <div aria-label="<name>"><p><name></p><div><p><headline></p></div></div>
+	// i.e. the name div's aria-label equals its first <p>'s text. That self-
+	// validating match is the anchor; headline "Title at Company" gives the company.
+	function topCard() {
+		for (const div of document.querySelectorAll("div[aria-label]")) {
+			const p = div.querySelector("p");
+			if (p && clean(p.textContent) === clean(div.getAttribute("aria-label") ?? "")) return div;
+		}
+		return null;
 	}
 
-	// Best-effort current company, most-stable anchor first:
-	// 1. top-card "current position" right panel — "Title at Company"
-	// 2. headline — "VP Ops at Acme Corp"
-	// 3. first experience entry's bold company line
+	function scrapeName() {
+		return topCard()?.getAttribute("aria-label") ?? null;
+	}
+
 	function scrapeCompany() {
-		const panel = clean(text(".pv-text-details__right-panel-item, .pv-text-details__right-panel"));
-		const headline = clean(text(".text-body-medium.break-words"));
-		for (const t of [panel, headline]) {
-			if (!t || t.length > 160) continue;
-			const m = t.match(/(?:\bat\b|@|·)\s*([^@·|]+)/i);
+		const card = topCard();
+		const headline = card ? clean(card.querySelectorAll("p")[1]?.textContent ?? "") : "";
+		if (headline) {
+			const m = headline.match(/(?:\bat\b|@|·)\s*([^@·|]+)/i);
 			if (m && clean(m[1]).length > 1) return clean(m[1]);
 		}
-		const exp = document.querySelectorAll("section[aria-label*='xperience' i] .pvs-entity strong, #experience strong");
+		// older DOMs: right-panel current position / headline div
+		for (const sel of [".pv-text-details__right-panel-item", ".text-body-medium.break-words"]) {
+			const t = clean(text(sel));
+			if (t && t.length <= 160) {
+				const m = t.match(/(?:\bat\b|@|·)\s*([^@·|]+)/i);
+				if (m && clean(m[1]).length > 1) return clean(m[1]);
+			}
+		}
+		const exp = document.querySelectorAll("section[aria-label*='xperience' i] .pvs-entity strong");
 		return exp.length ? clean(exp[0].textContent) : null;
 	}
 
