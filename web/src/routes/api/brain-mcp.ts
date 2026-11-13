@@ -16,6 +16,7 @@ import { linkComponents, listLinks, UnknownKindError } from "~/lib/entity-links"
 import { createVideo, setProspectVideo } from "~/lib/videos";
 import { createFunnel, createFunnelRun, importRunItems, recordStageVerdict } from "~/lib/funnels";
 import { runStageBatch } from "~/lib/funnel-stages";
+import { cookieDead, scrapeCompanyPage, ScrapeFailed } from "~/lib/importyeti-scrape";
 
 
 /**
@@ -711,12 +712,27 @@ chat_uuid: { type: "string" },
 	{
 		name: "create_funnel",
 		description:
-			"Create a funnel (idempotent on name) whose stages clone the ungated freight skeleton (hq_state, ai_signal, headcount, revenue_band, tech_team, ops_trigger, owner_led — all soft, nothing drops a company; an ai_signal pass is the only promotion gate, and ops_trigger + owner_led form the trigger path that promotes an ai_signal fail). Then create_funnel_run → add_funnel_items → run_funnel_stage.",
+			"Create a funnel (idempotent on name) whose stages clone the ungated freight skeleton (hq_state, ai_signal, headcount, revenue_band, tech_team, ops_trigger, owner_led — all soft, nothing drops a company; an ai_signal pass is the only promotion gate, and ops_trigger + owner_led form the trigger path that promotes an ai_signal fail). Optional extra_stages: [{key, label, gate, method?, position?}] splices custom soft stages in (default after hq_state; method defaults to source) — e.g. the Importers ICP's customs_evidence. Then create_funnel_run → add_funnel_items → run_funnel_stage.",
 		inputSchema: {
 			type: "object",
 			properties: {
 				name: { type: "string", description: "unique funnel name, e.g. 'Legal ICP'" },
 				description: { type: "string" },
+				extra_stages: {
+					type: "array",
+					description: "custom soft stages: {key, label, gate, method (source|api|agent|human, default source), position (insert after this skeleton stage key, default hq_state)}",
+					items: {
+						type: "object",
+						properties: {
+							key: { type: "string" },
+							label: { type: "string" },
+							gate: { type: "string" },
+							method: { type: "string", enum: ["source", "api", "agent", "human"] },
+							position: { type: "string" },
+						},
+						required: ["key", "label", "gate"],
+					},
+				},
 			},
 			required: ["name"],
 		},
@@ -733,6 +749,19 @@ chat_uuid: { type: "string" },
 				source: { type: "string", enum: ["importyeti", "fmcsa", "paste", "mixed"], description: "default 'paste'" },
 				note: { type: "string", description: "where the pull came from, e.g. 'Best Lawyers pull 2026-10'" },
 			},
+		},
+	},
+	{
+		name: "scrape_funnel_company",
+		description:
+			"Deep-scrape one funnel company's ImportYeti page (free — replaces the 1-credit-per-record API endpoint): suppliers, monthly shipment volumes, recent bills of lading, addresses, and manifest-confidentiality periods, merged into the item's rawData as `scrape`. Runs at gate-fire/promotion only, one company per call (5s pacer, ~5s each). Needs IMPORTYETI_COOKIE set and alive. The slug defaults to the slugified company name — pass slug when that misses (check importyeti.com/company/<slug> by hand).",
+		inputSchema: {
+			type: "object",
+			properties: {
+				item_id: { type: "string", description: "funnel item id (list_funnel_items)" },
+				slug: { type: "string", description: "ImportYeti company slug (/company/<slug>); default: slugified company name" },
+			},
+			required: ["item_id"],
 		},
 	},
 	{
@@ -1812,7 +1841,11 @@ export async function POST(event: APIEvent) {
 							result = { error: "name is required" };
 							break;
 						}
-					result = await createFunnel(name, toolArgs.description ? String(toolArgs.description) : null);
+						try {
+							result = await createFunnel(name, toolArgs.description ? String(toolArgs.description) : null, toolArgs.extra_stages);
+						} catch (e) {
+							result = { error: String(e instanceof Error ? e.message : e) };
+						}
 						break;
 					}
 					case "create_funnel_run": {
@@ -1822,6 +1855,60 @@ export async function POST(event: APIEvent) {
 							source: toolArgs.source ? String(toolArgs.source) : undefined,
 							note: toolArgs.note ? String(toolArgs.note) : undefined,
 						});
+						break;
+					}
+					case "scrape_funnel_company": {
+						const [item] = await db
+							.select({ id: funnelItems.id, company: funnelItems.companyName, raw: funnelItems.rawData })
+							.from(funnelItems)
+							.where(eq(funnelItems.id, String(toolArgs.item_id ?? "")))
+							.limit(1);
+						if (!item) {
+							result = { error: "Unknown item_id" };
+							break;
+						}
+						if (cookieDead()) {
+							result = { error: "IMPORTYETI_COOKIE is missing or expired — refresh the importyeti_token JWT before scraping" };
+							break;
+						}
+						const raw = (item.raw ?? {}) as Record<string, unknown>;
+						const slug =
+							(toolArgs.slug ? String(toolArgs.slug) : null) ??
+							(typeof raw.importyetiSlug === "string" ? raw.importyetiSlug : null) ??
+							item.company
+								.toLowerCase()
+								.replace(/&/g, "and")
+								.replace(/[^a-z0-9]+/g, "-")
+								.replace(/^-+|-+$/g, "");
+						try {
+							const { data } = await scrapeCompanyPage(slug);
+							await db
+								.update(funnelItems)
+								.set({
+									rawData: {
+										...raw,
+										importyetiSlug: slug,
+										scrape: data as unknown as Record<string, unknown>,
+									},
+								})
+								.where(eq(funnelItems.id, item.id));
+							result = {
+								company: item.company,
+								slug,
+								totalShipments: data.totalShipments,
+								suppliers: data.suppliers.length,
+								recentShipments: data.shipments.length,
+								monthsOfData: data.shipmentPeriods.length,
+								confidentialityPeriods: data.confidentialityPeriods,
+								website: data.canonicalWebsite,
+								mergedInto: "rawData.scrape",
+							};
+						} catch (e) {
+							result = {
+								error: e instanceof ScrapeFailed ? e.message : String(e),
+								hint: "if the slug was guessed wrong, find the right one at importyeti.com and retry with slug=",
+							};
+						}
 						break;
 					}
 					case "add_funnel_items": {
