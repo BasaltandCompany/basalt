@@ -32,6 +32,7 @@ export default function CommandPalette() {
 			go("/admin/outreach", "Go to Outreach"),
 			go("/admin/campaigns", "Go to Campaigns"),
 			go("/admin/api-keys", "Go to API Keys"),
+			go("/admin/oauth", "Go to OAuth Apps"),
 			{
 				label: "New doc",
 				hint: "docs",

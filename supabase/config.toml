@@ -363,8 +363,11 @@ enabled = false
 
 # OAuth server configuration
 [auth.oauth_server]
-# Enable OAuth server functionality
-enabled = false
+# Enable OAuth server functionality — Basalt acts as an OAuth 2.1 identity
+# provider for small apps (bcw-ada-scanner, basalt-interviewer). Consent UI:
+# /oauth/consent on the Site URL. In prod, enable it in Dashboard →
+# Authentication → OAuth Server and set the Authorization Path to /oauth/consent.
+enabled = true
 # Path for OAuth consent flow UI
 authorization_url_path = "/oauth/consent"
 # Allow dynamic client registration
