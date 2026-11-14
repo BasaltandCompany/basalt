@@ -8,7 +8,7 @@ import { getDocQuery, getDocStatsQuery } from "~/lib/docs-queries";
 import { computeBreaks } from "~/lib/doc-pages";
 import { VoiceLintPanel } from "~/components/VoiceLintPanel";
 import { docSurface, type LintResult } from "~/lib/voice-lint";
-import { Button, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@basalt/ui";
+import { Button, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@basaltac/ui";
 import SelectField from "~/components/select-field";
 
 type VersionRow = {

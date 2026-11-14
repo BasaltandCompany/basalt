@@ -7,7 +7,7 @@ import { getUserQuery } from "~/lib/queries";
 import { getOutreachQuery, getVideosQuery, setOutreachVideoAction } from "~/lib/admin-queries";
 import { stageLabel } from "~/db/schema";
 import { videoSummary } from "~/lib/video-summary";
-import { Button } from "@basalt/ui";
+import { Button } from "@basaltac/ui";
 import SelectField from "~/components/select-field";
 
 // Mirrors the server's free-plan cap (dashboard/src/routes/api/upload-video.ts).

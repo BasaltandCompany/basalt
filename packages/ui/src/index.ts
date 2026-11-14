@@ -1,4 +1,4 @@
-// @basalt/ui — one component library, every surface. Solid (Kobalte)
+// @basaltac/ui — one component library, every surface. Solid (Kobalte)
 // source ships as .tsx; consuming vite configs compile the JSX (see
 // optimizeDeps.exclude + ssr.noExternal in basalt/dashboard vite configs).
 export { Button, buttonVariants, type ButtonProps } from "./components/ui/button"

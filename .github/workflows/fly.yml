@@ -17,7 +17,7 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      # repo root is the build context (the app imports the @basalt/ui
+      # repo root is the build context (the app imports the @basaltac/ui
       # workspace package); the Dockerfile builds web/.output
       - run: flyctl deploy --remote-only --config web/fly.toml --dockerfile web/Dockerfile
         env:

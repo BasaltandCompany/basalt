@@ -2,68 +2,23 @@
 @import "@fontsource-variable/bodoni-moda/opsz.css";
 @import "tailwindcss";
 @import "tw-animate-css";
+/* ink palette + token mappings live in the @basaltac/ui package — shared with every product */
+@import "@basaltac/ui/theme.css";
 
 /* feedback-widget ships pre-bundled zinc utilities — v4 needs an explicit source */
 @source "../node_modules/@aspectrr/feedback-widget/dist";
 
-/* @basalt/ui utilities (size-4, h-10, …) live outside web/src — without this
+/* @basaltac/ui utilities (size-4, h-10, …) live outside web/src — without this
    source, every class used only in the ui package is missing from the build */
 @source "../../packages/ui/src";
 
-@custom-variant dark (&:is(.dark *));
-
 @theme inline {
     --font-sans: 'Geist Variable', sans-serif;
-    --color-border: var(--border);
-    --color-input: var(--input);
-    --color-ring: var(--ring);
-    --color-background: var(--background);
-    --color-foreground: var(--foreground);
-    --color-primary: var(--primary);
-    --color-primary-foreground: var(--primary-foreground);
-    --color-secondary: var(--secondary);
-    --color-secondary-foreground: var(--secondary-foreground);
-    --color-destructive: var(--destructive);
-    --color-destructive-foreground: var(--destructive-foreground);
-    --color-muted: var(--muted);
-    --color-muted-foreground: var(--muted-foreground);
-    --color-accent: var(--accent);
-    --color-accent-foreground: var(--accent-foreground);
-    --color-popover: var(--popover);
-    --color-popover-foreground: var(--popover-foreground);
-    --color-card: var(--card);
-    --color-card-foreground: var(--card-foreground);
 	--color-signal: #C8102E;
-    --radius-sm: calc(var(--radius) * 0.6);
-    --radius-md: calc(var(--radius) * 0.8);
-    --radius-lg: var(--radius);
 }
 
 @layer base {
   :root {
-    /* Basalt ink — dark-first, one theme. Paper text on ink surface, one
-       signal red. Radius zero: basalt is columnar. Matches basalt/src/index.css. */
-    --background: #0A0A0A;
-    --foreground: #FAFAFA;
-    --card: #111113;
-    --card-foreground: #FAFAFA;
-    --popover: #111113;
-    --popover-foreground: #FAFAFA;
-    --primary: #FAFAFA;
-    --primary-foreground: #0A0A0A;
-    --secondary: #1A1A1C;
-    --secondary-foreground: #FAFAFA;
-    --muted: #1A1A1C;
-    --muted-foreground: rgba(250, 250, 250, 0.55);
-    --accent: #1A1A1C;
-    --accent-foreground: #FAFAFA;
-    --destructive: #C8102E;
-    --destructive-foreground: #ffffff;
-    --border: rgba(250, 250, 250, 0.12);
-    --input: rgba(250, 250, 250, 0.12);
-    --ring: rgba(250, 250, 250, 0.3);
-    --radius: 0rem;
-
     /* The one color: signal red, destructive meaning only (blocked / over-cap /
        destructive). Everything else is ink. */
     --red: #C8102E;
@@ -75,9 +30,6 @@
 }
 
 @layer base {
-  * {
-    @apply border-border;
-  }
   body {
     @apply bg-background text-foreground;
     font-family: var(--font-sans);

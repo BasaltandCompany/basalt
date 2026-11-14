@@ -2,7 +2,7 @@ import { A, createAsync, useAction, useNavigate } from "@solidjs/router";
 import { For, Show, Suspense, createSignal } from "solid-js";
 import CreateDialog from "~/components/CreateDialog";
 import { getDocsQuery, createDocAction, getIssueStatsQuery, addIssueLearningAction } from "~/lib/docs-queries";
-import { Button, Card } from "@basalt/ui";
+import { Button, Card } from "@basaltac/ui";
 import SelectField from "~/components/select-field";
 
 /** Shared list for the three doc tabs — same table, filtered by kind. */

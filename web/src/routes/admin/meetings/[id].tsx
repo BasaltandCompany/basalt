@@ -18,7 +18,7 @@ import {
 	publishMeetingAction,
 	type TranscriptBlock,
 } from "~/lib/admin-queries";
-import { Button, Card } from "@basalt/ui";
+import { Button, Card } from "@basaltac/ui";
 import SelectField from "~/components/select-field";
 
 interface EditableBlock extends TranscriptBlock {

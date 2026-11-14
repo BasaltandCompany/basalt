@@ -3,10 +3,10 @@
 import { createSignal, Show } from "solid-js"
 import { DASHBOARD } from "@/lib/dashboard"
 import { Page } from "@/components/site"
-import { Button } from "@basalt/ui"
-import { Input } from "@basalt/ui"
-import { Label } from "@basalt/ui"
-import { Textarea } from "@basalt/ui"
+import { Button } from "@basaltac/ui"
+import { Input } from "@basaltac/ui"
+import { Label } from "@basaltac/ui"
+import { Textarea } from "@basaltac/ui"
 
 export default function Contact() {
   const [sending, setSending] = createSignal(false)

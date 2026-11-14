@@ -1,6 +1,6 @@
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js"
 import { Logo } from "@/brand/logo"
-import { Button } from "@basalt/ui"
+import { Button } from "@basaltac/ui"
 import { initHeroVideo } from "@/routes/site-state"
 
 

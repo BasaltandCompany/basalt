@@ -14,7 +14,7 @@ import {
 } from "~/lib/queries";
 import { createDeliverableAction, getDeliverablesQuery, deleteDeliverableAction } from "~/lib/admin-queries";
 import type { DeliverableStatus } from "~/db/schema";
-import { Button, Card, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@basalt/ui";
+import { Button, Card, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@basaltac/ui";
 import SelectField from "~/components/select-field";
 
 const STATUS_OPTIONS: DeliverableStatus[] = [

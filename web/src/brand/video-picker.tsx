@@ -1,10 +1,10 @@
 import { createEffect, createSignal, onCleanup, Show } from "solid-js"
-import { Badge } from "@basalt/ui"
-import { Button } from "@basalt/ui"
-import { Card } from "@basalt/ui"
-import { Input } from "@basalt/ui"
-import { Label } from "@basalt/ui"
-import { Separator } from "@basalt/ui"
+import { Badge } from "@basaltac/ui"
+import { Button } from "@basaltac/ui"
+import { Card } from "@basaltac/ui"
+import { Input } from "@basaltac/ui"
+import { Label } from "@basaltac/ui"
+import { Separator } from "@basaltac/ui"
 
 type Clip = {
   title: string

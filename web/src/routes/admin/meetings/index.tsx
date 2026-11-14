@@ -8,7 +8,7 @@ import {
 	getMeetingDraftsQuery,
 	deleteDocumentAction,
 } from "~/lib/admin-queries";
-import { Card } from "@basalt/ui";
+import { Card } from "@basaltac/ui";
 
 /** Meeting drafts pushed by the Anarlog publisher — edit + publish at [id]. */
 export default function MeetingDrafts() {

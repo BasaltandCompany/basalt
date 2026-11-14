@@ -1,0 +1,64 @@
+/* @basaltac/ui theme — the Basalt ink palette every consumer imports after
+   "tailwindcss". Tokens are byte-identical to web/src/app.css, which imports
+   this file as its single source of truth. Products layer their own fonts and
+   extra colors on top via @theme inline in their own app.css. */
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --color-border: var(--border);
+    --color-input: var(--input);
+    --color-ring: var(--ring);
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+    --color-primary: var(--primary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-secondary: var(--secondary);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-destructive: var(--destructive);
+    --color-destructive-foreground: var(--destructive-foreground);
+    --color-muted: var(--muted);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-accent: var(--accent);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-popover: var(--popover);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-card: var(--card);
+    --color-card-foreground: var(--card-foreground);
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+}
+
+@layer base {
+  :root {
+    /* Basalt ink — dark-first, one theme. Paper text on ink surface, one
+       signal red. Radius zero: basalt is columnar. Matches basalt/src/index.css. */
+    --background: #0A0A0A;
+    --foreground: #FAFAFA;
+    --card: #111113;
+    --card-foreground: #FAFAFA;
+    --popover: #111113;
+    --popover-foreground: #FAFAFA;
+    --primary: #FAFAFA;
+    --primary-foreground: #0A0A0A;
+    --secondary: #1A1A1C;
+    --secondary-foreground: #FAFAFA;
+    --muted: #1A1A1C;
+    --muted-foreground: rgba(250, 250, 250, 0.55);
+    --accent: #1A1A1C;
+    --accent-foreground: #FAFAFA;
+    --destructive: #C8102E;
+    --destructive-foreground: #ffffff;
+    --border: rgba(250, 250, 250, 0.12);
+    --input: rgba(250, 250, 250, 0.12);
+    --ring: rgba(250, 250, 250, 0.3);
+    --radius: 0rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+}

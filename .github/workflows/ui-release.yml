@@ -1,0 +1,80 @@
+name: ui release
+
+# packages/ui changes merged to main → publish @basaltac/ui to public npm.
+# - PR bumped the version above what npm has → publish that version as-is.
+# - Version unchanged but src/** differs from the published tarball →
+#   auto-increment the patch and publish.
+# - Nothing meaningful changed (docs-only) → skip, no version churn.
+# - Local version BELOW what npm has (rebase race) → skip loudly.
+# Publishes via npm Trusted Publishing (OIDC): the package's trusted publisher
+# on npmjs.com is bound to BasaltandCompany/basalt + this workflow file. No
+# token secret involved. Manual escape hatch: workflow_dispatch / local publish.
+
+on:
+  push:
+    branches: [main]
+    paths: ['packages/ui/**', '.github/workflows/ui-release.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: ui-release
+  cancel-in-progress: false # serialize; a queued run re-checks and skips if nothing new
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing (OIDC)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1
+
+      # root install: prepublishOnly's tsc lives in the ui workspace devDeps
+      - run: bun install --frozen-lockfile
+
+      # npm >= 11.5.1 required for trusted-publishing OIDC
+      - run: npm install -g npm@latest
+
+      - name: publish if src changed (bump version if not bumped in PR)
+        working-directory: packages/ui
+        run: |
+        run: |
+          # hash of src/** inside a packed tarball, order-stable
+          src_hash() {
+            local dir
+            dir=$(mktemp -d)
+            tar -xzf "$1" -C "$dir"
+            (cd "$dir/package" && find src -type f -print0 | sort -z \
+              | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+            rm -rf "$dir"
+          }
+
+          local=$(bun -e 'console.log(require("./package.json").version)')
+          remote=$(npm view @basaltac/ui version 2>/dev/null || echo none)
+          echo "local=$local remote=$remote"
+
+          if [[ "$remote" != "none" && "$(printf '%s\n%s\n' "$remote" "$local" | sort -V | head -1)" != "$remote" ]]; then
+            echo "::warning::npm already has v$remote, local is v$local — rebase onto main to pick up the newer version"
+            exit 0
+          fi
+
+          tmp=$(mktemp -d)
+          if [[ "$local" != "$remote" ]]; then
+            echo "publishing explicitly bumped v$local"
+          else
+            local_tgz="$tmp/$(npm pack --silent --pack-destination "$tmp")"
+            remote_tgz="$tmp/$(npm pack "@basaltac/ui@$local" --silent --pack-destination "$tmp")"
+            if [[ "$(src_hash "$local_tgz")" == "$(src_hash "$remote_tgz")" ]]; then
+              echo "src identical to published v$local — nothing to publish"
+              exit 0
+            fi
+            bumped="${local%.*}.$((${local##*.} + 1))"
+            sed -i "s/\"version\": \"$local\"/\"version\": \"$bumped\"/" package.json
+            echo "src changed, version not bumped in PR — auto-bumping v$local → v$bumped"
+          fi
+
+          npm publish

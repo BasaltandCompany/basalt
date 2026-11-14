@@ -7,7 +7,7 @@ import { createAsync, useAction } from "@solidjs/router";
 import { For, Show } from "solid-js";
 import Layout from "~/components/Layout";
 import { getBrainRequestsQuery, setBrainRequestStatusAction, linkBrainRequestToProspectAction } from "~/lib/admin-queries";
-import { Button, Card } from "@basalt/ui";
+import { Button, Card } from "@basaltac/ui";
 import SelectField from "~/components/select-field";
 
 const STATUSES = ["new", "building", "delivered", "declined"] as const;

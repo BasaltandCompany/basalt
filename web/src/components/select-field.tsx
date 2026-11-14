@@ -10,7 +10,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@basalt/ui"
+} from "@basaltac/ui"
 
 export type SelectOption = { value: string; label: string }
 

@@ -8,10 +8,10 @@
 import { DASHBOARD } from "@/lib/dashboard"
 import { createSignal, Show } from "solid-js"
 import { Page } from "@/components/site"
-import { Button } from "@basalt/ui"
-import { Input } from "@basalt/ui"
-import { Label } from "@basalt/ui"
-import { Textarea } from "@basalt/ui"
+import { Button } from "@basaltac/ui"
+import { Input } from "@basaltac/ui"
+import { Label } from "@basaltac/ui"
+import { Textarea } from "@basaltac/ui"
 
 function Field(props: { id: string; label: string; required?: boolean; children: unknown }) {
 	return (

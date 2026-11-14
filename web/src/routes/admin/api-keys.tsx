@@ -10,7 +10,7 @@ import {
 	createAdminApiKeyAction,
 	revokeAdminApiKeyAction,
 } from "~/lib/admin-queries";
-import { Button, Card } from "@basalt/ui";
+import { Button, Card } from "@basaltac/ui";
 
 /** Memberless API keys — server-to-server auth (e.g. the Anarlog publisher).
  *  Raw key is shown once at creation; only a hash is stored. */

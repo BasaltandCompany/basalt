@@ -10,7 +10,7 @@ import {
 	getClientUserQuery,
 	revokeApiKeyAction,
 } from "~/lib/client-queries";
-import { Button, Card } from "@basalt/ui";
+import { Button, Card } from "@basaltac/ui";
 
 export default function PortalApiKeys() {
 	const user = createAsync(() => getClientUserQuery(), { deferStream: true });

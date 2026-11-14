@@ -8,7 +8,7 @@ import { CommandDialog,
 	CommandEmpty,
 	CommandInput,
 	CommandItem,
-	CommandList, } from "@basalt/ui";
+	CommandList, } from "@basaltac/ui";
 
 type Cmd = { label: string; hint?: string; run: () => void };
 

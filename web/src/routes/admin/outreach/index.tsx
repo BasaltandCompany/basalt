@@ -24,7 +24,7 @@ import {
 import { OUTREACH_STAGES, stageLabel, type OutreachProspect, type OutreachStage, type Video } from "~/db/schema";
 import type { ProspectEmailStatus } from "~/lib/admin-queries";
 import { fmtDate, fmtDur, videoSummary } from "~/lib/video-summary";
-import { Button } from "@basalt/ui";
+import { Button } from "@basaltac/ui";
 import SelectField from "~/components/select-field";
 
 const STAGE_COLOR: Record<string, string> = {

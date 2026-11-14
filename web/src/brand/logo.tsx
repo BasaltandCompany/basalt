@@ -1,5 +1,5 @@
 import type { JSX } from "solid-js"
-import { cn } from "@basalt/ui"
+import { cn } from "@basaltac/ui"
 
 /**
  * Basalt brand marks. One geometry: three basalt pillars, staggered tops.
