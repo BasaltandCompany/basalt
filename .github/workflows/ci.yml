@@ -16,7 +16,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1
-      # install at the workspace root: web imports @basalt/ui from packages/ui
+      # install at the workspace root: web imports @basaltac/ui from packages/ui
       - run: bun install
       - working-directory: web
         run: bun run test

@@ -21,7 +21,7 @@ import type { CompanySendStats } from "~/lib/campaign-stats";
 import { fillTemplate, templateSlots } from "~/lib/campaign-fill";
 import type { LintResult } from "~/lib/voice-lint";
 import { fmtDate } from "~/lib/video-summary";
-import { Button } from "@basalt/ui";
+import { Button } from "@basaltac/ui";
 import SelectField from "~/components/select-field";
 
 /** getCampaignsQuery row: company + its Gmail-grounded send/reply state. */

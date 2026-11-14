@@ -3,8 +3,8 @@
 // FMR vellum css replaced by layout utilities.
 import type { JSX } from "solid-js"
 import { Page } from "@/components/site"
-import { Button } from "@basalt/ui"
-import { Separator } from "@basalt/ui"
+import { Button } from "@basaltac/ui"
+import { Separator } from "@basaltac/ui"
 
 function CaseSection(props: { label: string; children: JSX.Element }) {
   return (

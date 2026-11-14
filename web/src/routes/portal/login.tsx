@@ -5,7 +5,7 @@ import {
 	clientLoginAction,
 	setInvitePasswordAction,
 } from "~/lib/client-queries";
-import { Button, Card } from "@basalt/ui";
+import { Button, Card } from "@basaltac/ui";
 import Brand from "~/components/Brand";
 
 export default function ClientLogin() {

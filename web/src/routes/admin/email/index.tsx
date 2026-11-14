@@ -11,7 +11,7 @@ import {
 	getEmailStatusQuery,
 } from "~/lib/email-queries";
 import type { EmailThread, EmailMessage, EmailOutbox } from "~/db/schema";
-import { Button } from "@basalt/ui";
+import { Button } from "@basaltac/ui";
 
 type DraftVersionRow = { id: string; version: number; author: string; createdAt: string; updatedAt: string };
 type DraftDiffPart = { added?: boolean; removed?: boolean; value: string };

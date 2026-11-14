@@ -22,7 +22,7 @@ import {
 } from "~/lib/admin-queries";
 import { getUserQuery } from "~/lib/queries";
 import type { InvoiceStatus } from "~/db/schema";
-import { Button, Card } from "@basalt/ui";
+import { Button, Card } from "@basaltac/ui";
 import SelectField from "~/components/select-field";
 
 export default function CompanyDetail() {

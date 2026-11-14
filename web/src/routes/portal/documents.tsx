@@ -8,7 +8,7 @@ import {
 	searchDocumentsQuery,
 } from "~/lib/client-queries";
 import type { DocumentType } from "~/db/schema";
-import { Button, Card } from "@basalt/ui";
+import { Button, Card } from "@basaltac/ui";
 
 const typeLabel: Record<DocumentType, string> = {
 	link: "Link",

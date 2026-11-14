@@ -1,11 +1,11 @@
 import { Show, createSignal, type JSX } from "solid-js";
 import { toast } from "~/lib/toast";
-import { Button } from "@basalt/ui";
+import { Button } from "@basaltac/ui";
 import { Dialog,
 	DialogContent,
 	DialogFooter,
 	DialogHeader,
-	DialogTitle, } from "@basalt/ui";
+	DialogTitle, } from "@basaltac/ui";
 
 /** Result contract for onSubmit: `error` keeps the dialog open and shows the
  *  message inline (inputs preserved); anything else is success. */

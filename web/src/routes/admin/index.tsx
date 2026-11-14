@@ -14,7 +14,7 @@ import {
 	getOverviewQuery,
 	type ExternalResult,
 } from "~/lib/overview";
-import { Button, Card, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@basalt/ui";
+import { Button, Card, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@basaltac/ui";
 import SelectField from "~/components/select-field";
 
 /** Render an external-source metric, degrading to a muted "not connected" tile. */

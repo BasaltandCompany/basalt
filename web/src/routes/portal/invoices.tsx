@@ -7,7 +7,7 @@ import {
 	getClientUserQuery,
 } from "~/lib/client-queries";
 import type { InvoiceStatus } from "~/db/schema";
-import { Button, Card, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@basalt/ui";
+import { Button, Card, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@basaltac/ui";
 
 const statusBadge: Record<InvoiceStatus, string> = {
 	draft: "badge-paused",

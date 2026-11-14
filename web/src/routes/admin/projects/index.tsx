@@ -9,7 +9,7 @@ import {
 	getUserQuery,
 } from "~/lib/queries";
 import { getCompaniesForSelectQuery } from "~/lib/admin-queries";
-import { Card, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@basalt/ui";
+import { Card, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@basaltac/ui";
 import SelectField from "~/components/select-field";
 
 const statusBadge: Record<string, string> = {

@@ -2,7 +2,7 @@ import { Title } from "@solidjs/meta";
 import { createAsync, useAction } from "@solidjs/router";
 import { Show, createSignal } from "solid-js";
 import { getUserQuery, loginAction } from "~/lib/queries";
-import { Button, Card } from "@basalt/ui";
+import { Button, Card } from "@basaltac/ui";
 import Brand from "~/components/Brand";
 
 export default function Login() {

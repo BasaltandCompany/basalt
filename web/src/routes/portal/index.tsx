@@ -7,7 +7,7 @@ import {
 	getClientUserQuery,
 } from "~/lib/client-queries";
 import type { DeliverableStatus } from "~/db/schema";
-import { Button, Card } from "@basalt/ui";
+import { Button, Card } from "@basaltac/ui";
 
 const statusBadge: Record<DeliverableStatus, string> = {
 	planned: "badge-paused",

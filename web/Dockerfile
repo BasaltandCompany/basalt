@@ -1,6 +1,6 @@
 # ═══ Builder: install + compile ═══
 # Build context is the REPO ROOT (ci.yml + fly.yml pass --dockerfile
-# web/Dockerfile): the app imports the @basalt/ui workspace package
+# web/Dockerfile): the app imports the @basaltac/ui workspace package
 # from packages/ui.
 FROM oven/bun:1.4 AS builder
 WORKDIR /app

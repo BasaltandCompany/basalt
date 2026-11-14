@@ -10,7 +10,7 @@ import {
 	runBrainCycleAction,
 	closeLoopAction,
 } from "~/lib/brain/admin";
-import { Button, Card } from "@basalt/ui";
+import { Button, Card } from "@basaltac/ui";
 
 const kindColor: Record<string, string> = {
 	lesson: "var(--accent, #a855f7)",
