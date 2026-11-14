@@ -2,7 +2,9 @@ import { getCookie, setCookie } from "@solidjs/start/http";
 import { supabaseAdmin } from "./supabase";
 import type { User } from "@supabase/supabase-js";
 
-const COOKIE_OPTS = {
+/** Session cookies for the Supabase tokens (admin dashboard + OAuth consent).
+ *  The client portal uses its own cookie (mc-client-session) in client-session.ts. */
+export const COOKIE_OPTS = {
 	httpOnly: true,
 	secure: false, // local dev
 	sameSite: "lax" as const,

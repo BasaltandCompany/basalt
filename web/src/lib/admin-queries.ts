@@ -41,7 +41,7 @@ import type { Video } from "~/db/schema";
 
 // ── Auth guard ────────────────────────────────────────────────────
 
-async function requireAdmin() {
+export async function requireAdmin() {
 	const supabase = await getAuthedClient();
 	if (!supabase) throw redirect("/admin/login");
 }

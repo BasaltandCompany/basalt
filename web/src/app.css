@@ -967,6 +967,22 @@ input:not(.form-group input):not(.doc-title):focus {
   margin: 0 0 8px;
 }
 
+/* consent scope list on /oauth/consent */
+.login-scopes {
+  margin: 16px 0 4px;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: var(--foreground);
+}
+.login-scopes li {
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+.login-scopes li:last-child {
+  border-bottom: 1px solid var(--border);
+}
+
 /* ── Timer widget (sidebar) ─────────────────────────────────── */
 
 .timer-widget {
