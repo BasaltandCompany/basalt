@@ -5,6 +5,7 @@ import Brand from "~/components/Brand";
 
 const links = [
 	{ href: "/portal", label: "Overview" },
+	{ href: "/portal/value", label: "Value" },
 	{ href: "/portal/documents", label: "Documents" },
 	{ href: "/portal/quotes", label: "Quotes" },
 	{ href: "/portal/invoices", label: "Invoices" },

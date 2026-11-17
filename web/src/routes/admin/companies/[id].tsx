@@ -19,7 +19,13 @@ import {
 	createInvoiceAction,
 	deleteInvoiceAction,
 	updateCompanyAliasesAction,
+	getCompanyToolsQuery,
+	createToolAction,
+	updateToolAction,
+	deleteToolAction,
+	getCompanyValueQuery,
 } from "~/lib/admin-queries";
+import { grossSavedForTool, usd } from "~/lib/value";
 import { getUserQuery } from "~/lib/queries";
 import type { InvoiceStatus } from "~/db/schema";
 import { Button, Card } from "@basaltac/ui";
@@ -61,6 +67,12 @@ export default function CompanyDetail() {
 	const [showInvForm, setShowInvForm] = createSignal<string | null>(null);
 	const [error, setError] = createSignal("");
 	const [success, setSuccess] = createSignal("");
+
+	const companyTools = createAsync(() => getCompanyToolsQuery(companyId()), { deferStream: true });
+	const companyValue = createAsync(() => getCompanyValueQuery(companyId()), { deferStream: true });
+	const addTool = useAction(createToolAction);
+	const updateTool = useAction(updateToolAction);
+	const deleteTool = useAction(deleteToolAction);
 
 	const referer = () => `/admin/companies/${companyId()}`;
 	const today = new Date().toISOString().slice(0, 10);
@@ -131,6 +143,129 @@ export default function CompanyDetail() {
 								<Button variant="outline" size="sm" type="submit">Save</Button>
 							</form>
 						</Card>
+
+						{/* ── Replaced SaaS tools (savings ledger) ──── */}
+						<div style={{ "margin-top": "32px" }}>
+							<div style={{ display: "flex", "justify-content": "space-between", "align-items": "center", "margin-bottom": "16px" }}>
+								<div class="section-heading" style={{ margin: "0" }}>Replaced SaaS Tools</div>
+								<CreateDialog
+									label="Add Tool"
+									title="Add a replaced SaaS tool"
+									submitLabel="Add"
+									triggerClass="btn btn-sm btn-primary"
+									successMessage="Tool added."
+									onSubmit={async (fd) => {
+										fd.set("company_id", companyId());
+										fd.set("_referer", referer());
+										await addTool(fd);
+										await revalidate(getCompanyToolsQuery.key);
+										await revalidate(getCompanyValueQuery.key);
+									}}
+								>
+									<div class="form-row">
+										<div class="form-group">
+											<label for="t_name">Tool name</label>
+											<input type="text" id="t_name" name="name" required placeholder="Zoom" />
+										</div>
+										<div class="form-group">
+											<label for="t_cost">Was $/mo</label>
+											<input type="number" id="t_cost" name="monthly_cost" step="0.01" min="0" required placeholder="49" />
+										</div>
+									</div>
+									<div class="form-group">
+										<label for="t_cutover">Cutover date (blank = planned)</label>
+										<input type="date" id="t_cutover" name="cutover_date" />
+									</div>
+									<div class="form-group">
+										<label for="t_notes">Notes</label>
+										<textarea id="t_notes" name="notes" rows={2} placeholder="Replaced with the in-house pipeline" />
+									</div>
+								</CreateDialog>
+							</div>
+
+							<Suspense fallback={<p class="muted">Loading…</p>}>
+								<Show when={companyValue()}>{(v) => (
+									<div class="stat-grid" style={{ "margin-bottom": "16px" }}>
+										<div class="stat-card">
+											<div class="label">Gross saved</div>
+											<div class="value">{usd(v().grossSaved)}</div>
+										</div>
+										<div class="stat-card">
+											<div class="label">Fees (billable × rate)</div>
+											<div class="value">{usd(v().fees)}</div>
+										</div>
+										<div class="stat-card">
+											<div class="label">Net ROI</div>
+											<div class="value">{usd(v().net)}</div>
+										</div>
+									</div>
+								)}</Show>
+
+								<Show when={companyTools()}>
+									{(list) => (
+										<Show when={list().length > 0} fallback={<Card class="empty">No replaced tools yet.</Card>}>
+											<div style={{ display: "flex", "flex-direction": "column", gap: "8px" }}>
+												<For each={list()}>
+													{(t) => (
+																<Card style={{ display: "flex", "align-items": "center", gap: "12px", padding: "14px 20px", "flex-wrap": "wrap" }}>
+															<div style={{ flex: "1", "min-width": "220px" }}>
+																<span style={{ "font-size": "14px" }}>{t.name}</span>
+																<span class="muted" style={{ "font-size": "12px", "margin-left": "8px" }}>
+																	{usd(t.monthlyCost)}/mo
+																</span>
+																<span class={`badge ${t.cutoverDate ? "badge-completed" : "badge-paused"}`} style={{ "margin-left": "8px" }}>
+																	{t.cutoverDate ? "replaced" : "planned"}
+																</span>
+																<span class="muted" style={{ "font-size": "12px", "margin-left": "8px" }}>
+																	saved {usd(grossSavedForTool(t))}
+																</span>
+															</div>
+															<form
+																onSubmit={async (e) => {
+																	e.preventDefault();
+																	const fd = new FormData(e.target as HTMLFormElement);
+																	fd.set("id", t.id);
+																	fd.set("_referer", referer());
+																	await updateTool(fd);
+																	await revalidate(getCompanyToolsQuery.key);
+																	await revalidate(getCompanyValueQuery.key);
+																}}
+																style={{ display: "inline-flex", gap: "8px", "align-items": "center" }}
+															>
+																<input type="hidden" name="name" value={t.name} />
+																<input type="hidden" name="monthly_cost" value={t.monthlyCost} />
+																<input type="hidden" name="notes" value={t.notes ?? ""} />
+																<input
+																	type="date"
+																	name="cutover_date"
+																	value={t.cutoverDate ? new Date(t.cutoverDate).toISOString().slice(0, 10) : ""}
+																	style={{ "font-size": "13px" }}
+																/>
+																<Button variant="outline" size="sm" type="submit">
+																	{t.cutoverDate ? "Update" : "Cut over"}
+																</Button>
+															</form>
+															<ConfirmButton
+																label="Remove"
+																confirmText="Remove this tool?"
+																danger
+																				onConfirm={async () => {
+																					const fd = new FormData();
+																					fd.set("id", t.id);
+																					await deleteTool(fd);
+																					await revalidate(getCompanyToolsQuery.key);
+																					await revalidate(getCompanyValueQuery.key);
+																				}}
+															/>
+														</Card>
+													)}
+												</For>
+											</div>
+										</Show>
+									)}
+								</Show>
+							</Suspense>
+						</div>
 
 						{/* ── Members ─────────────────────────────────── */}
 						<div style={{ "margin-top": "32px" }}>

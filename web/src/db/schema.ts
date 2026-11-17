@@ -276,6 +276,31 @@ export const companies = pgTable("companies", {
 		.$onUpdate(() => new Date()),
 });
 
+// ── Replaced SaaS tools (the savings ledger) ───────────────────────
+// One row per client SaaS tool we replaced with an in-house build.
+// Savings accrue from cutoverDate (null = planned, $0 until cut over) —
+// the raw material for /portal/value's gross-saved number and admin net ROI.
+export const tools = pgTable(
+	"tools",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		companyId: uuid("company_id")
+			.notNull()
+			.references(() => companies.id, { onDelete: "cascade" }),
+		name: text("name").notNull(),
+		monthlyCost: doublePrecision("monthly_cost").notNull().default(0),
+		// null = not yet cut over (planned); savings only accrue from this date
+		cutoverDate: timestamp("cutover_date"),
+		notes: text("notes"),
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+		updatedAt: timestamp("updated_at")
+			.notNull()
+			.defaultNow()
+			.$onUpdate(() => new Date()),
+	},
+	(t) => [index("idx_tools_company").on(t.companyId)],
+);
+
 // ── Outreach campaigns (email sequences) ──────────────────────────
 // The CRM board tracks people progressing through stages; campaigns track
 // the sequence itself — which companies are in it, when the next email goes
@@ -395,6 +420,11 @@ export const timeEntries = pgTable(
 		projectId: uuid("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "cascade" }),
+		// optional link to the deliverable these hours built (set null on
+		// deliverable deletion — the hours survive unlinked)
+		deliverableId: uuid("deliverable_id").references(() => deliverables.id, {
+			onDelete: "set null",
+		}),
 		entryDate: timestamp("entry_date").notNull().defaultNow(),
 		hours: doublePrecision("hours").notNull(),
 		description: text("description").notNull(),

@@ -13,6 +13,8 @@ import {
 	invoices,
 	deliverables,
 	deliverableUpdates,
+	timeEntries,
+	tools,
 	apiKeys,
 	outreachProspects,
 	videos,
@@ -35,6 +37,8 @@ import type {
 	OutreachProspect,
 	CampaignTouch,
 } from "~/db/schema";
+import { grossSavedForCompany, billedAmount } from "~/lib/value";
+
 import { generateApiKey, hashKey, keyPrefix } from "~/lib/crypto";
 import { normalizeBrainTools } from "~/lib/brain-activity";
 import { contactSuggestionsFor, latestThreadFor } from "~/lib/outreach-email";
@@ -352,6 +356,77 @@ export const deleteInvoiceAction = action(async (formData: FormData) => {
 		return { error: e instanceof Error ? e.message : "Failed to delete invoice." };
 	}
 }, "deleteInvoice");
+
+// ── Replaced SaaS tools (savings ledger) ─────────────────────────
+
+export const getCompanyToolsQuery = query(async (companyId: string) => {
+	"use server";
+	await requireAdmin();
+	return db
+		.select()
+		.from(tools)
+		.where(eq(tools.companyId, companyId))
+		.orderBy(desc(tools.createdAt));
+}, "admin-company-tools");
+
+export const createToolAction = action(async (formData: FormData) => {
+	"use server";
+	await requireAdmin();
+	await db.insert(tools).values({
+		companyId: String(formData.get("company_id")),
+		name: String(formData.get("name")),
+		monthlyCost: Number(formData.get("monthly_cost") || 0),
+		cutoverDate: formData.get("cutover_date") ? new Date(String(formData.get("cutover_date"))) : null,
+		notes: String(formData.get("notes") || "") || null,
+	});
+	await revalidate(getCompanyValueQuery.key);
+	throw redirect(String(formData.get("_referer") || "/admin/companies"));
+}, "createTool");
+
+export const updateToolAction = action(async (formData: FormData) => {
+	"use server";
+	await requireAdmin();
+	await db
+		.update(tools)
+		.set({
+			name: String(formData.get("name")),
+			monthlyCost: Number(formData.get("monthly_cost") || 0),
+			cutoverDate: formData.get("cutover_date") ? new Date(String(formData.get("cutover_date"))) : null,
+			notes: String(formData.get("notes") || "") || null,
+		})
+		.where(eq(tools.id, String(formData.get("id"))));
+	await revalidate(getCompanyValueQuery.key);
+	throw redirect(String(formData.get("_referer") || "/admin/companies"));
+}, "updateTool");
+
+export const deleteToolAction = action(async (formData: FormData) => {
+	"use server";
+	await requireAdmin();
+	await db.delete(tools).where(eq(tools.id, String(formData.get("id"))));
+	await revalidate(getCompanyValueQuery.key);
+	return { success: "Tool removed." };
+}, "deleteTool");
+
+/** Gross saved, billable fees, and net ROI for one company (admin-only view). */
+export const getCompanyValueQuery = query(async (companyId: string) => {
+	"use server";
+	await requireAdmin();
+	const [toolRows, billed] = await Promise.all([
+		db.select().from(tools).where(eq(tools.companyId, companyId)),
+		db
+			.select({ hours: timeEntries.hours, billable: timeEntries.billable, hourlyRate: projects.hourlyRate })
+			.from(timeEntries)
+			.innerJoin(projects, eq(projects.id, timeEntries.projectId))
+			.where(eq(projects.companyId, companyId)),
+	]);
+	const grossSaved = grossSavedForCompany(
+		toolRows.map((t) => ({ name: t.name, monthlyCost: t.monthlyCost, cutoverDate: t.cutoverDate })),
+	);
+	const fees = billedAmount(billed);
+	return { grossSaved, fees, net: grossSaved - fees };
+}, "admin-company-value");
+
+// ── Deliverables ──────────────────────────────────────────────────
 
 // ── Deliverables ──────────────────────────────────────────────────
 
