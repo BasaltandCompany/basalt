@@ -14,6 +14,8 @@ import {
 	invoices,
 	deliverables,
 	deliverableUpdates,
+	timeEntries,
+	tools,
 	apiKeys,
 	outreachProspects,
 	videos,
@@ -37,6 +39,7 @@ import type {
 	CampaignTouch,
 } from "~/db/schema";
 import { getPersonDossier } from "~/lib/people";
+import { grossSavedForCompany, billedAmount } from "~/lib/value";
 import { generateApiKey, hashKey, keyPrefix } from "~/lib/crypto";
 import { normalizeBrainTools } from "~/lib/brain-activity";
 import { contactSuggestionsFor, latestThreadFor } from "~/lib/outreach-email";
@@ -45,6 +48,7 @@ import { campaignStats } from "~/lib/campaign-stats";
 import { setProspectVideo } from "~/lib/videos";
 import { createDoc } from "~/lib/docs";
 import { computeQuoteTotals } from "~/lib/quotes";
+import { getProjectQuery, getProjectsQuery } from "~/lib/queries";
 import { getProjectActuals } from "~/lib/quote-actuals";
 import type { Video } from "~/db/schema";
 import type { QuoteStatus } from "~/db/schema";
@@ -353,6 +357,77 @@ export const deleteInvoiceAction = action(async (formData: FormData) => {
 		return { error: e instanceof Error ? e.message : "Failed to delete invoice." };
 	}
 }, "deleteInvoice");
+
+// ── Replaced SaaS tools (savings ledger) ─────────────────────────
+
+export const getCompanyToolsQuery = query(async (companyId: string) => {
+	"use server";
+	await requireAdmin();
+	return db
+		.select()
+		.from(tools)
+		.where(eq(tools.companyId, companyId))
+		.orderBy(desc(tools.createdAt));
+}, "admin-company-tools");
+
+export const createToolAction = action(async (formData: FormData) => {
+	"use server";
+	await requireAdmin();
+	await db.insert(tools).values({
+		companyId: String(formData.get("company_id")),
+		name: String(formData.get("name")),
+		monthlyCost: Number(formData.get("monthly_cost") || 0),
+		cutoverDate: formData.get("cutover_date") ? new Date(String(formData.get("cutover_date"))) : null,
+		notes: String(formData.get("notes") || "") || null,
+	});
+	await revalidate(getCompanyValueQuery.key);
+	throw redirect(String(formData.get("_referer") || "/admin/companies"));
+}, "createTool");
+
+export const updateToolAction = action(async (formData: FormData) => {
+	"use server";
+	await requireAdmin();
+	await db
+		.update(tools)
+		.set({
+			name: String(formData.get("name")),
+			monthlyCost: Number(formData.get("monthly_cost") || 0),
+			cutoverDate: formData.get("cutover_date") ? new Date(String(formData.get("cutover_date"))) : null,
+			notes: String(formData.get("notes") || "") || null,
+		})
+		.where(eq(tools.id, String(formData.get("id"))));
+	await revalidate(getCompanyValueQuery.key);
+	throw redirect(String(formData.get("_referer") || "/admin/companies"));
+}, "updateTool");
+
+export const deleteToolAction = action(async (formData: FormData) => {
+	"use server";
+	await requireAdmin();
+	await db.delete(tools).where(eq(tools.id, String(formData.get("id"))));
+	await revalidate(getCompanyValueQuery.key);
+	return { success: "Tool removed." };
+}, "deleteTool");
+
+/** Gross saved, billable fees, and net ROI for one company (admin-only view). */
+export const getCompanyValueQuery = query(async (companyId: string) => {
+	"use server";
+	await requireAdmin();
+	const [toolRows, billed] = await Promise.all([
+		db.select().from(tools).where(eq(tools.companyId, companyId)),
+		db
+			.select({ hours: timeEntries.hours, billable: timeEntries.billable, hourlyRate: projects.hourlyRate })
+			.from(timeEntries)
+			.innerJoin(projects, eq(projects.id, timeEntries.projectId))
+			.where(eq(projects.companyId, companyId)),
+	]);
+	const grossSaved = grossSavedForCompany(
+		toolRows.map((t) => ({ name: t.name, monthlyCost: t.monthlyCost, cutoverDate: t.cutoverDate })),
+	);
+	const fees = billedAmount(billed);
+	return { grossSaved, fees, net: grossSaved - fees };
+}, "admin-company-value");
+
+// ── Deliverables ──────────────────────────────────────────────────
 
 // ── Deliverables ──────────────────────────────────────────────────
 
@@ -1382,6 +1457,21 @@ export const getQuotesQuery = query(async () => {
 	}));
 }, "admin-quotes");
 
+export const getProjectQuotesQuery = query(async (projectId: string) => {
+	"use server";
+	await requireAdmin();
+	const rows = await db
+		.select({ id: quotes.id, title: quotes.title, status: quotes.status, updatedAt: quotes.updatedAt })
+		.from(quotes)
+		.where(eq(quotes.projectId, projectId))
+		.orderBy(desc(quotes.updatedAt));
+	const allItems = await db.select().from(quoteItems);
+	return rows.map((q) => ({
+		...q,
+		total: computeQuoteTotals(allItems.filter((i) => i.quoteId === q.id)).total,
+	}));
+}, "admin-project-quotes");
+
 export const getQuoteQuery = query(async (id: string) => {
 	"use server";
 	await requireAdmin();
@@ -1441,16 +1531,46 @@ export const updateQuoteMetaAction = action(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id"));
-	await db
-		.update(quotes)
-		.set({
-			title: String(formData.get("title") || "").trim() || undefined,
-			projectId: formData.get("project_id") ? String(formData.get("project_id")) : null,
-			validDays: Number(formData.get("valid_days")) || 30,
-			quotedCapHours: formData.get("quoted_cap_hours") ? Number(formData.get("quoted_cap_hours")) : null,
-		})
-		.where(eq(quotes.id, id));
-	await revalidate([getQuoteQuery.keyFor(id), getQuotesQuery.key]);
+	// Partial update (drizzle ignores undefined): the quote detail form
+	// submits every field; the project page sends only id + project_id.
+	const values: Partial<typeof quotes.$inferInsert> = {};
+	if (formData.has("title")) {
+		const title = String(formData.get("title") || "").trim();
+		if (title) values.title = title;
+	}
+	if (formData.has("project_id")) {
+		const projectId = String(formData.get("project_id") || "") || null;
+		if (projectId) {
+			// portal access is company-scoped: a quote may only link to a
+			// project of the same company
+			const [project] = await db
+				.select({ companyId: projects.companyId })
+				.from(projects)
+				.where(eq(projects.id, projectId))
+				.limit(1);
+			const [quote] = await db
+				.select({ companyId: quotes.companyId })
+				.from(quotes)
+				.where(eq(quotes.id, id))
+				.limit(1);
+			if (!project || !quote || project.companyId !== quote.companyId) {
+				return { error: "Quote belongs to a different company." };
+			}
+		}
+		values.projectId = projectId;
+	}
+	if (formData.has("valid_days")) values.validDays = Number(formData.get("valid_days")) || 30;
+	if (formData.has("quoted_cap_hours")) {
+		values.quotedCapHours = formData.get("quoted_cap_hours") ? Number(formData.get("quoted_cap_hours")) : null;
+	}
+	await db.update(quotes).set(values).where(eq(quotes.id, id));
+	await revalidate([
+		getQuoteQuery.keyFor(id),
+		getQuotesQuery.key,
+		getProjectQuotesQuery.key,
+		getProjectQuery.key,
+		getProjectsQuery.key,
+	]);
 	return { success: "Saved." };
 }, "updateQuoteMeta");
 
@@ -1517,7 +1637,7 @@ export const setQuoteStatusAction = action(async (formData: FormData) => {
 	if (status === "accepted" && q.projectId) {
 		await db.update(projects).set({ fixedPrice: totals.total }).where(eq(projects.id, q.projectId));
 	}
-	await revalidate([getQuoteQuery.keyFor(id), getQuotesQuery.key]);
+	await revalidate([getQuoteQuery.keyFor(id), getQuotesQuery.key, getProjectQuotesQuery.key, getProjectQuery.key, getProjectsQuery.key]);
 	return { success: `Status → ${status}.` };
 }, "setQuoteStatus");
 

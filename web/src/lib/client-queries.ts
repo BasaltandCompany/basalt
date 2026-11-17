@@ -20,11 +20,14 @@ import {
 	quoteVersions,
 	quoteSignatures,
 	docs,
+	timeEntries,
+	tools,
 } from "~/db/schema";
 import type { DocumentType, QuoteStatus } from "~/db/schema";
 import { computeQuoteTotals, composeQuoteMarkdown } from "~/lib/quotes";
 import { marked } from "marked";
-import { sql } from "drizzle-orm";
+import { sql, asc } from "drizzle-orm";
+import { grossSavedForCompany, grossSavedForTool, cumulativeSavingsSeries } from "~/lib/value";
 
 // ── Client portal queries ──────────────────────────────────────────
 
@@ -131,6 +134,59 @@ export const getClientDashboardQuery = query(async () => {
 		invoiceCount: invoiceRows.length,
 	};
 }, "client-dashboard");
+
+/** The value story for the member's companies: gross saved, cumulative
+ *  series for the chart, per-tool rows, and hours invested. Fees are
+ *  deliberately absent — cost math is admin-only. */
+export const getClientValueQuery = query(async () => {
+	"use server";
+	const member = await getClient();
+	if (!member) throw redirect("/portal/login");
+
+	const memberCompanies = await db
+		.select({ companyId: clientCompanyMembers.companyId })
+		.from(clientCompanyMembers)
+		.where(eq(clientCompanyMembers.memberId, member.id));
+	const companyIds = memberCompanies.map((c) => c.companyId);
+	if (companyIds.length === 0)
+		return { savedToDate: 0, series: [], tools: [], totalHours: 0, hoursThisMonth: 0 };
+
+	const toolRows = await db
+		.select()
+		.from(tools)
+		.where(inArray(tools.companyId, companyIds))
+		.orderBy(asc(tools.cutoverDate)); // ASC: nulls last → replaced tools first, planned at the end
+
+	const projectRows = await db
+		.select({ id: projects.id })
+		.from(projects)
+		.where(inArray(projects.companyId, companyIds));
+	const projectIds = projectRows.map((p) => p.id);
+	const entryRows =
+		projectIds.length > 0
+			? await db
+					.select({ hours: timeEntries.hours, entryDate: timeEntries.entryDate })
+					.from(timeEntries)
+					.where(inArray(timeEntries.projectId, projectIds))
+			: [];
+
+	const now = new Date();
+	const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+	return {
+		savedToDate: grossSavedForCompany(toolRows),
+		series: cumulativeSavingsSeries(toolRows),
+		tools: toolRows.map((t) => ({
+			name: t.name,
+			monthlyCost: t.monthlyCost,
+			cutoverDate: t.cutoverDate,
+			saved: grossSavedForTool(t),
+		})),
+		totalHours: entryRows.reduce((s, e) => s + e.hours, 0),
+		hoursThisMonth: entryRows
+			.filter((e) => new Date(e.entryDate) >= monthStart)
+			.reduce((s, e) => s + e.hours, 0),
+	};
+}, "client-value");
 
 export interface SearchHit {
 	id: string;

@@ -35,6 +35,7 @@ import {
 	quoteItems,
 	quoteSignatures,
 	secureShares,
+	tools,
 } from "~/db/schema";
 import { computeQuoteTotals, type QuoteTotals } from "~/lib/quotes";
 import {
@@ -45,6 +46,8 @@ import {
 	type ComponentTypeSummary,
 	type EntityRef,
 } from "./types";
+import { usd } from "~/lib/value";
+
 
 // ── Registrations ──────────────────────────────────────────────────
 
@@ -308,6 +311,23 @@ const quote = defineComponent({
 	],
 });
 
+const tool = defineComponent({
+	kind: "tool",
+	label: "Tool",
+	description:
+		"A client SaaS tool replaced (or slated for replacement) with an in-house build — the savings ledger behind /portal/value and admin net ROI.",
+	table: tools,
+	title: (r) => r.name,
+	subtitle: (r) => `${usd(r.monthlyCost)}/mo · ${r.cutoverDate ? `cut over ${new Date(r.cutoverDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}` : "planned"}`,
+	status: {
+		get: (r) => (r.cutoverDate ? "replaced" : "planned"),
+		labels: { replaced: "replaced — savings accruing", planned: "planned — not yet cut over" },
+	},
+	adminPath: (r) => `/admin/companies/${r.companyId}`,
+	search: { columns: [tools.name, tools.notes] },
+	ownerLinks: [{ key: "companyId", column: tools.companyId, kind: "company" }],
+});
+
 const funnelRun = defineComponent({
 	kind: "funnel-run",
 	label: "Funnel run",
@@ -394,6 +414,7 @@ export const COMPONENTS: Record<string, AnyComponentDefinition> = {
 	invoice: invoice as AnyComponentDefinition,
 	deliverable: deliverable as AnyComponentDefinition,
 	"quote": quote as AnyComponentDefinition,
+	tool: tool as AnyComponentDefinition,
 	"funnel-run": funnelRun as AnyComponentDefinition,
 	"funnel-item": funnelItem as AnyComponentDefinition,
 	"secure-share": secureShare as AnyComponentDefinition,

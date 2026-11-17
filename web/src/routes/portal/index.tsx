@@ -5,9 +5,11 @@ import PortalLayout from "~/components/PortalLayout";
 import {
 	getClientDashboardQuery,
 	getClientUserQuery,
+	getClientValueQuery,
 } from "~/lib/client-queries";
-import type { DeliverableStatus } from "~/db/schema";
+import { usd } from "~/lib/value";
 import { Button, Card } from "@basaltac/ui";
+import type { DeliverableStatus } from "~/db/schema";
 
 const statusBadge: Record<DeliverableStatus, string> = {
 	planned: "badge-paused",
@@ -22,6 +24,7 @@ export default function PortalHome() {
 	const data = createAsync(() => getClientDashboardQuery(), {
 		deferStream: true,
 	});
+	const value = createAsync(() => getClientValueQuery(), { deferStream: true });
 
 	return (
 		<PortalLayout user={user()}>
@@ -45,6 +48,12 @@ export default function PortalHome() {
 								<div class="label">Open Invoices</div>
 								<div class="value">{d().invoiceCount}</div>
 							</div>
+							<A href="/portal/value" style={{ "text-decoration": "none" }}>
+								<div class="stat-card">
+									<div class="label">Saved to date</div>
+									<div class="value">{usd(value()?.savedToDate ?? 0)}</div>
+								</div>
+							</A>
 						</div>
 
 						{/* ── Projects list ────────────────────────── */}

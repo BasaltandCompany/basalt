@@ -94,6 +94,16 @@ export default function Projects() {
 							<input type="number" id="monthly_cap_hours" name="monthly_cap_hours" step="1" min="0" placeholder="Leave blank if uncapped" />
 						</div>
 					</Show>
+					<div class="form-row">
+						<div class="form-group">
+							<label for="start_date">Start Date</label>
+							<input type="date" id="start_date" name="start_date" />
+						</div>
+						<div class="form-group">
+							<label for="end_date">End Date</label>
+							<input type="date" id="end_date" name="end_date" />
+						</div>
+					</div>
 					<div class="form-group">
 						<label for="notes">Scope / Notes</label>
 						<textarea id="notes" name="notes" rows={3} placeholder="What's planned, scope boundaries, deliverables…" />
