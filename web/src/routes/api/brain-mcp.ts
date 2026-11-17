@@ -14,6 +14,7 @@ import { randomKey, shortLinkBase, TARGET_RE } from "~/lib/short-links";
 import { maybeRunCycle } from "~/lib/brain/distill";
 import { listComponentTypes, getComponent, resolveCard, searchAll, linksFor, loadRow } from "~/registry/registry";
 import { linkComponents, listLinks, UnknownKindError } from "~/lib/entity-links";
+import { nameKey, noteRead, requireRead, sessionKey } from "~/lib/read-gate";
 import { createVideo, setProspectVideo } from "~/lib/videos";
 import { createFunnel, createFunnelRun, importRunItems, recordStageVerdict } from "~/lib/funnels";
 import { runStageBatch } from "~/lib/funnel-stages";
@@ -272,7 +273,7 @@ const TOOLS = [
 	{
 		name: "set_outreach_brain",
 		description:
-			'Create or update an outreach prospect\'s brain wiring. Matches by company (case-insensitive; creates the prospect if unknown). Set brain_url (e.g. https://<name>.madcactus.org) and brain_activity_key (the brain\'s ACTIVITY_KEY) so the dashboard can pull /activity. Set video_url to the CAP share link once the outreach video is recorded (the dashboard then serves the tracked /v/:id email link). Omit brain_activity_key / video_url to leave them unchanged. Omit stage to leave it unchanged; stages: ' + OUTREACH_STAGES.join(" → ") + ". The ICP fit fields are research facts (region, revenue_band, tech_team). ai_interest fills ONLY from observed behavior (gate fired → high; click without return → some; sequence ended silent → none) — never guess it. icpApproved is UI-only: the human approves fit.",
+			'Create or update an outreach prospect\'s brain wiring. Matches by company (case-insensitive; creates the prospect if unknown). Set brain_url (e.g. https://<name>.madcactus.org) and brain_activity_key (the brain\'s ACTIVITY_KEY) so the dashboard can pull /activity. Set video_url to the CAP share link once the outreach video is recorded (the dashboard then serves the tracked /v/:id email link). Omit brain_activity_key / video_url to leave them unchanged. Omit stage to leave it unchanged; stages: ' + OUTREACH_STAGES.join(" → ") + ". The ICP fit fields are research facts (region, revenue_band, tech_team). ai_interest fills ONLY from observed behavior (gate fired → high; click without return → some; sequence ended silent → none) — never guess it. icpApproved is UI-only: the human approves fit. Read-before-write gate: updating an EXISTING prospect requires a prior list_outreach or get_component(kind=\"prospect\") read this session; creating a new prospect is unrestricted (chat_uuid scopes the ledger).",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -290,6 +291,7 @@ const TOOLS = [
 				tech_team: { type: "string", enum: ["unknown", "none", "small", "large"] },
 				ai_interest: { type: "string", enum: ["unknown", "none", "some", "high"], description: "behavior only: gate fired → high; click no return → some; silent → none" },
 				source_note: { type: "string", description: "where the row came from + which finding elicited any response" },
+				chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" },
 			},
 			required: ["company"],
 		},
@@ -310,7 +312,7 @@ const TOOLS = [
 	{
 		name: "add_campaign_company",
 		description:
-			"Add or update a company in a campaign's target list. Resolves the campaign by campaign_id, or lazily creates it by campaign_name. Upserts on (campaign, company). sequence_step starts at 1; set next_send_at to when the first email should go and next_email_note to what it should say (the finding).",
+			"Add or update a company in a campaign's target list. Resolves the campaign by campaign_id, or lazily creates it by campaign_name. Upserts on (campaign, company). sequence_step starts at 1; set next_send_at to when the first email should go and next_email_note to what it should say (the finding). Read-before-write gate: for an existing campaign, call list_campaigns or campaign_stats first (chat_uuid scopes the ledger); lazily-created campaigns are exempt.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -320,6 +322,7 @@ const TOOLS = [
 				contact_email: { type: "string" },
 				next_send_at: { type: "string", description: "ISO timestamp; empty string clears it" },
 				next_email_note: { type: "string", description: "what the next email should say — the finding for this touch" },
+				chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" },
 			},
 			required: ["company_name"],
 		},
@@ -333,7 +336,7 @@ const TOOLS = [
 	{
 		name: "set_campaign_templates",
 		description:
-			"Set a campaign's full email sequence — the frozen copy lives ON the campaign. touches: [{step, subject, body}] with {{slots}} for the per-company fill (first_name, company, watch_sentence, finding_1..3, link, owner_role). EVERY body is voice-linted (surface=email) before persisting; any avoid-violation rejects the whole call with per-touch violations — nothing is saved partially. Replaces the campaign's templates wholesale.",
+			"Set a campaign's full email sequence — the frozen copy lives ON the campaign. touches: [{step, subject, body}] with {{slots}} for the per-company fill (first_name, company, watch_sentence, finding_1..3, link, owner_role). EVERY body is voice-linted (surface=email) before persisting; any avoid-violation rejects the whole call with per-touch violations — nothing is saved partially. Replaces the campaign's templates wholesale. Read-before-write gate: call list_campaigns or campaign_stats first (chat_uuid scopes the ledger).",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -351,6 +354,7 @@ const TOOLS = [
 							required: ["step", "subject", "body"],
 					},
 				},
+				chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" },
 			},
 			required: ["touches"],
 		},
@@ -376,7 +380,7 @@ const TOOLS = [
 	{
 		name: "mark_campaign_email_sent",
 		description:
-			'Record that this company\'s step-N email went out and schedule the next. Advances sequence_step; next_send_at = sent_at + cadence delta. cadence "rung-1" (findings ladder): day-0 → +5d → +12d, done after step 3. cadence "rung-2" (post-Loom): day-0 → +4d → +8d, done after step 3. After the last step next_send_at goes null — sequence complete (then newsletter_subscribe applies). Optionally set next_email_note for the next touch.',
+			'Record that this company\'s step-N email went out and schedule the next. Advances sequence_step; next_send_at = sent_at + cadence delta. cadence "rung-1" (findings ladder): day-0 → +5d → +12d, done after step 3. cadence "rung-2" (post-Loom): day-0 → +4d → +8d, done after step 3. After the last step next_send_at goes null — sequence complete (then newsletter_subscribe applies). Optionally set next_email_note for the next touch. Read-before-write gate: the row must have been read this session — list_campaigns or get_due_follow_ups (chat_uuid scopes the ledger).',
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -385,14 +389,15 @@ const TOOLS = [
 				company_name: { type: "string" },
 				cadence: { type: "string", enum: ["rung-1", "rung-2"], description: "default rung-1" },
 				sent_at: { type: "string", description: "ISO timestamp, default now" },
-				next_email_note: { type: "string", description: "omit to leave unchanged" },
+					next_email_note: { type: "string", description: "omit to leave unchanged" },
+				chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" },
 			},
 		},
 	},
 	{
 		name: "stop_campaign_company",
 		description:
-			"Kill a company's sequence: next_send_at → null, note prefixed STOPPED:<reason>. Use on reply, bounce, or gate-fired escalation.",
+			"Kill a company's sequence: next_send_at → null, note prefixed STOPPED:<reason>. Use on reply, bounce, or gate-fired escalation. Read-before-write gate: the row must have been read this session — list_campaigns or get_due_follow_ups (chat_uuid scopes the ledger).",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -400,6 +405,7 @@ const TOOLS = [
 				campaign_name: { type: "string" },
 				company_name: { type: "string" },
 				reason: { type: "string" },
+				chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" },
 			},
 		},
 	},
@@ -515,12 +521,13 @@ lessons_reviewed: { type: "boolean", description: "true = you called get_voice_l
 	{
 		name: "set_newsletter_subject",
 		description:
-			'Set the subject line of a newsletter issue (kind=newsletter). The doc title IS the subject — this renames the doc, and the same text becomes the email subject and the web headline. Never put the subject in the body markdown. Runs Collin\'s voice lint on the subject and returns warnings (advisory — the subject lands regardless); fix flagged wording before or after, Collin reviews in the dashboard.',
+			'Set the subject line of a newsletter issue (kind=newsletter). The doc title IS the subject — this renames the doc, and the same text becomes the email subject and the web headline. Never put the subject in the body markdown. Runs Collin\'s voice lint on the subject and returns warnings (advisory — the subject lands regardless); fix flagged wording before or after, Collin reviews in the dashboard. Read-before-write gate: call get_doc(doc_id) first (chat_uuid scopes the ledger).',
 		inputSchema: {
 			type: "object",
 			properties: {
 				doc_id: { type: "string" },
 				subject: { type: "string", description: "The email subject line / issue title" },
+				chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" },
 			},
 			required: ["doc_id", "subject"],
 		},
@@ -528,13 +535,14 @@ lessons_reviewed: { type: "boolean", description: "true = you called get_voice_l
 	{
 		name: "set_channel_appendix",
 		description:
-			'Set the AFTER-THE-BODY copy (CTA block) of a newsletter issue for one channel — channel: "email" or "web". This is the ONLY place channel-specific copy goes; never write channel CTAs into the body markdown. New issues already carry the default /brain CTA here — overwrite it only when Collin asks for different copy. Runs Collin\'s voice lint (surface=newsletter) and returns warnings (advisory — the copy lands regardless).',
+			'Set the AFTER-THE-BODY copy (CTA block) of a newsletter issue for one channel — channel: "email" or "web". This is the ONLY place channel-specific copy goes; never write channel CTAs into the body markdown. New issues already carry the default /brain CTA here — overwrite it only when Collin asks for different copy. Runs Collin\'s voice lint (surface=newsletter) and returns warnings (advisory — the copy lands regardless). Read-before-write gate: call get_doc(doc_id) first (chat_uuid scopes the ledger).',
 		inputSchema: {
 			type: "object",
 			properties: {
 				doc_id: { type: "string" },
 				channel: { type: "string", enum: ["email", "web"] },
 				content: { type: "string", description: "markdown rendered after the issue body" },
+				chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" },
 			},
 			required: ["doc_id", "channel", "content"],
 		},
@@ -561,7 +569,7 @@ lessons_reviewed: { type: "boolean", description: "true = you called get_voice_l
 	{
 		name: "write_doc",
 		description:
-			"Write into a markdown doc as an attributed agent edit. mode: append (default) adds a section; replace rewrites the body. HARD GATES: the write is REJECTED (nothing lands) if the text has any avoid-violation — fix and resubmit; no override exists, if a rule is wrong tell Collin to disable it — First write attempt auto-no's: the call bounces with the top voice lessons ranked for YOUR text — apply them, then resubmit with lessons_applied=true. On success the write lands as an agent version and re-opens the doc for human review (status=draft). Pass genre to tag/retag the doc (marketing|informational|casual…) so its edits teach and lint under the right scope — reuse an existing genre from get_voice_lessons known_genres.",
+			"Write into a markdown doc as an attributed agent edit. mode: append (default) adds a section; replace rewrites the body. HARD GATES: the write is REJECTED (nothing lands) if the text has any avoid-violation — fix and resubmit; no override exists, if a rule is wrong tell Collin to disable it — First write attempt auto-no's: the call bounces with the top voice lessons ranked for YOUR text — apply them, then resubmit with lessons_applied=true. On success the write lands as an agent version and re-opens the doc for human review (status=draft). Pass genre to tag/retag the doc (marketing|informational|casual…) so its edits teach and lint under the right scope — reuse an existing genre from get_voice_lessons known_genres. Read-before-write gate: call get_doc(doc_id) first (chat_uuid scopes the ledger).",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -642,7 +650,7 @@ lessons_reviewed: { type: "boolean", description: "true = you called get_voice_l
 	{
 		name: "create_email_draft",
 		description:
-			"Create an email for Collin to review in the dashboard Drafts tab. Read get_voice_lessons FIRST and pre-check with lint_voice_text (surface=email). HARD GATE: any avoid-violation REJECTS the call before anything is saved — fix the flagged text and resubmit; nothing lands until it's clean. First write attempt auto-no's: the call bounces with the top voice lessons ranked for YOUR text — apply them, then resubmit with lessons_applied=true. To revise a draft you already created, pass its draft_id (same fields) instead of creating a new one. The human sends by default; pass send_at (ISO) to schedule auto-send via the outbox ticker — the voice gate applies either way. Pass chat_uuid = your session id for provenance. Attachments: pass absolute server-local file paths; each caps at 20MB, total at ~24MB (Gmail's send limit).",
+			"Create an email for Collin to review in the dashboard Drafts tab. Read get_voice_lessons FIRST and pre-check with lint_voice_text (surface=email). HARD GATE: any avoid-violation REJECTS the call before anything is saved — fix the flagged text and resubmit; nothing lands until it's clean. First write attempt auto-no's: the call bounces with the top voice lessons ranked for YOUR text — apply them, then resubmit with lessons_applied=true. To revise a draft you already created, pass its draft_id (same fields) instead of creating a new one. The human sends by default; pass send_at (ISO) to schedule auto-send via the outbox ticker — the voice gate applies either way. Pass chat_uuid = your session id for provenance. Attachments: pass absolute server-local file paths; each caps at 20MB, total at ~24MB (Gmail's send limit). Read-before-write gate: revising via draft_id requires a prior get_component(kind=\"email-draft\", id) read — new drafts are unrestricted (chat_uuid scopes the ledger).",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -697,7 +705,7 @@ chat_uuid: { type: "string" },
 	{
 		name: "link_components",
 		description:
-			"Cross-reference two components (from → to). Ownership NEVER goes here — real FKs own rows; this records references/mentions (e.g. video relates-to prospect, doc mentions company). Idempotent.",
+			"Cross-reference two components (from → to). Ownership NEVER goes here — real FKs own rows; this records references/mentions (e.g. video relates-to prospect, doc mentions company). Idempotent. Read-before-write gate: get_component on BOTH endpoints first — search_components and list_links hits also register (chat_uuid scopes the ledger).",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -707,6 +715,7 @@ chat_uuid: { type: "string" },
 				to_id: { type: "string" },
 				link_type: { type: "string", description: "default 'references'" },
 				context: { type: "string", description: "why this link exists" },
+				chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" },
 			},
 			required: ["from_kind", "from_id", "to_kind", "to_id"],
 		},
@@ -887,12 +896,13 @@ chat_uuid: { type: "string" },
 	{
 		name: "scrape_funnel_company",
 		description:
-			"Deep-scrape one funnel company's ImportYeti page (free — replaces the 1-credit-per-record API endpoint): suppliers, monthly shipment volumes, recent bills of lading, addresses, and manifest-confidentiality periods, merged into the item's rawData as `scrape`. Runs at gate-fire/promotion only, one company per call (5s pacer, ~5s each). Needs IMPORTYETI_COOKIE set and alive. The slug defaults to the slugified company name — pass slug when that misses (check importyeti.com/company/<slug> by hand).",
+			"Deep-scrape one funnel company's ImportYeti page (free — replaces the 1-credit-per-record API endpoint): suppliers, monthly shipment volumes, recent bills of lading, addresses, and manifest-confidentiality periods, merged into the item's rawData as `scrape`. Runs at gate-fire/promotion only, one company per call (5s pacer, ~5s each). Needs IMPORTYETI_COOKIE set and alive. The slug defaults to the slugified company name — pass slug when that misses (check importyeti.com/company/<slug> by hand). Read-before-write gate: list_funnel_items first (chat_uuid scopes the ledger).",
 		inputSchema: {
 			type: "object",
 			properties: {
 				item_id: { type: "string", description: "funnel item id (list_funnel_items)" },
 				slug: { type: "string", description: "ImportYeti company slug (/company/<slug>); default: slugified company name" },
+				chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" },
 			},
 			required: ["item_id"],
 		},
@@ -900,7 +910,7 @@ chat_uuid: { type: "string" },
 	{
 		name: "add_funnel_items",
 		description:
-			"Import companies into an open run (≤100 per call, deduped per run, already-promoted companies skipped). A state field auto-writes the hq_state verdict. Re-pulls are safe.",
+			"Import companies into an open run (≤100 per call, deduped per run, already-promoted companies skipped). A state field auto-writes the hq_state verdict. Re-pulls are safe. Read-before-write gate: funnel_stats or list_funnel_items on this run first (chat_uuid scopes the ledger).",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -927,13 +937,14 @@ chat_uuid: { type: "string" },
 	{
 		name: "run_funnel_stage",
 		description:
-			"Batch-run an api-method stage (ai_signal, headcount, revenue_band, tech_team, ops_trigger) for queued items through its Prospeo driver — CREDITS. Nothing gates: the queue is simply items without this stage's verdict yet. ai_signal runs the paid enrich + roster first (its cache answers the other stages free). limit bounds the batch; re-calls resume where it stopped. agent-method stages (owner_led) are yours: judge then record_funnel_verdict.",
+			"Batch-run an api-method stage (ai_signal, headcount, revenue_band, tech_team, ops_trigger) for queued items through its Prospeo driver — CREDITS. Nothing gates: the queue is simply items without this stage's verdict yet. ai_signal runs the paid enrich + roster first (its cache answers the other stages free). limit bounds the batch; re-calls resume where it stopped. agent-method stages (owner_led) are yours: judge then record_funnel_verdict. Read-before-write gate: funnel_stats or list_funnel_items on this run first (chat_uuid scopes the ledger).",
 		inputSchema: {
 			type: "object",
 			properties: {
 				run_id: { type: "string" },
 				stage: { type: "string", description: "stage key (funnel_stats has them)" },
 				limit: { type: "number", description: "default 50, max 500" },
+				chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" },
 			},
 			required: ["run_id", "stage"],
 		},
@@ -947,13 +958,14 @@ chat_uuid: { type: "string" },
 	{
 		name: "set_funnel_schedule",
 		description:
-			"Enable or disable a funnel's automation schedule — this IS the running switch for scheduled discovery + paid enrichment (Prospeo credits). Pass funnel_name (case-insensitive) or funnel_id, plus enabled true|false. Disabling stops future scheduler ticks; a batch already in flight finishes.",
+			"Enable or disable a funnel's automation schedule — this IS the running switch for scheduled discovery + paid enrichment (Prospeo credits). Pass funnel_name (case-insensitive) or funnel_id, plus enabled true|false. Disabling stops future scheduler ticks; a batch already in flight finishes. Read-before-write gate: list_funnel_schedules first (chat_uuid scopes the ledger).",
 		inputSchema: {
 			type: "object",
 			properties: {
 				funnel_name: { type: "string" },
 				funnel_id: { type: "string" },
 				enabled: { type: "boolean", description: "true = running, false = stopped" },
+				chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" },
 			},
 			required: ["enabled"],
 		},
@@ -961,7 +973,7 @@ chat_uuid: { type: "string" },
 	{
 		name: "record_funnel_verdict",
 		description:
-			"Record one stage verdict (pass|fail) for a funnel item — the same upsert + promotion path as the REST endpoint. agent/human stages land here; also overrides any auto verdict. Promotion fires when every non-soft stage passes.",
+			"Record one stage verdict (pass|fail) for a funnel item — the same upsert + promotion path as the REST endpoint. agent/human stages land here; also overrides any auto verdict. Promotion fires when every non-soft stage passes. Read-before-write gate: list_funnel_items first (chat_uuid scopes the ledger).",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -971,6 +983,7 @@ chat_uuid: { type: "string" },
 				note: { type: "string", description: "evidence summary, e.g. 'tier1: 2 employees post AI work'" },
 				evidence_url: { type: "string" },
 				method: { type: "string", enum: ["source", "api", "agent", "human"], description: "default 'human'" },
+				chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" },
 			},
 			required: ["item_id", "stage", "verdict"],
 		},
@@ -1067,7 +1080,8 @@ export async function POST(event: APIEvent) {
 
 		case "tools/call": {
 			const toolName = body.params?.name;
-			const toolArgs = body.params?.arguments ?? {};
+					const toolArgs = body.params?.arguments ?? {};
+					const readSession = sessionKey(toolArgs.chat_uuid);
 			try {
 				let result: unknown;
 				switch (toolName) {
@@ -1149,6 +1163,7 @@ export async function POST(event: APIEvent) {
 							})
 							.from(outreachProspects)
 							.orderBy(outreachProspects.company);
+						noteRead(readSession, rows.flatMap((p) => [`prospect:${p.id}`, nameKey("prospect", p.company)]));
 						// videos own the link now — latest video per prospect rides along
 						const vids = await db.select().from(videos).orderBy(desc(videos.createdAt));
 						const latestVideo = new Map<string, (typeof vids)[number]>();
@@ -1190,6 +1205,11 @@ export async function POST(event: APIEvent) {
 							.where(ilike(outreachProspects.company, company))
 							.limit(1);
 						if (existing) {
+							const rg = requireRead(readSession, [nameKey("prospect", company), `prospect:${existing.id}`], 'call list_outreach, or get_component(kind="prospect")');
+							if (!rg.ok) {
+								result = rg;
+								break;
+							}
 							await db
 								.update(outreachProspects)
 								.set({
@@ -1231,6 +1251,7 @@ export async function POST(event: APIEvent) {
 									...(videoDescription !== null ? { description: videoDescription } : {}),
 								});
 							}
+							noteRead(readSession, [`prospect:${created.id}`, nameKey("prospect", company)]);
 							result = { id: created.id, company, created: true };
 						}
 						break;
@@ -1245,6 +1266,7 @@ export async function POST(event: APIEvent) {
 							.insert(campaigns)
 							.values({ name, description: toolArgs.description ? String(toolArgs.description) : null })
 							.returning({ id: campaigns.id, name: campaigns.name });
+						noteRead(readSession, `campaign:${row.id}`);
 						result = row;
 						break;
 					}
@@ -1255,18 +1277,29 @@ export async function POST(event: APIEvent) {
 							break;
 						}
 						let campaignId = toolArgs.campaign_id ? String(toolArgs.campaign_id) : null;
+						let campaignCreatedHere = false;
 						if (!campaignId && toolArgs.campaign_name) {
 							const cname = String(toolArgs.campaign_name).trim();
 							const [existing] = await db.select({ id: campaigns.id }).from(campaigns).where(ilike(campaigns.name, cname)).limit(1);
-							if (existing) campaignId = existing.id;
-							else {
+							if (existing) {
+								campaignId = existing.id;
+							} else {
 								const [createdCamp] = await db.insert(campaigns).values({ name: cname }).returning({ id: campaigns.id });
 								campaignId = createdCamp.id;
+								campaignCreatedHere = true;
+								noteRead(readSession, `campaign:${campaignId}`); // session created it
 							}
 						}
 						if (!campaignId) {
 							result = { error: "campaign_id or campaign_name is required" };
 							break;
+						}
+						if (!campaignCreatedHere) {
+							const rg = requireRead(readSession, `campaign:${campaignId}`, "call list_campaigns or campaign_stats first");
+							if (!rg.ok) {
+								result = rg;
+								break;
+							}
 						}
 						const nextSendAt = toolArgs.next_send_at !== undefined ? new Date(String(toolArgs.next_send_at)) : undefined;
 						if (nextSendAt && Number.isNaN(nextSendAt.getTime())) {
@@ -1298,6 +1331,7 @@ export async function POST(event: APIEvent) {
 					case "list_campaigns": {
 						const campRows = await db.select().from(campaigns).orderBy(campaigns.createdAt);
 						const compRows = await db.select().from(campaignCompanies).orderBy(campaignCompanies.companyName);
+						noteRead(readSession, [...campRows.map((c) => `campaign:${c.id}`), ...compRows.map((x) => `campaign_company:${x.id}`)]);
 						const prospectRows = await db.select({ company: outreachProspects.company, stage: outreachProspects.stage }).from(outreachProspects);
 						const stageByCompany = new Map(prospectRows.map((p) => [p.company.toLowerCase(), p.stage] as const));
 						result = {
@@ -1314,6 +1348,11 @@ export async function POST(event: APIEvent) {
 						const camp = await resolveCampaign(toolArgs);
 						if ("error" in camp) {
 							result = camp;
+							break;
+						}
+						const rg = requireRead(readSession, `campaign:${camp.id}`, "call list_campaigns or campaign_stats first");
+						if (!rg.ok) {
+							result = rg;
 							break;
 						}
 						const rawTouches = Array.isArray(toolArgs.touches) ? toolArgs.touches : [];
@@ -1363,7 +1402,11 @@ export async function POST(event: APIEvent) {
 							campaignId = camp.id;
 						}
 						const { campaignStats } = await import("~/lib/campaign-stats");
-						result = { campaigns: await campaignStats(campaignId) };
+						const stats = await campaignStats(campaignId);
+						for (const c of stats) {
+							noteRead(readSession, [`campaign:${c.id}`, ...c.companies.map((x) => `campaign_company:${x.id}`)]);
+						}
+						result = { campaigns: stats };
 						break;
 					}
 					case "get_due_follow_ups": {
@@ -1382,7 +1425,9 @@ export async function POST(event: APIEvent) {
 							.leftJoin(outreachProspects, ilike(outreachProspects.company, campaignCompanies.companyName))
 							.where(and(isNotNull(campaignCompanies.nextSendAt), lte(campaignCompanies.nextSendAt, new Date())))
 							.orderBy(campaignCompanies.nextSendAt);
-						result = { due: rows.filter((r) => !r.prospectStage || !DEAD_STAGES.has(r.prospectStage)) };
+						const due = rows.filter((r) => !r.prospectStage || !DEAD_STAGES.has(r.prospectStage));
+						noteRead(readSession, due.flatMap((r) => [`campaign_company:${r.id}`, `campaign:${r.campaignId}`]));
+						result = { due };
 						break;
 					}
 					case "mark_campaign_email_sent": {
@@ -1395,6 +1440,11 @@ export async function POST(event: APIEvent) {
 						const row = await resolveCampaignCompany(toolArgs);
 						if ("error" in row) {
 							result = row;
+							break;
+						}
+						const rg = requireRead(readSession, `campaign_company:${row.id}`, "call list_campaigns or get_due_follow_ups first");
+						if (!rg.ok) {
+							result = rg;
 							break;
 						}
 						const deltaDays = cadence[row.sequenceStep - 1]; // step just sent is 1-based
@@ -1416,6 +1466,11 @@ export async function POST(event: APIEvent) {
 						const row = await resolveCampaignCompany(toolArgs);
 						if ("error" in row) {
 							result = row;
+							break;
+						}
+						const rg = requireRead(readSession, `campaign_company:${row.id}`, "call list_campaigns or get_due_follow_ups first");
+						if (!rg.ok) {
+							result = rg;
 							break;
 						}
 						const [updated] = await db
@@ -1505,6 +1560,7 @@ export async function POST(event: APIEvent) {
 						chatUuid: toolArgs.chat_uuid ? String(toolArgs.chat_uuid) : undefined,
 						genre: gate.genre,
 					});
+					noteRead(readSession, `doc:${d.id}`);
 					result = { id: d.id, title: d.title, version: d.version, kind: null, genre: d.genre, lint: docLint };
 					break;
 				}
@@ -1534,6 +1590,7 @@ export async function POST(event: APIEvent) {
 						genre: gate.genre,
 						chatUuid: toolArgs.chat_uuid ? String(toolArgs.chat_uuid) : undefined,
 					});
+					noteRead(readSession, `doc:${d.id}`);
 					result = { id: d.id, title: d.title, kind, genre: d.genre, version: d.version, status: d.status, lint };
 					break;
 				}
@@ -1554,12 +1611,18 @@ export async function POST(event: APIEvent) {
 				}
 					case "get_doc": {
 						const d = await getDoc(String(toolArgs.doc_id ?? ""));
+						if (d) noteRead(readSession, `doc:${d.id}`);
 						result = d
 							? { id: d.id, title: d.title, status: d.status, markdown: d.markdown, version: d.version }
 							: { error: "not found" };
 						break;
 					}
 					case "write_doc": {
+						const rg = requireRead(readSession, `doc:${String(toolArgs.doc_id ?? "")}`, 'call get_doc(doc_id) — or get_component(kind="doc")');
+						if (!rg.ok) {
+							result = rg;
+							break;
+						}
 						const gate = await gateGenre(toolArgs);
 						if ("error" in gate) {
 							result = gate;
@@ -1596,6 +1659,13 @@ export async function POST(event: APIEvent) {
 							result = { error: "not found" };
 							break;
 						}
+						{
+							const rg = requireRead(readSession, `doc:${d.id}`, "call get_doc(doc_id) first");
+							if (!rg.ok) {
+								result = rg;
+								break;
+							}
+						}
 						if (d.kind !== "newsletter") {
 							result = { error: `doc ${d.id} is not a newsletter (kind=${d.kind}) — the subject only exists for issues` };
 							break;
@@ -1618,6 +1688,13 @@ export async function POST(event: APIEvent) {
 						if (!d) {
 							result = { error: "not found" };
 							break;
+						}
+						{
+							const rg = requireRead(readSession, `doc:${d.id}`, "call get_doc(doc_id) first");
+							if (!rg.ok) {
+								result = rg;
+								break;
+							}
 						}
 						if (d.kind !== "newsletter") {
 							result = { error: `doc ${d.id} is not a newsletter (kind=${d.kind}) — channel appendix only exists for issues` };
@@ -1721,6 +1798,11 @@ export async function POST(event: APIEvent) {
 								? [String(toolArgs.attachments)]
 								: undefined;
 						if (toolArgs.draft_id) {
+							const rg = requireRead(readSession, `email-draft:${String(toolArgs.draft_id)}`, 'call get_component(kind="email-draft", id=draft_id) first — or just create a new draft');
+							if (!rg.ok) {
+								result = rg;
+								break;
+							}
 							const upd = await updateEmailDraft({
 								outboxId: String(toolArgs.draft_id),
 								to: String(toolArgs.to ?? ""),
@@ -1732,7 +1814,7 @@ export async function POST(event: APIEvent) {
 								...(attPaths ? { attachments: attPaths } : {}),
 								...(toolArgs.signature ? { signature: toolArgs.signature as "full" | "plain" | "none" } : {}),
 							});
-						result = upd;
+							result = upd;
 							if (!(upd && typeof upd === "object" && "outboxId" in upd)) break;
 							if (toolArgs.send_at) await scheduleDraftResult(String(upd.outboxId));
 							break;
@@ -1749,6 +1831,7 @@ export async function POST(event: APIEvent) {
 							...(attPaths ? { attachments: attPaths } : {}),
 							...(toolArgs.signature ? { signature: toolArgs.signature as "full" | "plain" | "none" } : {}),
 						});
+						noteRead(readSession, `email-draft:${created.outboxId}`);
 						result = created;
 						if (toolArgs.send_at) await scheduleDraftResult(created.outboxId);
 						break;
@@ -1822,6 +1905,7 @@ export async function POST(event: APIEvent) {
 						}
 						const card = await resolveCard({ kind, id });
 						const links = await linksFor({ kind, id });
+						if (!card.deleted && card.title) noteRead(readSession, [`${kind}:${id}`, nameKey(kind, card.title)]);
 						// row subset: scalars only, long strings truncated (bodies never dump)
 						const row = card.deleted ? null : Object.fromEntries(
 							Object.entries((await loadRow(def, id)) ?? {}).filter(([, v]) => ["string", "number", "boolean"].includes(typeof v))
@@ -1840,14 +1924,30 @@ export async function POST(event: APIEvent) {
 						result = { card, row, ...quoteExtras, links };
 						break;
 					}
-					case "search_components":
-						result = { hits: await searchAll(String(toolArgs.q ?? "")) };
+					case "search_components": {
+						const hits = await searchAll(String(toolArgs.q ?? ""));
+						noteRead(readSession, hits.map((h) => `${h.kind}:${h.id}`));
+						result = { hits };
 						break;
+					}
 					case "link_components": {
+						const fromRef = { kind: String(toolArgs.from_kind ?? ""), id: String(toolArgs.from_id ?? "") };
+						const toRef = { kind: String(toolArgs.to_kind ?? ""), id: String(toolArgs.to_id ?? "") };
+						const hint = "call get_component on BOTH endpoints (or search_components / list_links)";
+						const rgFrom = requireRead(readSession, `${fromRef.kind}:${fromRef.id}`, hint);
+						if (!rgFrom.ok) {
+							result = rgFrom;
+							break;
+						}
+						const rgTo = requireRead(readSession, `${toRef.kind}:${toRef.id}`, hint);
+						if (!rgTo.ok) {
+							result = rgTo;
+							break;
+						}
 						try {
 							await linkComponents(
-								{ kind: String(toolArgs.from_kind ?? ""), id: String(toolArgs.from_id ?? "") },
-								{ kind: String(toolArgs.to_kind ?? ""), id: String(toolArgs.to_id ?? "") },
+								fromRef,
+								toRef,
 								{ linkType: toolArgs.link_type ? String(toolArgs.link_type) : "references", context: toolArgs.context ? String(toolArgs.context) : null, createdBy: "agent" },
 							);
 							result = { linked: true };
@@ -1862,7 +1962,14 @@ export async function POST(event: APIEvent) {
 							result = { error: `unknown kind "${kind}" — call list_component_types` };
 							break;
 						}
-						result = await listLinks({ kind, id: String(toolArgs.id ?? "") });
+						const links = await listLinks({ kind, id: String(toolArgs.id ?? "") });
+						noteRead(readSession,
+							[`${kind}:${String(toolArgs.id ?? "")}`,
+								...links.owners.map((o) => `${o.card.kind}:${o.card.id}`),
+								...links.children.map((c) => `${c.card.kind}:${c.card.id}`),
+								...links.links.map((l) => `${l.card.kind}:${l.card.id}`)],
+						);
+						result = links;
 						break;
 					}
 					case "create_video": {
@@ -1980,10 +2087,15 @@ export async function POST(event: APIEvent) {
 							result = { error: "quote_id not found" };
 							break;
 						}
-						if (q.status !== "draft") {
-							result = { error: `quote is ${q.status} — immutable via MCP once sent. Collin edits sent quotes in the dashboard.` };
-							break;
-						}
+							if (q.status !== "draft") {
+								result = { error: `quote is ${q.status} — immutable via MCP once sent. Collin edits sent quotes in the dashboard.` };
+								break;
+							}
+							const rg = requireRead(readSession, [`quote:${quoteId}`, nameKey("quote", q.title)], 'call get_component(kind="quote", id) or list_quotes first');
+							if (!rg.ok) {
+								result = rg;
+								break;
+							}
 						if (!toolArgs.title && !Array.isArray(toolArgs.items) && !toolArgs.markdown) {
 							result = { error: "nothing to update — pass title, items, and/or markdown" };
 							break;
@@ -2040,6 +2152,7 @@ export async function POST(event: APIEvent) {
 							.where(conditions.length > 0 ? and(...conditions) : undefined)
 							.orderBy(desc(quotes.createdAt))
 							.limit(Math.min(Number(toolArgs.limit) || 50, 100));
+						noteRead(readSession, rows.flatMap((r) => [`quote:${r.id}`, nameKey("quote", r.title)]));
 						result = await Promise.all(
 							rows.map(async (r) => ({
 								...r,
@@ -2066,6 +2179,7 @@ export async function POST(event: APIEvent) {
 							result = { error: "funnel row missing for this run" };
 							break;
 						}
+						noteRead(readSession, [`funnel_run:${run.id}`, `funnel:${funnel.id}`]);
 						const [{ count: items }] = await db
 							.select({ count: sql<number>`count(*)::int` })
 							.from(funnelItems)
@@ -2104,6 +2218,7 @@ export async function POST(event: APIEvent) {
 						}
 						const [funnel] = await db.select().from(funnels).where(eq(funnels.id, run.funnelId)).limit(1);
 						const stageKeys = (funnel?.stages ?? []).map((s) => s.key);
+						noteRead(readSession, [`funnel_run:${run.id}`, ...(funnel ? [`funnel:${funnel.id}`] : [])]);
 						const stage = toolArgs.stage ? String(toolArgs.stage) : null;
 						const verdict = toolArgs.verdict ? String(toolArgs.verdict) : null;
 						if (stage && !stageKeys.includes(stage)) {
@@ -2135,6 +2250,7 @@ export async function POST(event: APIEvent) {
 							.orderBy(funnelItems.companyName)
 							.limit(limit)
 							.offset(offset);
+						noteRead(readSession, rows.map((r) => `funnel_item:${r.id}`));
 						const [{ count: matched }] = await db
 							.select({ count: sql<number>`count(*)::int` })
 							.from(funnelItems)
@@ -2173,18 +2289,21 @@ export async function POST(event: APIEvent) {
 						}
 						try {
 							result = await createFunnel(name, toolArgs.description ? String(toolArgs.description) : null, toolArgs.extra_stages);
+							if (result && typeof result === "object" && "id" in result) noteRead(readSession, `funnel:${String(result.id)}`);
 						} catch (e) {
 							result = { error: String(e instanceof Error ? e.message : e) };
 						}
 						break;
 					}
 					case "create_funnel_run": {
-						result = await createFunnelRun({
+						const run = await createFunnelRun({
 							funnelId: toolArgs.funnel_id ? String(toolArgs.funnel_id) : undefined,
 							funnelName: toolArgs.funnel_name ? String(toolArgs.funnel_name) : undefined,
 							source: toolArgs.source ? String(toolArgs.source) : undefined,
 							note: toolArgs.note ? String(toolArgs.note) : undefined,
 						});
+						if (!("error" in run)) noteRead(readSession, `funnel_run:${run.run.id}`);
+						result = run;
 						break;
 					}
 					case "scrape_funnel_company": {
@@ -2196,6 +2315,13 @@ export async function POST(event: APIEvent) {
 						if (!item) {
 							result = { error: "Unknown item_id" };
 							break;
+						}
+						{
+							const rg = requireRead(readSession, `funnel_item:${item.id}`, "call list_funnel_items first");
+							if (!rg.ok) {
+								result = rg;
+								break;
+							}
 						}
 						if (cookieDead()) {
 							result = { error: "IMPORTYETI_COOKIE is missing or expired — refresh the importyeti_token JWT before scraping" };
@@ -2255,6 +2381,11 @@ export async function POST(event: APIEvent) {
 							result = { error: "Run is closed — reopen by creating a new run" };
 							break;
 						}
+						const rg = requireRead(readSession, `funnel_run:${runRow.id}`, "call funnel_stats or list_funnel_items first");
+						if (!rg.ok) {
+							result = rg;
+							break;
+						}
 						const rows = (Array.isArray(toolArgs.items) ? toolArgs.items : []).filter(
 							(x: unknown) => !!x && typeof x === "object" && typeof (x as Record<string, unknown>).companyName === "string",
 						) as { companyName: string }[];
@@ -2270,6 +2401,11 @@ export async function POST(event: APIEvent) {
 						break;
 					}
 					case "run_funnel_stage": {
+						const rg = requireRead(readSession, `funnel_run:${String(toolArgs.run_id ?? "")}`, "call funnel_stats or list_funnel_items first");
+						if (!rg.ok) {
+							result = rg;
+							break;
+						}
 						result = await runStageBatch(
 							String(toolArgs.run_id ?? ""),
 							String(toolArgs.stage ?? ""),
@@ -2293,6 +2429,7 @@ export async function POST(event: APIEvent) {
 							.from(funnels)
 							.leftJoin(funnelSchedules, eq(funnelSchedules.funnelId, funnels.id))
 							.orderBy(funnels.name);
+						noteRead(readSession, rows.map((r) => `funnel:${r.funnelId}`));
 						result = { funnels: rows.map((r) => ({ ...r, running: r.enabled === true })) };
 						break;
 					}
@@ -2313,6 +2450,11 @@ export async function POST(event: APIEvent) {
 							result = { error: "funnel not found — list_funnel_schedules has ids and names" };
 							break;
 						}
+						const rg = requireRead(readSession, `funnel:${target.id}`, "call list_funnel_schedules first — this flips live paid enrichment");
+						if (!rg.ok) {
+							result = rg;
+							break;
+						}
 						const [existing] = await db.select({ id: funnelSchedules.id }).from(funnelSchedules).where(eq(funnelSchedules.funnelId, target.id)).limit(1);
 						if (existing) {
 							await db.update(funnelSchedules).set({ enabled, updatedAt: new Date() }).where(eq(funnelSchedules.id, existing.id));
@@ -2326,6 +2468,11 @@ export async function POST(event: APIEvent) {
 						const verdict = String(toolArgs.verdict ?? "");
 						if (!toolArgs.item_id || !toolArgs.stage || !["pass", "fail"].includes(verdict)) {
 							result = { error: "item_id, stage, verdict (pass|fail) required" };
+							break;
+						}
+						const rg = requireRead(readSession, `funnel_item:${String(toolArgs.item_id)}`, "call list_funnel_items first");
+						if (!rg.ok) {
+							result = rg;
 							break;
 						}
 						result = await recordStageVerdict({

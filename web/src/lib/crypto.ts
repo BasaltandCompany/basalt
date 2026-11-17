@@ -40,6 +40,12 @@ export function fromBase64(b64: string): string {
 	return new TextDecoder().decode(bytes);
 }
 
+/** Decode base64/base64url to raw bytes (binary payloads — ciphertext, media). */
+export function fromBase64Bytes(b64: string): Uint8Array {
+	const bin = atob(b64.replace(/-/g, "+").replace(/_/g, "/"));
+	return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+}
+
 /** First 12 chars of key for display (e.g. "mc_a1b2c3d4..."). */
 export function keyPrefix(key: string): string {
 	return key.slice(0, 12) + "...";

@@ -1,5 +1,5 @@
 {
-  "id": "3392b240-085e-450b-86fe-2ac17ce76cc9",
+  "id": "85ca8428-3999-40c8-acf8-c774fc8fb8cc",
   "prevId": "ce5b8f1a-59c7-410a-944b-d0905163e0e5",
   "version": "7",
   "dialect": "postgresql",
@@ -3833,8 +3833,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.quote_line_items": {
-      "name": "quote_line_items",
+    "public.secure_share_items": {
+      "name": "secure_share_items",
       "schema": "",
       "columns": {
         "id": {
@@ -3844,67 +3844,74 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
-        "quote_id": {
-          "name": "quote_id",
+        "share_id": {
+          "name": "share_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
-        "sort_order": {
-          "name": "sort_order",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "group": {
-          "name": "group",
-          "type": "quote_group",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'required'"
-        },
-        "name": {
-          "name": "name",
+        "kind": {
+          "name": "kind",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "detail": {
-          "name": "detail",
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mime_type": {
+          "name": "mime_type",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "hours": {
-          "name": "hours",
-          "type": "double precision",
+        "size_bytes": {
+          "name": "size_bytes",
+          "type": "integer",
           "primaryKey": false,
-          "notNull": true,
-          "default": 0
+          "notNull": false
         },
-        "unit_rate": {
-          "name": "unit_rate",
-          "type": "double precision",
+        "content_cipher": {
+          "name": "content_cipher",
+          "type": "text",
           "primaryKey": false,
-          "notNull": true,
-          "default": 0
+          "notNull": false
+        },
+        "storage_path": {
+          "name": "storage_path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "storage_iv": {
+          "name": "storage_iv",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "uploader_label": {
+          "name": "uploader_label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
-          "type": "timestamp",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
         }
       },
       "indexes": {
-        "idx_quote_items_quote": {
-          "name": "idx_quote_items_quote",
+        "idx_secure_share_items_share": {
+          "name": "idx_secure_share_items_share",
           "columns": [
             {
-              "expression": "quote_id",
+              "expression": "share_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -3917,12 +3924,12 @@
         }
       },
       "foreignKeys": {
-        "quote_line_items_quote_id_quotes_id_fk": {
-          "name": "quote_line_items_quote_id_quotes_id_fk",
-          "tableFrom": "quote_line_items",
-          "tableTo": "quotes",
+        "secure_share_items_share_id_secure_shares_id_fk": {
+          "name": "secure_share_items_share_id_secure_shares_id_fk",
+          "tableFrom": "secure_share_items",
+          "tableTo": "secure_shares",
           "columnsFrom": [
-            "quote_id"
+            "share_id"
           ],
           "columnsTo": [
             "id"
@@ -3937,8 +3944,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.quote_signatures": {
-      "name": "quote_signatures",
+    "public.secure_shares": {
+      "name": "secure_shares",
       "schema": "",
       "columns": {
         "id": {
@@ -3948,203 +3955,34 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
-        "quote_id": {
-          "name": "quote_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "member_id": {
-          "name": "member_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "signer_name": {
-          "name": "signer_name",
+        "title": {
+          "name": "title",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "ip_address": {
-          "name": "ip_address",
+        "token": {
+          "name": "token",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "user_agent": {
-          "name": "user_agent",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "idx_quote_signatures_quote": {
-          "name": "idx_quote_signatures_quote",
-          "columns": [
-            {
-              "expression": "quote_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "quote_signatures_quote_id_quotes_id_fk": {
-          "name": "quote_signatures_quote_id_quotes_id_fk",
-          "tableFrom": "quote_signatures",
-          "tableTo": "quotes",
-          "columnsFrom": [
-            "quote_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "quote_signatures_member_id_client_members_id_fk": {
-          "name": "quote_signatures_member_id_client_members_id_fk",
-          "tableFrom": "quote_signatures",
-          "tableTo": "client_members",
-          "columnsFrom": [
-            "member_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.quote_versions": {
-      "name": "quote_versions",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "quote_id": {
-          "name": "quote_id",
-          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
-        "version": {
-          "name": "version",
-          "type": "integer",
+        "note": {
+          "name": "note",
+          "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "status": {
           "name": "status",
-          "type": "quote_status",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "items_json": {
-          "name": "items_json",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "subtotal": {
-          "name": "subtotal",
-          "type": "double precision",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "quote_versions_quote_version_key": {
-          "name": "quote_versions_quote_version_key",
-          "columns": [
-            {
-              "expression": "quote_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "version",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "quote_versions_quote_id_quotes_id_fk": {
-          "name": "quote_versions_quote_id_quotes_id_fk",
-          "tableFrom": "quote_versions",
-          "tableTo": "quotes",
-          "columnsFrom": [
-            "quote_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.quotes": {
-      "name": "quotes",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
+          "default": "'open'"
         },
-        "company_id": {
-          "name": "company_id",
-          "type": "uuid",
+        "wrapped_dek": {
+          "name": "wrapped_dek",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -4154,78 +3992,30 @@
           "primaryKey": false,
           "notNull": false
         },
-        "body_doc_id": {
-          "name": "body_doc_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "title": {
-          "name": "title",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "quote_status",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'draft'"
-        },
-        "valid_days": {
-          "name": "valid_days",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 30
-        },
-        "quoted_cap_hours": {
-          "name": "quoted_cap_hours",
-          "type": "double precision",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "notes": {
-          "name": "notes",
-          "type": "text",
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
         "created_at": {
           "name": "created_at",
-          "type": "timestamp",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
         },
         "updated_at": {
           "name": "updated_at",
-          "type": "timestamp",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
         }
       },
       "indexes": {
-        "idx_quotes_company": {
-          "name": "idx_quotes_company",
-          "columns": [
-            {
-              "expression": "company_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_quotes_project": {
-          "name": "idx_quotes_project",
+        "idx_secure_shares_project": {
+          "name": "idx_secure_shares_project",
           "columns": [
             {
               "expression": "project_id",
@@ -4238,40 +4028,12 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "idx_quotes_body_doc": {
-          "name": "idx_quotes_body_doc",
-          "columns": [
-            {
-              "expression": "body_doc_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
-        "quotes_company_id_companies_id_fk": {
-          "name": "quotes_company_id_companies_id_fk",
-          "tableFrom": "quotes",
-          "tableTo": "companies",
-          "columnsFrom": [
-            "company_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "quotes_project_id_projects_id_fk": {
-          "name": "quotes_project_id_projects_id_fk",
-          "tableFrom": "quotes",
+        "secure_shares_project_id_projects_id_fk": {
+          "name": "secure_shares_project_id_projects_id_fk",
+          "tableFrom": "secure_shares",
           "tableTo": "projects",
           "columnsFrom": [
             "project_id"
@@ -4279,25 +4041,20 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "quotes_body_doc_id_docs_id_fk": {
-          "name": "quotes_body_doc_id_docs_id_fk",
-          "tableFrom": "quotes",
-          "tableTo": "docs",
-          "columnsFrom": [
-            "body_doc_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "secure_shares_token_unique": {
+          "name": "secure_shares_token_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "token"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -5476,24 +5233,6 @@
       "values": [
         "email+web",
         "web"
-      ]
-    },
-    "public.quote_group": {
-      "name": "quote_group",
-      "schema": "public",
-      "values": [
-        "required",
-        "optional"
-      ]
-    },
-    "public.quote_status": {
-      "name": "quote_status",
-      "schema": "public",
-      "values": [
-        "draft",
-        "sent",
-        "accepted",
-        "rejected"
       ]
     }
   },
