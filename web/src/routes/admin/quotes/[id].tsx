@@ -200,16 +200,14 @@ export default function AdminQuoteDetail() {
 							subtotal={q().totals.required.subtotal}
 							totalLabel={q().totals.optional.count > 0 ? "Base subtotal" : "Total"}
 						/>
-						<Show when={q().totals.optional.count > 0}>
-							<ItemRows
-								items={q().items.filter((i) => i.group === "optional")}
-								quoteId={q().id}
-								group="optional"
-								totalHours={q().totals.optional.hours}
-								subtotal={q().totals.optional.subtotal}
-								totalLabel="Everything-in total"
-							/>
-						</Show>
+						<ItemRows
+							items={q().items.filter((i) => i.group === "optional")}
+							quoteId={q().id}
+							group="optional"
+							totalHours={q().totals.optional.hours}
+							subtotal={q().totals.optional.subtotal}
+							totalLabel="Everything-in total"
+						/>
 
 						<div style={{ display: "flex", gap: "16px", "flex-wrap": "wrap" }}>
 							<Card style={{ flex: "1", "min-width": "300px", padding: "16px" }}>

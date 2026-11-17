@@ -1,5 +1,5 @@
 import { Title } from "@solidjs/meta";
-import { A, createAsync } from "@solidjs/router";
+import { A, createAsync, useAction } from "@solidjs/router";
 import { For, Show } from "solid-js";
 import Layout from "~/components/Layout";
 import CreateDialog from "~/components/CreateDialog";
@@ -18,6 +18,7 @@ const statusBadge: Record<string, string> = {
 export default function AdminQuotes() {
 	const user = createAsync(() => getUserQuery(), { deferStream: true });
 	const quotes = createAsync(() => getQuotesQuery(), { deferStream: true });
+	const createQuote = useAction(createQuoteAction);
 	const companies = createAsync(() => getCompaniesForSelectQuery(), { deferStream: true });
 	const projects = createAsync(() => getProjectsForSelectQuery(), { deferStream: true });
 
@@ -35,10 +36,7 @@ export default function AdminQuotes() {
 					label="New quote"
 					title="New quote"
 					submitLabel="Create quote"
-					onSubmit={async (fd) => {
-						const res = await createQuoteAction(fd);
-						return res as { error?: string };
-					}}
+					onSubmit={(fd) => createQuote(fd) as Promise<{ error?: string } | undefined>}
 				>
 					<div class="form-group">
 						<label for="company_id">Company</label>
