@@ -236,6 +236,16 @@ export default function AdminQuoteDetail() {
 											<input name="quoted_cap_hours" type="number" value={q().quotedCapHours ?? ""} style={{ width: "100%" }} />
 										</label>
 									</div>
+									<div style={{ display: "flex", gap: "8px" }}>
+										<label class="muted" style={{ "font-size": "12px", flex: "1" }}>
+											Start date
+											<input name="start_date" type="date" value={q().startDate ?? ""} style={{ width: "100%" }} />
+										</label>
+										<label class="muted" style={{ "font-size": "12px", flex: "1" }}>
+											End date
+											<input name="end_date" type="date" value={q().endDate ?? ""} style={{ width: "100%" }} />
+										</label>
+									</div>
 									<Button type="submit" size="sm">Save header</Button>
 								</form>
 							</Card>

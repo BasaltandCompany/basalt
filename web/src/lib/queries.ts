@@ -94,7 +94,7 @@ export const createProjectAction = action(async (formData: FormData) => {
 }, "createProject");
 
 // "" or missing → null; keeps nullable date inputs clearing cleanly
-function dateOrNull(v: FormDataEntryValue | null): string | null {
+export function dateOrNull(v: FormDataEntryValue | null): string | null {
 	const s = String(v || "").trim();
 	return s || null;
 }
