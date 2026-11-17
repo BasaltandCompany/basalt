@@ -1,29 +1,10 @@
 import { Title } from "@solidjs/meta";
-import { useNavigate, useParams } from "@solidjs/router";
-import { createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createAsync, revalidate, useNavigate, useParams } from "@solidjs/router";
+import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import ConfirmButton from "~/components/ConfirmButton";
 import Layout from "~/components/Layout";
+import { getShareDetail } from "~/lib/secure-share-queries";
 import { Button } from "@basaltac/ui";
-
-type ShareDetail = {
-	id: string;
-	title: string;
-	token: string;
-	status: string;
-	note: string | null;
-	expiresAt: string | null;
-	createdAt: string;
-	projectName: string | null;
-};
-type Item = {
-	id: string;
-	kind: "text" | "file" | string;
-	label: string;
-	mimeType: string | null;
-	sizeBytes: number | null;
-	uploaderLabel: string | null;
-	createdAt: string;
-};
 
 const IDLE_LOCK_MS = 30_000; // his number — contents blur after 30s without input
 const fmtBytes = (n: number | null) =>
@@ -32,11 +13,7 @@ const fmtBytes = (n: number | null) =>
 export default function SecureShareDetail() {
 	const params = useParams();
 	const navigate = useNavigate();
-	const [detail, { refetch }] = createResource(async () => {
-		const r = await fetch(`/api/secure-shares/${params.id}`);
-		if (!r.ok) return null;
-		return (await r.json()) as { share: ShareDetail; items: Item[] };
-	});
+	const detail = createAsync(() => getShareDetail(params.id ?? ""), { deferStream: true });
 	const [copied, setCopied] = createSignal(false);
 	const [viewed, setViewed] = createSignal<{ id: string; text: string } | null>(null);
 	const [viewError, setViewError] = createSignal("");
@@ -61,7 +38,7 @@ export default function SecureShareDetail() {
 		for (const ev of ["pointermove", "pointerdown", "keydown"]) document.removeEventListener(ev, wake);
 	});
 
-	async function viewText(item: Item) {
+	async function viewText(item: { id: string; kind: string }) {
 		setViewError("");
 		const r = await fetch(`/api/secure-items/${item.id}?format=text`);
 		const body = (await r.json()) as { text?: string; error?: string };
@@ -78,7 +55,7 @@ export default function SecureShareDetail() {
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ status }),
 		});
-		void refetch();
+		void revalidate();
 	}
 
 	async function remove() {
