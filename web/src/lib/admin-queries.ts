@@ -22,6 +22,10 @@ import {
 	brainRequests,
 	docs,
 	OUTREACH_STAGES,
+	quotes,
+	quoteItems,
+	quoteVersions,
+	quoteSignatures,
 } from "~/db/schema";
 import type {
 	DocumentType,
@@ -38,6 +42,9 @@ import { triggerSyncIfStale } from "~/lib/email-queries";
 import { campaignStats } from "~/lib/campaign-stats";
 import { setProspectVideo } from "~/lib/videos";
 import type { Video } from "~/db/schema";
+import { createDoc } from "~/lib/docs";
+import { computeQuoteTotals, getProjectActuals } from "~/lib/quotes";
+import type { QuoteStatus } from "~/db/schema";
 
 // ── Auth guard ────────────────────────────────────────────────────
 
@@ -1341,3 +1348,172 @@ export const linkBrainRequestToProspectAction = action(async (formData: FormData
 	await revalidate(getBrainRequestsQuery.key);
 	return { success: `Linked to prospect: ${company}.` };
 }, "linkBrainRequestProspect");
+
+// ── Quotes ─────────────────────────────────────────────────────────
+// Fixed-price proposals; accepted+signed = the contract. Body prose lives in
+// a docs row; priced structure is quote_line_items (required/optional).
+
+export const getQuotesQuery = query(async () => {
+	"use server";
+	await requireAdmin();
+	const rows = await db
+		.select({
+			id: quotes.id,
+			title: quotes.title,
+			status: quotes.status,
+			companyId: quotes.companyId,
+			companyName: companies.name,
+			projectId: quotes.projectId,
+			projectName: projects.name,
+			bodyDocId: quotes.bodyDocId,
+			updatedAt: quotes.updatedAt,
+		})
+		.from(quotes)
+		.leftJoin(companies, eq(companies.id, quotes.companyId))
+		.leftJoin(projects, eq(projects.id, quotes.projectId))
+		.orderBy(desc(quotes.updatedAt));
+	const allItems = await db.select().from(quoteItems);
+	return rows.map((q) => ({
+		...q,
+		totals: computeQuoteTotals(allItems.filter((i) => i.quoteId === q.id)),
+	}));
+}, "admin-quotes");
+
+export const getQuoteQuery = query(async (id: string) => {
+	"use server";
+	await requireAdmin();
+	const [row] = await db
+		.select({ quote: quotes, companyName: companies.name, projectName: projects.name })
+		.from(quotes)
+		.leftJoin(companies, eq(companies.id, quotes.companyId))
+		.leftJoin(projects, eq(projects.id, quotes.projectId))
+		.where(eq(quotes.id, id))
+		.limit(1);
+	if (!row) return null;
+	const [items, bodyDoc, versions, signatures] = await Promise.all([
+		db.select().from(quoteItems).where(eq(quoteItems.quoteId, id)).orderBy(asc(quoteItems.sortOrder)),
+		db
+			.select({ id: docs.id, title: docs.title, markdown: docs.markdown, status: docs.status })
+			.from(docs)
+			.where(eq(docs.id, row.quote.bodyDocId))
+			.limit(1),
+		db.select().from(quoteVersions).where(eq(quoteVersions.quoteId, id)).orderBy(desc(quoteVersions.version)),
+		db.select().from(quoteSignatures).where(eq(quoteSignatures.quoteId, id)).orderBy(desc(quoteSignatures.createdAt)),
+	]);
+	return {
+		...row.quote,
+		companyName: row.companyName,
+		projectName: row.projectName,
+		items,
+		totals: computeQuoteTotals(items),
+		bodyDoc: bodyDoc[0] ?? null,
+		versions,
+		signatures,
+		actuals: row.quote.projectId ? await getProjectActuals(row.quote.projectId) : null,
+	};
+}, "admin-quote");
+
+export const createQuoteAction = action(async (formData: FormData) => {
+	"use server";
+	await requireAdmin();
+	const companyId = String(formData.get("company_id") || "");
+	if (!companyId) return { error: "Company is required." };
+	const title = String(formData.get("title") || "").trim() || "Untitled quote";
+	const doc = await createDoc(title, "", { genre: "quote" });
+	const [row] = await db
+		.insert(quotes)
+		.values({
+			companyId,
+			projectId: formData.get("project_id") ? String(formData.get("project_id")) : null,
+			bodyDocId: doc.id,
+			title,
+			validDays: Number(formData.get("valid_days")) || 30,
+		})
+		.returning({ id: quotes.id });
+	revalidate(getQuotesQuery.key);
+	throw redirect(`/admin/quotes/${row.id}`);
+}, "createQuote");
+
+export const updateQuoteMetaAction = action(async (formData: FormData) => {
+	"use server";
+	await requireAdmin();
+	const id = String(formData.get("id"));
+	await db
+		.update(quotes)
+		.set({
+			title: String(formData.get("title") || "").trim() || undefined,
+			projectId: formData.get("project_id") ? String(formData.get("project_id")) : null,
+			validDays: Number(formData.get("valid_days")) || 30,
+			quotedCapHours: formData.get("quoted_cap_hours") ? Number(formData.get("quoted_cap_hours")) : null,
+		})
+		.where(eq(quotes.id, id));
+	await revalidate([getQuoteQuery.keyFor(id), getQuotesQuery.key]);
+	return { success: "Saved." };
+}, "updateQuoteMeta");
+
+export const upsertQuoteItemAction = action(async (formData: FormData) => {
+	"use server";
+	await requireAdmin();
+	const quoteId = String(formData.get("quote_id"));
+	const values = {
+		quoteId,
+		group: (String(formData.get("group") || "required") === "optional" ? "optional" : "required") as "required" | "optional",
+		name: String(formData.get("name") || "").trim(),
+		detail: String(formData.get("detail") || "") || null,
+		hours: Number(formData.get("hours")) || 0,
+		unitRate: Number(formData.get("unit_rate")) || 0,
+		sortOrder: Number(formData.get("sort_order")) || 0,
+	};
+	if (!values.name) return { error: "Line item name is required." };
+	const itemId = String(formData.get("item_id") || "");
+	if (itemId) await db.update(quoteItems).set(values).where(eq(quoteItems.id, itemId));
+	else await db.insert(quoteItems).values(values);
+	await revalidate([getQuoteQuery.keyFor(quoteId), getQuotesQuery.key]);
+	return { success: "Line item saved." };
+}, "upsertQuoteItem");
+
+export const deleteQuoteItemAction = action(async (formData: FormData) => {
+	"use server";
+	await requireAdmin();
+	const quoteId = String(formData.get("quote_id"));
+	await db.delete(quoteItems).where(eq(quoteItems.id, String(formData.get("item_id"))));
+	await revalidate([getQuoteQuery.keyFor(quoteId), getQuotesQuery.key]);
+	return { success: "Line item removed." };
+}, "deleteQuoteItem");
+
+const QUOTE_STATUSES: QuoteStatus[] = ["draft", "sent", "accepted", "rejected"];
+
+// Human-only transitions (agents are drafts-only via MCP). Every transition
+// snapshots the items — "what changed between sends".
+export const setQuoteStatusAction = action(async (formData: FormData) => {
+	"use server";
+	await requireAdmin();
+	const id = String(formData.get("id"));
+	const status = String(formData.get("status")) as QuoteStatus;
+	if (!QUOTE_STATUSES.includes(status)) return { error: "Invalid status." };
+	const [q] = await db.select().from(quotes).where(eq(quotes.id, id)).limit(1);
+	if (!q) return { error: "Quote not found." };
+	if (q.status === status) return { success: `Already ${status}.` };
+	const items = await db.select().from(quoteItems).where(eq(quoteItems.quoteId, id));
+	const totals = computeQuoteTotals(items);
+	const [last] = await db
+		.select({ version: quoteVersions.version })
+		.from(quoteVersions)
+		.where(eq(quoteVersions.quoteId, id))
+		.orderBy(desc(quoteVersions.version))
+		.limit(1);
+	await db.insert(quoteVersions).values({
+		quoteId: id,
+		version: (last?.version ?? 0) + 1,
+		status,
+		itemsJson: items,
+		subtotal: totals.total,
+	});
+	await db.update(quotes).set({ status }).where(eq(quotes.id, id));
+	// accepted → sync the project's fixed price to the everything-in total
+	if (status === "accepted" && q.projectId) {
+		await db.update(projects).set({ fixedPrice: totals.total }).where(eq(projects.id, q.projectId));
+	}
+	await revalidate([getQuoteQuery.keyFor(id), getQuotesQuery.key]);
+	return { success: `Status → ${status}.` };
+}, "setQuoteStatus");

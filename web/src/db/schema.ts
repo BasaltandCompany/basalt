@@ -462,6 +462,107 @@ export const invoices = pgTable(
 	(t) => [index("idx_invoices_project").on(t.projectId)],
 );
 
+// ── Quotes (fixed-price proposals; accepted+signed = the contract) ──
+// Canonical structure: the BCW Forms quote — header block, narrative body
+// (a docs row), required + optional line-item tables, signature block.
+// Totals are NEVER stored: line amount = hours × unitRate, computed on read
+// so the math cannot drift from the items.
+
+export const quoteStatus = pgEnum("quote_status", [
+	"draft",
+	"sent",
+	"accepted",
+	"rejected",
+]);
+
+export const quoteGroup = pgEnum("quote_group", ["required", "optional"]);
+
+export const quotes = pgTable(
+	"quotes",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		companyId: uuid("company_id")
+			.notNull()
+			.references(() => companies.id, { onDelete: "cascade" }),
+		// set when the quoted work is projectized
+		projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }),
+		// narrative body: engagement overview, guarantee, exclusions, payment terms
+		bodyDocId: uuid("body_doc_id")
+			.notNull()
+			.references(() => docs.id, { onDelete: "cascade" }),
+		title: text("title").notNull(),
+		status: quoteStatus("status").notNull().default("draft"),
+		validDays: integer("valid_days").notNull().default(30),
+		// CDL-style hour cap; null = pure per-line fixed price
+		quotedCapHours: doublePrecision("quoted_cap_hours"),
+		notes: text("notes"),
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+		updatedAt: timestamp("updated_at")
+			.notNull()
+			.defaultNow()
+			.$onUpdate(() => new Date()),
+	},
+	(t) => [
+		index("idx_quotes_company").on(t.companyId),
+		index("idx_quotes_project").on(t.projectId),
+		index("idx_quotes_body_doc").on(t.bodyDocId),
+	],
+);
+
+export const quoteItems = pgTable(
+	"quote_line_items",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		quoteId: uuid("quote_id")
+			.notNull()
+			.references(() => quotes.id, { onDelete: "cascade" }),
+		sortOrder: integer("sort_order").notNull().default(0),
+		group: quoteGroup("group").notNull().default("required"),
+		name: text("name").notNull(),
+		detail: text("detail"),
+		hours: doublePrecision("hours").notNull().default(0),
+		unitRate: doublePrecision("unit_rate").notNull().default(0),
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+	},
+	(t) => [index("idx_quote_items_quote").on(t.quoteId)],
+);
+
+// snapshot of items+status taken on every status transition — "what changed
+// between sends" (client cuts happen via revise-and-resend)
+export const quoteVersions = pgTable(
+	"quote_versions",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		quoteId: uuid("quote_id")
+			.notNull()
+			.references(() => quotes.id, { onDelete: "cascade" }),
+		version: integer("version").notNull(),
+		status: quoteStatus("status").notNull(),
+		itemsJson: jsonb("items_json").notNull(),
+		subtotal: doublePrecision("subtotal").notNull(),
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+	},
+	(t) => [uniqueIndex("quote_versions_quote_version_key").on(t.quoteId, t.version)],
+);
+
+// click-to-sign audit trail (ESIGN-valid): who typed their name, when, from where
+export const quoteSignatures = pgTable(
+	"quote_signatures",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		quoteId: uuid("quote_id")
+			.notNull()
+			.references(() => quotes.id, { onDelete: "cascade" }),
+		memberId: uuid("member_id")
+			.references(() => clientMembers.id, { onDelete: "cascade" }),
+		signerName: text("signer_name").notNull(),
+		ipAddress: text("ip_address"),
+		userAgent: text("user_agent"),
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+	},
+	(t) => [index("idx_quote_signatures_quote").on(t.quoteId)],
+);
+
 // ── API Keys (per member — grants access to all their companies' projects) ─
 
 export const apiKeys = pgTable(
@@ -1252,6 +1353,10 @@ export type ApiKey = typeof apiKeys.$inferSelect;
 export type Deliverable = typeof deliverables.$inferSelect;
 export type DeliverableUpdate = typeof deliverableUpdates.$inferSelect;
 export type Timer = typeof timer.$inferSelect;
+export type Quote = typeof quotes.$inferSelect;
+export type QuoteItem = typeof quoteItems.$inferSelect;
+export type QuoteVersion = typeof quoteVersions.$inferSelect;
+export type QuoteSignature = typeof quoteSignatures.$inferSelect;
 
 // Type aliases for UI code (badge maps, selects, etc.)
 export type EngagementType = Project["engagementType"];
@@ -1269,6 +1374,7 @@ export type Video = typeof videos.$inferSelect;
 export type Campaign = typeof campaigns.$inferSelect;
 export type CampaignCompany = typeof campaignCompanies.$inferSelect;
 export type Doc = typeof docs.$inferSelect;
+export type QuoteStatus = Quote["status"];
 export type TextVersion = typeof textVersions.$inferSelect;
 export type EmailAccount = typeof emailAccounts.$inferSelect;
 export type EmailThread = typeof emailThreads.$inferSelect;

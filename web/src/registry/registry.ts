@@ -31,7 +31,11 @@ import {
 	shortLinks,
 	invoices,
 	deliverables,
+	quotes,
+	quoteItems,
+	quoteSignatures,
 } from "~/db/schema";
+import { computeQuoteTotals, type QuoteTotals } from "~/lib/quotes";
 import {
 	defineComponent,
 	type AnyComponentDefinition,
@@ -231,6 +235,56 @@ const deliverable = defineComponent({
 	ownerLinks: [{ key: "projectId", column: deliverables.projectId, kind: "project" }],
 });
 
+// Quote = fixed-price proposal that becomes the contract once accepted and
+// signed in the client portal. Narrative body lives in a docs row; the priced
+// structure is quote_line_items in two groups (required / optional). Totals
+// are computed on read, never stored — the math can't drift from the items.
+type QuoteRow = typeof quotes.$inferSelect & {
+	items: (typeof quoteItems.$inferSelect)[];
+	totals: QuoteTotals;
+	bodyDoc: { id: string; title: string; status: string } | null;
+	signature: { signerName: string; signedAt: Date } | null;
+};
+const quote = defineComponent({
+	kind: "quote",
+	label: "Quote",
+	description:
+		"A fixed-price engagement proposal; accepted+signed in the portal it IS the contract. Narrative body is a docs row (edit prose in the doc editor); priced line items split required/optional with per-group subtotals. Structure mirrors the BCW Forms quote. Agents draft via MCP (drafts only); Collin sends, clients sign. Calibrate with project_actuals before drafting.",
+	table: quotes,
+	load: async (id): Promise<QuoteRow | null> => {
+		const [row] = await db.select().from(quotes).where(eq(quotes.id, id)).limit(1);
+		if (!row) return null;
+		const [items, bodyDoc, sig] = await Promise.all([
+			db.select().from(quoteItems).where(eq(quoteItems.quoteId, id)).orderBy(quoteItems.sortOrder),
+			db.select({ id: docs.id, title: docs.title, status: docs.status }).from(docs).where(eq(docs.id, row.bodyDocId)).limit(1),
+			db
+				.select({ signerName: quoteSignatures.signerName, signedAt: quoteSignatures.createdAt })
+				.from(quoteSignatures)
+				.where(eq(quoteSignatures.quoteId, id))
+				.orderBy(sql`created_at desc`)
+				.limit(1),
+		]);
+		return { ...row, items, totals: computeQuoteTotals(items), bodyDoc: bodyDoc[0] ?? null, signature: sig[0] ?? null } satisfies QuoteRow;
+	},
+	title: (r) => r.title,
+	subtitle: (r: typeof quotes.$inferSelect & { totals?: QuoteTotals }) => {
+		// searchAll passes raw table rows (no embedded totals) — degrade gracefully
+		if (!r.totals) return null;
+		const lines = r.totals.optional.count > 0 ? `${r.totals.required.count}+${r.totals.optional.count} lines` : `${r.totals.required.count} lines`;
+		return `$${Math.round(r.totals.total).toLocaleString("en-US")} · ${lines}`;
+	},
+	status: {
+		get: (r) => r.status,
+		labels: { sent: "sent — awaiting client", accepted: "accepted (signed)", rejected: "rejected" },
+	},
+	adminPath: (r) => `/admin/quotes/${r.id}`,
+	search: { columns: [quotes.title] },
+	ownerLinks: [
+		{ key: "companyId", column: quotes.companyId, kind: "company" },
+		{ key: "projectId", column: quotes.projectId, kind: "project" },
+	],
+});
+
 const funnelRun = defineComponent({
 	kind: "funnel-run",
 	label: "Funnel run",
@@ -316,6 +370,7 @@ export const COMPONENTS: Record<string, AnyComponentDefinition> = {
 	"short-link": shortLink as AnyComponentDefinition,
 	invoice: invoice as AnyComponentDefinition,
 	deliverable: deliverable as AnyComponentDefinition,
+	"quote": quote as AnyComponentDefinition,
 	"funnel-run": funnelRun as AnyComponentDefinition,
 	"funnel-item": funnelItem as AnyComponentDefinition,
 };
