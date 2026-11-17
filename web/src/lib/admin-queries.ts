@@ -8,6 +8,7 @@ import {
 	companies,
 	clientMembers,
 	clientCompanyMembers,
+	clientMemberEmails,
 	projects,
 	documents,
 	invoices,
@@ -37,8 +38,8 @@ import type {
 	OutreachProspect,
 	CampaignTouch,
 } from "~/db/schema";
+import { getPersonDossier } from "~/lib/people";
 import { grossSavedForCompany, billedAmount } from "~/lib/value";
-
 import { generateApiKey, hashKey, keyPrefix } from "~/lib/crypto";
 import { normalizeBrainTools } from "~/lib/brain-activity";
 import { contactSuggestionsFor, latestThreadFor } from "~/lib/outreach-email";
@@ -1639,3 +1640,105 @@ export const setQuoteStatusAction = action(async (formData: FormData) => {
 	await revalidate([getQuoteQuery.keyFor(id), getQuotesQuery.key, getProjectQuotesQuery.key, getProjectQuery.key, getProjectsQuery.key]);
 	return { success: `Status → ${status}.` };
 }, "setQuoteStatus");
+
+// ── People (contact profile pages /admin/contacts) ───────────────
+// A person = client_members row: one primary (login) email + extras in
+// client_member_emails + company memberships. Creating a person here does
+// NOT send a portal invite — that stays the company page's explicit flow.
+
+export const getPeopleQuery = query(async () => {
+	"use server";
+	await requireAdmin();
+	const [members, extras, memberships] = await Promise.all([
+		db.select().from(clientMembers).orderBy(desc(clientMembers.createdAt)),
+		db.select({ memberId: clientMemberEmails.memberId, email: clientMemberEmails.email }).from(clientMemberEmails),
+		db
+			.select({ memberId: clientCompanyMembers.memberId, companyId: companies.id, companyName: companies.name })
+			.from(clientCompanyMembers)
+			.innerJoin(companies, eq(clientCompanyMembers.companyId, companies.id)),
+	]);
+	return members.map((m) => ({
+		...m,
+		extraEmails: extras.filter((e) => e.memberId === m.id).map((e) => e.email),
+		companies: memberships.filter((x) => x.memberId === m.id).map((x) => ({ id: x.companyId, name: x.companyName })),
+	}));
+}, "admin-people");
+
+export const getPersonQuery = query(async (id: string) => {
+	"use server";
+	await requireAdmin();
+	return getPersonDossier(id);
+}, "admin-person");
+
+const uniqueEmailError = (e: unknown) =>
+	e instanceof Error && "code" in e && (e as { code?: string }).code === "23505"
+		? "That email address already belongs to a person."
+		: e instanceof Error
+			? e.message
+			: "Something went wrong.";
+
+export const createPersonAction = action(async (formData: FormData) => {
+	"use server";
+	await requireAdmin();
+	const name = String(formData.get("name") || "").trim();
+	const email = String(formData.get("email") || "").trim().toLowerCase();
+	if (!name || !email) return { error: "Name and email are required." };
+	const companyId = String(formData.get("company_id") || "");
+	try {
+		const [member] = await db.insert(clientMembers).values({ name, email }).returning();
+		if (companyId) {
+			await db.insert(clientCompanyMembers).values({ memberId: member.id, companyId }).onConflictDoNothing();
+		}
+		await revalidate(getPeopleQuery.key);
+		return { success: `${name} created.`, id: member.id };
+	} catch (e) {
+		return { error: uniqueEmailError(e) };
+	}
+}, "create-person");
+
+export const addPersonEmailAction = action(async (formData: FormData) => {
+	"use server";
+	await requireAdmin();
+	const memberId = String(formData.get("member_id"));
+	const email = String(formData.get("email") || "").trim().toLowerCase();
+	if (!email) return { error: "Email is required." };
+	try {
+		await db.insert(clientMemberEmails).values({ memberId, email });
+		await revalidate([getPersonQuery.keyFor(memberId), getPeopleQuery.key]);
+		return { success: `${email} added.` };
+	} catch (e) {
+		return { error: uniqueEmailError(e) };
+	}
+}, "add-person-email");
+
+export const removePersonEmailAction = action(async (formData: FormData) => {
+	"use server";
+	await requireAdmin();
+	const id = String(formData.get("id"));
+	const memberId = String(formData.get("member_id"));
+	await db.delete(clientMemberEmails).where(eq(clientMemberEmails.id, id));
+	await revalidate([getPersonQuery.keyFor(memberId), getPeopleQuery.key]);
+	return { success: "Address removed." };
+}, "remove-person-email");
+
+export const linkPersonCompanyAction = action(async (formData: FormData) => {
+	"use server";
+	await requireAdmin();
+	const memberId = String(formData.get("member_id"));
+	const companyId = String(formData.get("company_id"));
+	await db.insert(clientCompanyMembers).values({ memberId, companyId }).onConflictDoNothing();
+	await revalidate([getPersonQuery.keyFor(memberId), getPeopleQuery.key]);
+	return { success: "Company linked." };
+}, "link-person-company");
+
+export const unlinkPersonCompanyAction = action(async (formData: FormData) => {
+	"use server";
+	await requireAdmin();
+	const memberId = String(formData.get("member_id"));
+	const companyId = String(formData.get("company_id"));
+	await db
+		.delete(clientCompanyMembers)
+		.where(and(eq(clientCompanyMembers.memberId, memberId), eq(clientCompanyMembers.companyId, companyId)));
+	await revalidate([getPersonQuery.keyFor(memberId), getPeopleQuery.key]);
+	return { success: "Company unlinked." };
+}, "unlink-person-company");

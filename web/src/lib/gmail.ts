@@ -82,7 +82,11 @@ export async function accessTokenForRefresh(refreshToken: string): Promise<strin
 }
 
 /** One authenticated Gmail call with per-user rate-limit backoff. Exported for tests. */
-export async function gmail<T>(account: EmailAccount, path: string, init?: RequestInit): Promise<T> {
+export async function gmail<T>(
+	account: Pick<EmailAccount, "id" | "refreshToken">,
+	path: string,
+	init?: RequestInit,
+): Promise<T> {
 	const token = await accessToken(account);
 	const once = () =>
 		fetch(`${GMAIL_API}${path}`, {
@@ -116,9 +120,10 @@ export async function gmail<T>(account: EmailAccount, path: string, init?: Reque
 
 type GmailPayload = {
 	headers: { name: string; value: string }[];
-	body?: { data?: string; size?: number };
+	body?: { data?: string; size?: number; attachmentId?: string };
 	parts?: GmailPayload[];
 	mimeType?: string;
+	filename?: string;
 };
 
 function b64url(data: string): string {
@@ -165,6 +170,32 @@ export function extractText(payload: GmailPayload): string {
 	return raw?.replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|tr)>/gi, "\n").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\n{3,}/g, "\n\n").trim() ?? "";
 }
 
+export type GmailAttachmentMeta = {
+	filename: string;
+	mimeType: string;
+	size: number;
+	attachmentId: string;
+};
+
+/** Attachment metadata for every part carrying filename + attachmentId.
+ *  Bytes stay in Gmail — fetched on demand via get_email_attachment. */
+export function extractAttachments(payload: GmailPayload): GmailAttachmentMeta[] {
+	const walk = (p: GmailPayload): GmailAttachmentMeta[] => [
+		...(p.filename && p.body?.attachmentId
+			? [
+					{
+						filename: p.filename,
+						mimeType: p.mimeType ?? "application/octet-stream",
+						size: p.body.size ?? 0,
+						attachmentId: p.body.attachmentId,
+					},
+				]
+			: []),
+		...(p.parts ?? []).flatMap(walk),
+	];
+	return walk(payload);
+}
+
 // ── Sync ───────────────────────────────────────────────────────────
 
 type GmailThreadRef = {
@@ -194,6 +225,7 @@ async function upsertMessage(account: EmailAccount, threadRowId: string, msg: Gm
 			toEmails: header(msg.payload, "To"),
 			bodyText: extractText(msg.payload),
 			bodyHtml: extractHtml(msg.payload),
+			attachments: extractAttachments(msg.payload),
 			date: new Date(Number(msg.internalDate)),
 			isSent: msg.labelIds?.includes("SENT") ?? false,
 		})
@@ -202,6 +234,19 @@ async function upsertMessage(account: EmailAccount, threadRowId: string, msg: Gm
 
 async function fetchFullThread(account: EmailAccount, id: string) {
 	return gmail<{ id: string; messages: GmailMessage[]; historyId: string }>(account, `/threads/${id}?format=full`);
+}
+
+/** Attachment BYTES on demand — the only path to attachment content, since
+ *  sync stores metadata only. Returns base64url data from Gmail. */
+export function fetchAttachment(
+	account: Pick<EmailAccount, "id" | "refreshToken">,
+	messageId: string,
+	attachmentId: string,
+) {
+	return gmail<{ size: number; filename?: string; mimeType?: string; data: string }>(
+		account,
+		`/messages/${messageId}/attachments/${attachmentId}`,
+	);
 }
 
 /** Upsert one full thread (+ its messages). `archived` defaults to "does any

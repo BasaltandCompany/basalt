@@ -157,7 +157,11 @@ const prospect = defineComponent({
 	search: {
 		columns: [outreachProspects.company, outreachProspects.contactName, outreachProspects.email, outreachProspects.notes],
 	},
-	ownerLinks: [{ key: "campaignId", column: outreachProspects.campaignId, kind: "campaign" }],
+	ownerLinks: [
+		{ key: "campaignId", column: outreachProspects.campaignId, kind: "campaign" },
+		{ key: "contactId", column: outreachProspects.contactId, kind: "contact" },
+		{ key: "companyId", column: outreachProspects.companyId, kind: "company" },
+	],
 });
 
 const video = defineComponent({
