@@ -31,6 +31,7 @@ import {
 	shortLinks,
 	invoices,
 	deliverables,
+	secureShares,
 } from "~/db/schema";
 import {
 	defineComponent,
@@ -202,6 +203,24 @@ const shortLink = defineComponent({
 	search: { columns: [shortLinks.slug, shortLinks.target] },
 });
 
+const secureShare = defineComponent({
+	kind: "secure-share",
+	label: "Secure share",
+	description:
+		"A guest upload link for secrets (.env files, API keys) — AES-256-GCM encrypted at rest, admin-viewable only. Clients upload via /drop/<token> with no login; the link never exposes contents.",
+	table: secureShares,
+	title: (r) => r.title,
+	subtitle: (r) => (r.note ? r.note : null),
+	status: {
+		get: (r) => (r.expiresAt && r.expiresAt.getTime() < Date.now() ? "expired" : r.status),
+		labels: { open: "open — accepting uploads", closed: "closed" },
+	},
+	adminPath: (r) => `/admin/secure-shares/${r.id}`,
+	publicPath: (r) => `/drop/${r.token}`,
+	search: { columns: [secureShares.title] },
+	ownerLinks: [{ key: "projectId", column: secureShares.projectId, kind: "project" }],
+});
+
 const invoice = defineComponent({
 	kind: "invoice",
 	label: "Invoice",
@@ -318,6 +337,7 @@ export const COMPONENTS: Record<string, AnyComponentDefinition> = {
 	deliverable: deliverable as AnyComponentDefinition,
 	"funnel-run": funnelRun as AnyComponentDefinition,
 	"funnel-item": funnelItem as AnyComponentDefinition,
+	"secure-share": secureShare as AnyComponentDefinition,
 };
 
 export function getComponent(kind: string): AnyComponentDefinition | undefined {

@@ -1239,6 +1239,59 @@ export const changeEvents = pgTable(
 	(t) => [index("idx_change_events_created").on(t.createdAt)],
 );
 
+// ── Secure shares (guest upload links for secrets) ────────────────
+
+// A drop link Collin sends to clients: anyone with /drop/<token> can upload
+// (no login — client-login gating is tracked in ASPTR-218). Every item is
+// AES-256-GCM encrypted; the per-share DEK lives only wrapped under
+// SECURE_SHARE_MASTER_KEY, so a DB dump alone reveals nothing. Contents
+// are admin-viewable only; guests can never read a drop back.
+export const secureShares = pgTable(
+	"secure_shares",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		title: text("title").notNull(),
+		token: text("token").notNull().unique(),
+		// instructions shown on the guest upload page
+		note: text("note"),
+		// open = accepting uploads; closed = frozen (items stay admin-viewable)
+		status: text("status").notNull().default("open"),
+		// base64(iv ‖ AES-GCM(KEK, raw DEK)) — see lib/secure-share.ts
+		wrappedDek: text("wrapped_dek").notNull(),
+		projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+		// uploads rejected past this; admin viewing is unaffected
+		expiresAt: timestamp("expires_at", { withTimezone: true }),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+		updatedAt: timestamp("updated_at", { withTimezone: true })
+			.notNull()
+			.defaultNow()
+			.$onUpdate(() => new Date()),
+	},
+	(t) => [index("idx_secure_shares_project").on(t.projectId)],
+);
+
+// One upload in a secure share. Text items keep base64(iv ‖ ciphertext)
+// inline; file items keep ciphertext in the private `secure-shares` bucket.
+export const secureShareItems = pgTable(
+	"secure_share_items",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		shareId: uuid("share_id")
+			.notNull()
+			.references(() => secureShares.id, { onDelete: "cascade" }),
+		kind: text("kind").notNull(), // "text" | "file"
+		label: text("label").notNull(), // filename or "Pasted text"
+		mimeType: text("mime_type"),
+		sizeBytes: integer("size_bytes"),
+		contentCipher: text("content_cipher"), // text items: base64(iv ‖ ciphertext)
+		storagePath: text("storage_path"), // file items: ciphertext in storage
+		storageIv: text("storage_iv"), // file items: base64 12-byte GCM iv
+		uploaderLabel: text("uploader_label"),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(t) => [index("idx_secure_share_items_share").on(t.shareId)],
+);
+
 
 // ── Inferred types (replaces hand-maintained interfaces) ───────────
 
@@ -1280,3 +1333,5 @@ export type EmailMessage = typeof emailMessages.$inferSelect;
 export type EmailOutbox = typeof emailOutbox.$inferSelect;
 export type BrainRequest = typeof brainRequests.$inferSelect;
 export type NewsletterEvent = typeof newsletterEvents.$inferSelect;
+export type SecureShare = typeof secureShares.$inferSelect;
+export type SecureShareItem = typeof secureShareItems.$inferSelect;
