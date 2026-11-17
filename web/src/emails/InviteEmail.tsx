@@ -13,7 +13,7 @@ export default function InviteEmail() {
 			<EmailLogo />
 			<EmailHeading>You're invited</EmailHeading>
 			<EmailText>
-				I'd like to give you access to your Basalt client portal, where you can track deliverables, view documents, check invoices, and review your meetings.
+				I'd like to give you access to your Basalt client portal, where you can track deliverables, view documents, check invoices, and review our meetings.
 			</EmailText>
 			<EmailButton href={EMAIL_PLACEHOLDER}>Accept Invite</EmailButton>
 			<EmailFallbackLink href={EMAIL_PLACEHOLDER} />
