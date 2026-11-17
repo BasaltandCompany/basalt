@@ -7,7 +7,7 @@ import { cn } from "@basaltac/ui"
  * that is the only color the brand gets.
  */
 
-const SIGNAL_RED = "#C8102E"
+export const SIGNAL_RED = "#C8102E"
 
 export function BasaltMark(props: {
   size?: number

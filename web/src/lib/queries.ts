@@ -248,6 +248,8 @@ export const createTimeEntryAction = action(async (formData: FormData) => {
 	const projectId = String(formData.get("project_id"));
 	await db.insert(timeEntries).values({
 		projectId,
+		// optional deliverable link — empty select → unlinked hours
+		deliverableId: String(formData.get("deliverable_id") || "") || null,
 		entryDate: new Date(String(formData.get("entry_date"))),
 		hours: Number(formData.get("hours")),
 		description: String(formData.get("description")),

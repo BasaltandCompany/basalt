@@ -71,6 +71,9 @@ export default function ProjectDetail() {
 	const today = new Date().toISOString().slice(0, 10);
 	const totalHours = () =>
 		(entries() ?? []).reduce((sum, e) => sum + e.hours, 0);
+	// hours linked to one deliverable (rollup on each deliverable card)
+	const linkedHours = (deliverableId: string) =>
+		(entries() ?? []).filter((e) => e.deliverableId === deliverableId).reduce((sum, e) => sum + e.hours, 0);
 
 	async function handleLog(e: Event) {
 		e.preventDefault();
@@ -203,9 +206,14 @@ export default function ProjectDetail() {
 															<div style={{ display: "flex", "justify-content": "space-between", "align-items": "flex-start", gap: "12px" }}>
 																<div style={{ flex: "1" }}>
 																	<span style={{ "font-size": "15px", "font-weight": "500" }}>{delv.title}</span>
-																	<span class={`badge ${statusBadge[delv.status]}`} style={{ "margin-left": "8px", "text-transform": "capitalize" }}>
-																		{delv.status.replace("_", " ")}
-																	</span>
+																			<span class={`badge ${statusBadge[delv.status]}`} style={{ "margin-left": "8px", "text-transform": "capitalize" }}>
+																				{delv.status.replace("_", " ")}
+																			</span>
+																			<Show when={linkedHours(delv.id) > 0}>
+																				<span class="muted" style={{ "font-size": "12px", "margin-left": "8px" }}>
+																					{linkedHours(delv.id)}h logged
+																				</span>
+																			</Show>
 																</div>
 																{/* Status changer */}
 																<form method="post" action="/admin/projects/update-deliverable" style={{ display: "inline-flex", gap: "0" }} ref={(f) => (statusForms[delv.id] = f)}>
@@ -360,6 +368,13 @@ export default function ProjectDetail() {
 									<div class="form-group">
 										<label for="description">What did you do?</label>
 										<textarea id="description" name="description" rows={2} required placeholder="What was accomplished…" />
+									</div>
+									<div class="form-group">
+										<label for="deliverable_id">Deliverable (optional)</label>
+										<select id="deliverable_id" name="deliverable_id" style={{ width: "100%" }}>
+											<option value="">— none —</option>
+											<For each={deliverables() ?? []}>{(d) => <option value={d.id}>{d.title}</option>}</For>
+										</select>
 									</div>
 									<div class="form-group">
 										<label style={{ display: "flex", "align-items": "center", gap: "8px", cursor: "pointer" }}>
