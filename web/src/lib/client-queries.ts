@@ -1,4 +1,4 @@
-import { query, action, redirect } from "@solidjs/router";
+import { query, action, redirect, revalidate } from "@solidjs/router";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm";
 import { getClient, clientSignIn, setClientSessionCookie } from "./client-session";
@@ -15,8 +15,15 @@ import {
 	deliverables,
 	deliverableUpdates,
 	apiKeys,
+	quotes,
+	quoteItems,
+	quoteVersions,
+	quoteSignatures,
+	docs,
 } from "~/db/schema";
-import type { DocumentType } from "~/db/schema";
+import type { DocumentType, QuoteStatus } from "~/db/schema";
+import { computeQuoteTotals, composeQuoteMarkdown } from "~/lib/quotes";
+import { marked } from "marked";
 import { sql } from "drizzle-orm";
 
 // ── Client portal queries ──────────────────────────────────────────
@@ -365,3 +372,123 @@ export const revokeApiKeyAction = action(async (formData: FormData) => {
 		return { error: e instanceof Error ? e.message : "Failed to revoke key." };
 	}
 }, "revokeApiKey");
+
+// ── Quotes (client portal) ─────────────────────────────────────────
+
+export const getClientQuotesQuery = query(async () => {
+	"use server";
+	const member = await getClient();
+	if (!member) throw redirect("/portal/login");
+	const memberCompanies = await db
+		.select({ companyId: clientCompanyMembers.companyId })
+		.from(clientCompanyMembers)
+		.where(eq(clientCompanyMembers.memberId, member.id));
+	const companyIds = memberCompanies.map((c) => c.companyId);
+	if (companyIds.length === 0) return [];
+	const rows = await db
+		.select({
+			id: quotes.id,
+			title: quotes.title,
+			status: quotes.status,
+			companyName: companies.name,
+			updatedAt: quotes.updatedAt,
+		})
+		.from(quotes)
+		.innerJoin(companies, eq(companies.id, quotes.companyId))
+		.where(inArray(quotes.companyId, companyIds))
+		.orderBy(desc(quotes.updatedAt));
+	const allItems = await db.select().from(quoteItems);
+	return rows.map((q) => ({
+		...q,
+		totals: computeQuoteTotals(allItems.filter((i) => i.quoteId === q.id)),
+	}));
+}, "client-quotes");
+
+export const getClientQuoteQuery = query(async (id: string) => {
+	"use server";
+	const member = await getClient();
+	if (!member) throw redirect("/portal/login");
+	const memberCompanies = await db
+		.select({ companyId: clientCompanyMembers.companyId })
+		.from(clientCompanyMembers)
+		.where(eq(clientCompanyMembers.memberId, member.id));
+	const companyIds = memberCompanies.map((c) => c.companyId);
+	const [row] = await db
+		.select({ quote: quotes, companyName: companies.name })
+		.from(quotes)
+		.innerJoin(companies, eq(companies.id, quotes.companyId))
+		.where(and(eq(quotes.id, id), inArray(quotes.companyId, companyIds.length > 0 ? companyIds : ["00000000-0000-0000-0000-000000000000"])))
+		.limit(1);
+	if (!row) return null;
+	const [items, bodyDoc, versions, signatures] = await Promise.all([
+		db.select().from(quoteItems).where(eq(quoteItems.quoteId, id)).orderBy(quoteItems.sortOrder),
+		db.select({ id: docs.id, markdown: docs.markdown }).from(docs).where(eq(docs.id, row.quote.bodyDocId)).limit(1),
+		db.select().from(quoteVersions).where(eq(quoteVersions.quoteId, id)).orderBy(desc(quoteVersions.version)),
+		db.select().from(quoteSignatures).where(eq(quoteSignatures.quoteId, id)).orderBy(desc(quoteSignatures.createdAt)),
+	]);
+	const composed = bodyDoc[0]
+		? composeQuoteMarkdown({
+				quote: { validDays: row.quote.validDays, quotedCapHours: row.quote.quotedCapHours, createdAt: row.quote.createdAt },
+				companyName: row.companyName,
+				bodyMarkdown: bodyDoc[0].markdown,
+				items,
+				signature: signatures[0] ? { signerName: signatures[0].signerName, signedAt: signatures[0].createdAt } : null,
+			})
+		: "";
+	return {
+		...row.quote,
+		companyName: row.companyName,
+		memberName: member.name,
+		items,
+		totals: computeQuoteTotals(items),
+		bodyDoc: bodyDoc[0] ? { id: bodyDoc[0].id } : null,
+		composedHtml: (marked.parse(composed, { async: false }) as string) ?? "",
+		versions,
+		signatures,
+	};
+}, "client-quote");
+
+// Click-to-sign (ESIGN-valid): typed legal name + portal identity + timestamp.
+// Flips sent → accepted and syncs the project's fixed price to the total.
+export const signQuoteAction = action(async (formData: FormData) => {
+	"use server";
+	const member = await getClient();
+	if (!member) throw redirect("/portal/login");
+	const quoteId = String(formData.get("quote_id") || "");
+	const signerName = String(formData.get("signer_name") || "").trim();
+	if (signerName.length < 3) return { error: "Enter your full legal name to sign." };
+	const memberCompanies = await db
+		.select({ companyId: clientCompanyMembers.companyId })
+		.from(clientCompanyMembers)
+		.where(eq(clientCompanyMembers.memberId, member.id));
+	const companyIds = memberCompanies.map((c) => c.companyId);
+	const [quote] = await db
+		.select()
+		.from(quotes)
+		.where(and(eq(quotes.id, quoteId), inArray(quotes.companyId, companyIds.length > 0 ? companyIds : ["00000000-0000-0000-0000-000000000000"])))
+		.limit(1);
+	if (!quote) return { error: "Quote not found." };
+	if (quote.status !== "sent") return { error: `This quote is ${quote.status} — only sent quotes can be signed.` };
+	const items = await db.select().from(quoteItems).where(eq(quoteItems.quoteId, quoteId));
+	const totals = computeQuoteTotals(items);
+	const [last] = await db
+		.select({ version: quoteVersions.version })
+		.from(quoteVersions)
+		.where(eq(quoteVersions.quoteId, quoteId))
+		.orderBy(desc(quoteVersions.version))
+		.limit(1);
+	await db.insert(quoteSignatures).values({ quoteId, memberId: member.id, signerName });
+	await db.insert(quoteVersions).values({
+		quoteId,
+		version: (last?.version ?? 0) + 1,
+		status: "accepted" as QuoteStatus,
+		itemsJson: items,
+		subtotal: totals.total,
+	});
+	await db.update(quotes).set({ status: "accepted" }).where(eq(quotes.id, quoteId));
+	if (quote.projectId) {
+		await db.update(projects).set({ fixedPrice: totals.total }).where(eq(projects.id, quote.projectId));
+	}
+	await revalidate([getClientQuoteQuery.keyFor(quoteId), getClientQuotesQuery.key]);
+	return { success: `Signed by ${signerName}. The quote is now accepted.` };
+}, "clientSignQuote");

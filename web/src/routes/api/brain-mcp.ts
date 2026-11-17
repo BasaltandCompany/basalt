@@ -4,7 +4,9 @@ import { hashKey } from "~/lib/crypto";
 import { db } from "~/db";
 import { apiKeys, companies, outreachProspects, OUTREACH_STAGES, campaigns, campaignCompanies, videos, funnels, funnelRuns, funnelItems, funnelStageResults, funnelSchedules } from "~/db/schema";
 import { brainQuery, entityFacts } from "~/lib/brain/search";
-import { brainJobs, docs, shortLinks } from "~/db/schema";
+import { brainJobs, docs, shortLinks, quotes, quoteItems } from "~/db/schema";
+import { computeQuoteTotals } from "~/lib/quotes";
+import { getProjectActuals } from "~/lib/quote-actuals";
 import { agentWrite, createDoc, getDoc, getDocVersionDiff, listDocVersions, listDocs, renameDoc, setDocAppendix } from "~/lib/docs";
 import { getVoiceLessons, hasRecentLessonReview, lintGateError, lintVoiceText, listKnownGenres, recordLessonReview, topLessonsForText } from "~/lib/voice-lint-db";
 import { docSurface, type VoiceScope } from "~/lib/voice-lint";
@@ -56,6 +58,57 @@ function json(body: unknown, status = 200) {
 
 function rpcResponse(id: string | number | null, result: unknown) {
 	return json({ jsonrpc: "2.0", id, result });
+}
+
+type ParsedQuoteItem = {
+	group: "required" | "optional";
+	name: string;
+	detail: string | null;
+	hours: number;
+	unitRate: number;
+	sortOrder: number;
+};
+
+function parseQuoteItem(raw: Record<string, unknown>, i: number): ParsedQuoteItem {
+	return {
+		group: raw.group === "optional" ? "optional" : "required",
+		name: String(raw.name ?? `Line ${i + 1}`),
+		detail: raw.detail ? String(raw.detail) : null,
+		hours: Number(raw.hours) || 0,
+		unitRate: Number(raw.rate) || 0,
+		sortOrder: i,
+	};
+}
+
+/** BCW-shaped narrative skeleton when create_quote omits markdown — Collin
+ *  (or a later update_quote) fills the sections with real prose. */
+function skeletonQuoteMarkdown(items: ParsedQuoteItem[]): string {
+	const hasOptional = items.some((i) => i.group === "optional");
+	return [
+		"## What we are building",
+		"",
+		"<one paragraph: what this engagement delivers, in the client's words>",
+		"",
+		"## Why this structure",
+		"",
+			`Fixed-price quote: ${items.filter((i) => i.group === "required").length} required lines${hasOptional ? " plus optional add-ons you can choose" : ""}. Every line purchased is verified working before it counts as delivered.`,
+		"",
+		"## What is not included",
+		"",
+		"- <exclusions>",
+		"",
+		"## What the client provides",
+		"",
+		"- <access, approvals, reviews>",
+		"",
+		"## Timeline",
+		"",
+		"<weeks per phase, milestones>",
+		"",
+		"## Payment",
+		"",
+		"<milestones, due days, late terms>",
+	].join("\n");
 }
 
 function rpcError(id: string | number | null, code: number, message: string) {
@@ -624,7 +677,7 @@ chat_uuid: { type: "string" },
 	{
 		name: "list_component_types",
 		description:
-			"THE MAP OF THE BUSINESS. Every first-class component (company, contact, project, doc, email-thread, email-draft, campaign, prospect, video, meeting, short-link, invoice, deliverable) with a teaching description of what it IS. Call this before hand-rolling any tool or query — components are addressable as {kind, id} everywhere: get_component, search_components, link_components, @[kind:id] mentions in docs.",
+		"THE MAP OF THE BUSINESS. Every first-class component (company, contact, project, doc, email-thread, email-draft, campaign, prospect, video, meeting, short-link, invoice, deliverable, quote) with a teaching description of what it IS. Call this before hand-rolling any tool or query — components are addressable as {kind, id} everywhere: get_component, search_components, link_components, @[kind:id] mentions in docs.",
 		inputSchema: { type: "object", properties: {} },
 	},
 	{
@@ -691,6 +744,85 @@ chat_uuid: { type: "string" },
 				prospect_id: { type: "string", description: "outreach_prospects id, alternative to prospect" },
 			},
 			required: ["url"],
+		},
+	},
+	{
+		name: "create_quote",
+		description:
+			"Create a fixed-price QUOTE DRAFT (the BCW Forms quote is the canonical shape). items[] are priced line items split required/optional — per-group subtotals render as 'Base subtotal' and 'Everything-in total', and detail is the rich per-line prose (what it covers). markdown is the narrative body (what we are building / guarantee / exclusions / client provides / timeline / payment) stored as a docs row and voice-linted like create_doc: the first attempt auto-no's with lessons ranked for YOUR text, resubmit with lessons_applied=true. Companies must already exist (never auto-creates a client on a financial doc). DRAFTS ONLY: you cannot send/accept/reject — Collin sends from the dashboard, the client signs in the portal. Returns quote id, doc id, computed totals.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				company: { type: "string", description: "company name, matched case-insensitively against existing clients" },
+				company_id: { type: "string", description: "companies id, alternative to company" },
+				project_id: { type: "string", description: "projects id — links the quote so project_actuals variance shows" },
+				title: { type: "string" },
+				items: {
+					type: "array",
+					minItems: 1,
+					items: {
+						type: "object",
+						properties: {
+							name: { type: "string", description: "the Part label / workstream" },
+							detail: { type: "string", description: "what this line covers — the rich prose the client reads" },
+							hours: { type: "number", description: "estimated hours (price = hours × rate)" },
+							rate: { type: "number", description: "hourly rate for this line" },
+							group: { type: "string", enum: ["required", "optional"], description: "default required" },
+						},
+						required: ["name"],
+					},
+				},
+				markdown: { type: "string", description: "narrative body markdown; a BCW-shaped skeleton is generated if omitted" },
+				valid_days: { type: "number", description: "default 30 — 'Quote valid: N days' header line" },
+				quoted_cap_hours: { type: "number", description: "optional hour cap (CDL-style)" },
+				genre: { type: "string", description: "voice scope for the body; default 'quote'" },
+				chat_uuid: { type: "string", description: "your session id — required for the voice gates" },
+				lessons_applied: { type: "boolean" },
+				lessons_reviewed: { type: "boolean" },
+			},
+			required: ["title", "items", "chat_uuid"],
+		},
+	},
+	{
+		name: "update_quote",
+		description:
+			"Revise a DRAFT quote: replace title and/or items and/or markdown (markdown goes through the same voice gates as write_doc, mode=replace). Rejected once sent/accepted/rejected — quotes are immutable via MCP after send; Collin edits sent quotes in the dashboard. Returns the recomputed totals.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				quote_id: { type: "string" },
+				title: { type: "string" },
+				items: { type: "array", minItems: 1, description: "REPLACES all line items (same shape as create_quote items)" },
+				markdown: { type: "string", description: "REPLACES the narrative body" },
+				genre: { type: "string" },
+				chat_uuid: { type: "string", description: "your session id — required for the voice gates" },
+				lessons_applied: { type: "boolean" },
+				lessons_reviewed: { type: "boolean" },
+			},
+			required: ["quote_id", "chat_uuid"],
+		},
+	},
+	{
+		name: "list_quotes",
+		description:
+			"Quotes with computed totals, newest first. status=accepted gives the signed contracts — the calibration set for estimating new work. status=sent are awaiting client signature.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				status: { type: "string", enum: ["draft", "sent", "accepted", "rejected"] },
+				company_id: { type: "string" },
+				limit: { type: "number", description: "default 50, max 100" },
+			},
+		},
+	},
+	{
+		name: "project_actuals",
+		description:
+			"THE ESTIMATING LOOP for one project: hours logged (total/billable), labor cost (billable × project rate), invoiced (total + by status), the linked quote (required/optional subtotals, everything-in total, quoted hours, cap), and variance (labor cost − quote total; hours vs cap). Call it on similar past projects BEFORE drafting a quote, and after finishing work to see how the estimate held up.",
+		inputSchema: {
+			type: "object",
+			properties: { project_id: { type: "string" } },
+			required: ["project_id"],
 		},
 	},
 	// ── Funnels (read-only stage aggregates + verdict-filtered worklists) ──
@@ -937,6 +1069,8 @@ export async function POST(event: APIEvent) {
 				protocolVersion: PROTOCOL_VERSION,
 				capabilities: { tools: { listChanged: false } },
 				serverInfo: { name: "madcactus-brain", version: "1.0.0" },
+				instructions:
+					"Quotes are DRAFT-ONLY via MCP: create_quote/update_quote make drafts; Collin sends from the dashboard and clients sign in the portal. Before drafting any quote, call project_actuals on similar past projects to calibrate (hours vs what was quoted). If any tool here fails, misleads you, or could work better in any way, leave feedback via the feedback MCP server (Collin reads every entry) instead of silently working around it.",
 			});
 
 		case "notifications/initialized":
@@ -1778,7 +1912,17 @@ export async function POST(event: APIEvent) {
 							Object.entries((await loadRow(def, id)) ?? {}).filter(([, v]) => ["string", "number", "boolean"].includes(typeof v))
 								.map(([k, v]) => [k, typeof v === "string" && v.length > 200 ? v.slice(0, 200) + "…" : v]),
 						);
-						result = { card, row, links };
+						// quotes: the priced lines ARE the payload — row is scalars-only by design,
+						// so attach a compact items + totals view
+						let quoteExtras: Record<string, unknown> = {};
+						if (kind === "quote" && !card.deleted) {
+							const items = await db.select().from(quoteItems).where(eq(quoteItems.quoteId, id)).orderBy(quoteItems.sortOrder);
+							quoteExtras = {
+								totals: computeQuoteTotals(items),
+								items: items.map((i) => ({ group: i.group, name: i.name, detail: i.detail, hours: i.hours, rate: i.unitRate, amount: i.hours * i.unitRate })),
+							};
+						}
+						result = { card, row, ...quoteExtras, links };
 						break;
 					}
 					case "search_components": {
@@ -1859,6 +2003,167 @@ export async function POST(event: APIEvent) {
 							prospectId,
 						});
 						result = { id: v.id, url: v.url, prospectId: v.prospectId, watchLink: `/v/${v.id}`, fullWatchLink: `https://basalt.ac/v/${v.id}` };
+						break;
+					}
+					// ── Quotes (drafts-only: humans send, clients sign) ──
+					case "create_quote": {
+						const gate = await gateGenre(toolArgs);
+						if ("error" in gate) {
+							result = gate;
+							break;
+						}
+						const itemsRaw = Array.isArray(toolArgs.items) ? (toolArgs.items as Record<string, unknown>[]) : [];
+						if (itemsRaw.length === 0) {
+							result = { error: "items[] is required (at least one line item)" };
+							break;
+						}
+						const items = itemsRaw.map((raw, i) => parseQuoteItem(raw, i));
+						// company must already exist — never auto-create a client on a financial doc
+						let companyId: string | null = null;
+						if (toolArgs.company_id) {
+							const [row] = await db.select({ id: companies.id }).from(companies).where(eq(companies.id, String(toolArgs.company_id))).limit(1);
+							if (!row) {
+								result = { error: "company_id not found" };
+								break;
+							}
+							companyId = row.id;
+						} else if (toolArgs.company) {
+							const cname = String(toolArgs.company).trim();
+							const matches = await db.select({ id: companies.id, name: companies.name }).from(companies).where(ilike(companies.name, cname)).limit(5);
+							const exact = matches.find((m) => m.name.toLowerCase() === cname.toLowerCase());
+							if (exact) companyId = exact.id;
+							else if (matches.length === 1) companyId = matches[0].id;
+							else {
+								result = {
+									error: `company "${cname}" ${matches.length === 0 ? "does not exist — create it in the dashboard first" : "is ambiguous — pass company_id from these"}: ${matches.map((m) => m.name).join(", ") || "no close matches"}`,
+								};
+								break;
+							}
+						} else {
+							result = { error: "company or company_id is required" };
+							break;
+						}
+						const markdown = toolArgs.markdown ? String(toolArgs.markdown) : skeletonQuoteMarkdown(items);
+						const lessons = await gateLessonsForText(toolArgs, markdown, { surface: "docs", genre: gate.genre ?? "quote" });
+						if (!lessons.ok) {
+							result = lessons;
+							break;
+						}
+						const lint = await lintVoiceText(markdown, { surface: "docs", genre: gate.genre ?? "quote" });
+						if (lint.avoidCount > 0) {
+							result = lintGateError(lint);
+							break;
+						}
+						const title = String(toolArgs.title ?? "Untitled quote");
+						const doc = await createDoc(title, markdown, {
+							author: "agent",
+							chatUuid: toolArgs.chat_uuid ? String(toolArgs.chat_uuid) : undefined,
+							genre: gate.genre ?? "quote",
+						});
+						const [row] = await db
+							.insert(quotes)
+							.values({
+								companyId: companyId!,
+								projectId: toolArgs.project_id ? String(toolArgs.project_id) : null,
+								bodyDocId: doc.id,
+								title,
+								validDays: Number(toolArgs.valid_days) || 30,
+								quotedCapHours: toolArgs.quoted_cap_hours ? Number(toolArgs.quoted_cap_hours) : null,
+							})
+							.returning({ id: quotes.id });
+						await db.insert(quoteItems).values(items.map((it) => ({ ...it, quoteId: row.id })));
+						result = {
+							id: row.id,
+							doc_id: doc.id,
+							status: "draft",
+							totals: computeQuoteTotals(items),
+							note: "draft created — Collin reviews and sends from the dashboard; the client signs in the portal",
+						};
+						break;
+					}
+					case "update_quote": {
+						const quoteId = String(toolArgs.quote_id ?? "");
+						const [q] = await db.select().from(quotes).where(eq(quotes.id, quoteId)).limit(1);
+						if (!q) {
+							result = { error: "quote_id not found" };
+							break;
+						}
+							if (q.status !== "draft") {
+								result = { error: `quote is ${q.status} — immutable via MCP once sent. Collin edits sent quotes in the dashboard.` };
+								break;
+							}
+							const rg = requireRead(readSession, [`quote:${quoteId}`, nameKey("quote", q.title)], 'call get_component(kind="quote", id) or list_quotes first');
+							if (!rg.ok) {
+								result = rg;
+								break;
+							}
+						if (!toolArgs.title && !Array.isArray(toolArgs.items) && !toolArgs.markdown) {
+							result = { error: "nothing to update — pass title, items, and/or markdown" };
+							break;
+						}
+						const gate = await gateGenre(toolArgs);
+						if ("error" in gate) {
+							result = gate;
+							break;
+						}
+						if (toolArgs.title) {
+							const title = String(toolArgs.title).trim();
+							if (title) {
+								await db.update(quotes).set({ title }).where(eq(quotes.id, quoteId));
+								await renameDoc(q.bodyDocId, title);
+							}
+						}
+						if (Array.isArray(toolArgs.items)) {
+							const items = (toolArgs.items as Record<string, unknown>[]).map((raw, i) => parseQuoteItem(raw, i));
+							if (items.length === 0) {
+								result = { error: "items[] cannot be empty — use get_component/list_quotes to inspect instead" };
+								break;
+							}
+							await db.delete(quoteItems).where(eq(quoteItems.quoteId, quoteId));
+							await db.insert(quoteItems).values(items.map((it) => ({ ...it, quoteId })));
+						}
+						if (toolArgs.markdown) {
+							const content = String(toolArgs.markdown);
+							const lessons = await gateLessonsForText(toolArgs, content, { surface: "docs", genre: gate.genre ?? "quote" });
+							if (!lessons.ok) {
+								result = lessons;
+								break;
+							}
+							// agentWrite runs the hard lint gate itself and lands as an agent version
+							result = await agentWrite({ docId: q.bodyDocId, content, chatUuid: String(toolArgs.chat_uuid ?? ""), mode: "replace", genre: gate.genre ?? undefined });
+						}
+						const items = await db.select().from(quoteItems).where(eq(quoteItems.quoteId, quoteId)).orderBy(quoteItems.sortOrder);
+						result = { id: quoteId, status: q.status, totals: computeQuoteTotals(items) };
+						break;
+					}
+					case "list_quotes": {
+						const conditions = [];
+						if (toolArgs.status) {
+							const s = String(toolArgs.status);
+							if (!["draft", "sent", "accepted", "rejected"].includes(s)) {
+								result = { error: "status must be draft|sent|accepted|rejected" };
+								break;
+							}
+							conditions.push(eq(quotes.status, s as "draft" | "sent" | "accepted" | "rejected"));
+						}
+						if (toolArgs.company_id) conditions.push(eq(quotes.companyId, String(toolArgs.company_id)));
+						const rows = await db
+							.select({ id: quotes.id, title: quotes.title, status: quotes.status, companyId: quotes.companyId, projectId: quotes.projectId, createdAt: quotes.createdAt, updatedAt: quotes.updatedAt })
+							.from(quotes)
+							.where(conditions.length > 0 ? and(...conditions) : undefined)
+							.orderBy(desc(quotes.createdAt))
+							.limit(Math.min(Number(toolArgs.limit) || 50, 100));
+						noteRead(readSession, rows.flatMap((r) => [`quote:${r.id}`, nameKey("quote", r.title)]));
+						result = await Promise.all(
+							rows.map(async (r) => ({
+								...r,
+								totals: computeQuoteTotals(await db.select().from(quoteItems).where(eq(quoteItems.quoteId, r.id))),
+							})),
+						);
+						break;
+					}
+					case "project_actuals": {
+						result = (await getProjectActuals(String(toolArgs.project_id ?? ""))) ?? { error: "project_id not found" };
 						break;
 					}
 					case "funnel_stats": {
