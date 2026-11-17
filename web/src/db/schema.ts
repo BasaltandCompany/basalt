@@ -105,6 +105,10 @@ export const outreachProspects = pgTable(
 		// still resolve via the watch route's prospect fallback.
 		// campaign this prospect came from (set null when the campaign is deleted)
 		campaignId: uuid("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
+		// person this prospect is about (auto-matched from prospect.email; set null when the person is deleted)
+		contactId: uuid("contact_id").references(() => clientMembers.id, { onDelete: "set null" }),
+		// the client org this prospect became / already is (unifies outreach + CRM views)
+		companyId: uuid("company_id").references(() => companies.id, { onDelete: "set null" }),
 		// ── ICP qualification (researched by Collin or the sourcing loop — never asked of the lead) ──
 		region: text("region").notNull().default("unknown"),
 		revenueBand: text("revenue_band").notNull().default("unknown"),
@@ -129,7 +133,9 @@ export const outreachProspects = pgTable(
 			"outreach_stage_check",
 			sql`${t.stage} in ${sql.raw(`(${OUTREACH_STAGES.map((s) => `'${s}'`).join(", ")})`)}`,
 			),
-		],
+		index("idx_prospects_contact").on(t.contactId),
+		index("idx_prospects_company").on(t.companyId),
+	],
 	);
 
 // ponytail: doublePrecision (float8) instead of numeric. Float8 gives 15-digit
@@ -353,6 +359,23 @@ export const clientCompanyMembers = pgTable(
 		createdAt: timestamp("created_at").notNull().defaultNow(),
 	},
 	(t) => [primaryKey({ columns: [t.memberId, t.companyId] })],
+);
+
+// ── Person email addresses (one person, many addresses) ───────────
+// Primary/login email stays on client_members (Supabase Auth matches it).
+// Every other address a person sends/receives from lives here; email→person
+// identity resolution checks both. Unique: two people can't share an address.
+export const clientMemberEmails = pgTable(
+	"client_member_emails",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		memberId: uuid("member_id")
+			.notNull()
+			.references(() => clientMembers.id, { onDelete: "cascade" }),
+		email: text("email").notNull().unique(), // stored lowercase
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+	},
+	(t) => [index("idx_member_emails_member").on(t.memberId)],
 );
 
 // ── Projects / Engagements ─────────────────────────────────────────
@@ -857,8 +880,9 @@ export const brainPages = pgTable(
 		// 'entity' (company/person/project/topic card) | 'take' | 'summary' | 'note'
 		type: text("type").notNull().default("entity"),
 		entityKind: brainEntityKind("entity_kind"),
-		// tight coupling: entity pages for clients point at the CRM row
+		// tight coupling: entity pages for clients/people point at the CRM row
 		companyId: uuid("company_id").references(() => companies.id, { onDelete: "set null" }),
+		contactId: uuid("contact_id").references(() => clientMembers.id, { onDelete: "set null" }),
 		title: text("title").notNull(),
 		// distilled body — synthesized from facts/takes by the enrich phase
 		compiledTruth: text("compiled_truth").notNull().default(""),
@@ -876,7 +900,7 @@ export const brainPages = pgTable(
 			.defaultNow()
 			.$onUpdate(() => new Date()),
 	},
-	(t) => [index("idx_brain_pages_company").on(t.companyId), index("idx_brain_pages_type").on(t.type)],
+	(t) => [index("idx_brain_pages_company").on(t.companyId), index("idx_brain_pages_contact").on(t.contactId), index("idx_brain_pages_type").on(t.type)],
 );
 
 export const brainChunks = pgTable(
@@ -1059,6 +1083,15 @@ export const brainState = pgTable("brain_state", {
 
 // ── Email (Gmail-backed inbox) ────────────────────
 
+// One inbound message attachment's metadata (bytes stay in Gmail; fetched on
+// demand via get_email_attachment — never stored locally).
+export type EmailAttachment = {
+	filename: string;
+	mimeType: string;
+	size: number;
+	attachmentId: string;
+};
+
 export const emailAccounts = pgTable("email_accounts", {
 	id: uuid("id").primaryKey().defaultRandom(),
 	email: text("email").notNull().unique(),
@@ -1108,7 +1141,11 @@ export const emailMessages = pgTable(
 		toEmails: text("to_emails"),
 		bodyText: text("body_text").notNull().default(""),
 		// raw text/html part; NULL = never checked (pre-column rows), '' = text-only
+		// raw text/html part; NULL = never checked (pre-column rows), '' = text-only
 		bodyHtml: text("body_html"),
+		// metadata only (filename/mimeType/size/attachmentId) — bytes stay in
+		// Gmail and are fetched on demand via get_email_attachment (no storage cost)
+		attachments: jsonb("attachments").$type<EmailAttachment[]>().notNull().default([]),
 		date: timestamp("date", { withTimezone: true }).notNull(),
 		isSent: boolean("is_sent").notNull().default(false),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

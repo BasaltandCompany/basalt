@@ -1,7 +1,7 @@
 // Self-check for gmail payload parsing + mime building (pure functions).
 // Run: DATABASE_URL=postgres://dummy bun test src/lib/gmail.test.ts
 import { describe, expect, test } from "bun:test";
-import { buildMime, extractText, extractHtml, addr, latestMessage, isTrashed, threadSubject } from "./gmail";
+import { buildMime, extractText, extractHtml, addr, latestMessage, isTrashed, threadSubject, extractAttachments } from "./gmail";
 import { toBase64 } from "./crypto";
 
 const part = (mimeType: string, data: string): any => ({
@@ -345,5 +345,32 @@ describe("latestByThread", () => {
 	test("missing labelIds → not unread", () => {
 		const out = latestByThread([stub("t1", "1", "s")]);
 		expect(out.get("t1")?.unread).toBe(false);
+	});
+});
+
+describe("extractAttachments", () => {
+	test("collects nested parts carrying filename + attachmentId", () => {
+		const p = msg(
+			[],
+			[
+				{ ...part("text/plain", "hi") },
+				{
+					mimeType: "multipart/mixed",
+					headers: [],
+					parts: [
+						{ mimeType: "application/pdf", filename: "quote.pdf", headers: [], body: { attachmentId: "att1", size: 1234 } },
+						{ mimeType: "image/png", filename: "logo.png", headers: [], body: { attachmentId: "att2", size: 10 } },
+					],
+				},
+			],
+		);
+		const out = extractAttachments(p);
+		expect(out).toHaveLength(2);
+		expect(out[0]).toEqual({ filename: "quote.pdf", mimeType: "application/pdf", size: 1234, attachmentId: "att1" });
+	});
+
+	test("body parts without attachmentId are skipped", () => {
+		const p = msg([], [part("text/plain", "just text")]);
+		expect(extractAttachments(p)).toEqual([]);
 	});
 });
