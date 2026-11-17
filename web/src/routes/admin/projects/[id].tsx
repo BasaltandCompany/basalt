@@ -12,8 +12,10 @@ import {
 	getProjectQuery,
 	getUserQuery,
 } from "~/lib/queries";
-import { createDeliverableAction, getDeliverablesQuery, deleteDeliverableAction } from "~/lib/admin-queries";
-import type { DeliverableStatus } from "~/db/schema";
+import { createDeliverableAction, getDeliverablesQuery, deleteDeliverableAction, updateQuoteMetaAction, getProjectQuotesQuery, getQuotesQuery, getCompaniesForSelectQuery } from "~/lib/admin-queries";
+import { updateProjectAction } from "~/lib/queries";
+import type { DeliverableStatus, ProjectStatus, QuoteStatus, Project } from "~/db/schema";
+import { money } from "~/lib/quotes";
 import { Button, Card, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@basaltac/ui";
 import SelectField from "~/components/select-field";
 
@@ -33,6 +35,15 @@ const statusBadge: Record<DeliverableStatus, string> = {
 	blocked: "badge-paused",
 };
 
+const PROJECT_STATUS_OPTIONS: ProjectStatus[] = ["active", "paused", "completed"];
+
+const quoteBadge: Record<QuoteStatus, string> = {
+	draft: "badge-paused",
+	sent: "badge-active",
+	accepted: "badge-completed",
+	rejected: "badge-paused",
+};
+
 export default function ProjectDetail() {
 	const params = useParams();
 	const navigate = useNavigate();
@@ -40,16 +51,22 @@ export default function ProjectDetail() {
 	const project = createAsync(() => getProjectQuery(params.id!), { deferStream: true });
 	const entries = createAsync(() => getProjectEntriesQuery(params.id!), { deferStream: true });
 	const deliverables = createAsync(() => getDeliverablesQuery(params.id!), { deferStream: true });
+	const companies = createAsync(() => getCompaniesForSelectQuery(), { deferStream: true });
+	const projectQuotes = createAsync(() => getProjectQuotesQuery(params.id!), { deferStream: true });
+	const allQuotes = createAsync(() => getQuotesQuery(), { deferStream: true });
 	const createEntry = useAction(createTimeEntryAction);
 	const deleteEntry = useAction(deleteTimeEntryAction);
 	const deleteDeliverable = useAction(deleteDeliverableAction);
 	const createDeliverable = useAction(createDeliverableAction);
+	const updateProject = useAction(updateProjectAction);
+	const updateQuoteMeta = useAction(updateQuoteMetaAction);
 	const statusForms: Record<string, HTMLFormElement> = {};
 	const [error, setError] = createSignal("");
 	// Guard + in-flight indicator: a second click while the action runs must
 	// not submit a duplicate entry.
 	const [logging, setLogging] = createSignal(false);
 	const [updateDeliverableId, setUpdateDeliverableId] = createSignal<string | null>(null);
+	const [statusSaving, setStatusSaving] = createSignal(false);
 
 	const today = new Date().toISOString().slice(0, 10);
 	const totalHours = () =>
@@ -72,6 +89,36 @@ export default function ProjectDetail() {
 		}
 	}
 
+	async function handleStatus(id: string, current: string, status: string) {
+		if (!status || status === current || statusSaving()) return;
+		setStatusSaving(true);
+		try {
+			const fd = new FormData();
+			fd.set("id", id);
+			fd.set("status", status);
+			await updateProject(fd);
+		} finally {
+			setStatusSaving(false);
+		}
+	}
+
+	// Reversible — nothing is lost, so no confirm dialog.
+	async function handleUnlink(quoteId: string) {
+		const fd = new FormData();
+		fd.set("id", quoteId);
+		fd.set("project_id", "");
+		await updateQuoteMeta(fd);
+	}
+
+	const dateRange = (proj: Pick<Project, "startDate" | "endDate">) => {
+		const fmt = (d: string) =>
+			new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+		if (proj.startDate && proj.endDate) return ` · ${fmt(proj.startDate)} – ${fmt(proj.endDate)}`;
+		if (proj.startDate) return ` · starts ${fmt(proj.startDate)}`;
+		if (proj.endDate) return ` · ends ${fmt(proj.endDate)}`;
+		return "";
+	};
+
 	return (
 		<Layout user={user()}>
 			<Suspense fallback={<p class="muted">Loading…</p>}>
@@ -82,11 +129,37 @@ export default function ProjectDetail() {
 							<A href="/admin/projects" class="muted" style={{ "font-size": "13px", "margin-bottom": "8px", display: "inline-block" }}>
 								All Projects
 							</A>
-							<h1 class="page-title">{p().name}</h1>
-							<p class="page-subtitle">
-								{p().companyName} · <span style={{ "text-transform": "capitalize" }}>{p().engagementType}</span>{p().engagementType === "project" ? ` · $${(p().fixedPrice ?? 0).toLocaleString()} fixed` : ` · $${p().hourlyRate}/hr`}
-								{p().monthlyCapHours ? ` · ${p().monthlyCapHours}h cap` : ""}
-							</p>
+							<div style={{ display: "flex", "justify-content": "space-between", "align-items": "flex-start", gap: "16px" }}>
+								<div>
+									<h1 class="page-title" style={{ "margin-bottom": "0" }}>{p().name}</h1>
+									<p class="page-subtitle">
+										{p().companyName} · <span style={{ "text-transform": "capitalize" }}>{p().engagementType}</span>{p().engagementType === "project" ? ` · $${(p().fixedPrice ?? 0).toLocaleString()} fixed` : ` · $${p().hourlyRate}/hr`}
+										{p().monthlyCapHours ? ` · ${p().monthlyCapHours}h cap` : ""}
+										{dateRange(p())}
+									</p>
+								</div>
+								<div style={{ display: "flex", gap: "8px", "align-items": "center", "flex-shrink": 0, "padding-top": "6px" }}>
+									<SelectField
+										aria-label="Project status"
+										value={p().status}
+										options={PROJECT_STATUS_OPTIONS.map((s) => ({ value: s, label: s }))}
+										onChange={(s) => handleStatus(p().id, p().status, s)}
+										style={{ "font-size": "13px" }}
+									/>
+									<CreateDialog
+										label="Edit Project"
+										title="Edit Project"
+										submitLabel="Save Changes"
+										successMessage="Saved."
+										onSubmit={async (fd) => {
+											fd.set("id", p().id);
+											return updateProject(fd) as Promise<{ error?: string; success?: string } | undefined>;
+										}}
+									>
+										<EditProjectForm p={p()} companies={companies() ?? []} />
+									</CreateDialog>
+								</div>
+							</div>
 
 							<Show when={p().notes}>
 								<Card style={{ "margin-bottom": "32px" }}>
@@ -205,6 +278,64 @@ export default function ProjectDetail() {
 								</Show>
 							</Suspense>
 
+							{/* Quotes — accepted+signed = the contract */}
+							<div style={{ display: "flex", "justify-content": "space-between", "align-items": "center", "margin-bottom": "16px" }}>
+								<div class="section-heading" style={{ margin: "0" }}>Quotes</div>
+								<CreateDialog
+									label="Attach Quote"
+									title="Attach Quote"
+									submitLabel="Attach"
+									triggerClass="btn btn-sm btn-primary"
+									onSubmit={async (fd) => {
+										fd.set("id", String(fd.get("quote_id") || ""));
+										fd.set("project_id", p().id);
+										return updateQuoteMeta(fd) as Promise<{ error?: string; success?: string } | undefined>;
+									}}
+								>
+									<div class="form-group">
+										<label for="attach_quote">Quote</label>
+										<SelectField
+											id="attach_quote"
+											name="quote_id"
+											required
+											placeholder="Select a quote…"
+											options={() =>
+												(allQuotes() ?? [])
+													.filter((q) => !q.projectId && q.companyId === p().companyId)
+													.map((q) => ({ value: q.id, label: `${q.title} — ${money(q.totals.total)}` }))
+											}
+										/>
+									</div>
+									<p class="muted" style={{ "font-size": "12px", margin: "8px 0 0" }}>
+										Only quotes with no project yet, from this project's company. Manage quote contents at /admin/quotes.
+									</p>
+								</CreateDialog>
+							</div>
+							<Suspense fallback={<p class="muted">Loading…</p>}>
+								<Show when={projectQuotes()} fallback={<p class="muted">Loading…</p>}>
+									{(list) => (
+										<Show when={list().length > 0} fallback={<Card class="empty">No quotes attached.</Card>}>
+											<div style={{ display: "flex", "flex-direction": "column", gap: "12px", "margin-bottom": "40px" }}>
+												<For each={list()}>
+													{(q) => (
+														<Card style={{ padding: "20px" }}>
+															<div style={{ display: "flex", "justify-content": "space-between", "align-items": "center", gap: "12px" }}>
+																<A href={`/admin/quotes/${q.id}`} style={{ "font-size": "15px", "font-weight": "500" }}>{q.title}</A>
+																<div style={{ display: "flex", "align-items": "center", gap: "12px" }}>
+																	<span class={`badge ${quoteBadge[q.status]}`} style={{ "text-transform": "capitalize" }}>{q.status}</span>
+																	<span class="mono muted" style={{ "font-size": "13px" }}>{money(q.total)}</span>
+																	<Button variant="outline" size="sm" onClick={() => handleUnlink(q.id)}>Unlink</Button>
+																</div>
+															</div>
+														</Card>
+													)}
+												</For>
+											</div>
+										</Show>
+									)}
+								</Show>
+							</Suspense>
+							
 							{/* Documents */}
 							<ProjectDocuments
 								projectId={params.id!}
@@ -302,5 +433,96 @@ export default function ProjectDetail() {
 				</Show>
 			</Suspense>
 		</Layout>
+	);
+}
+
+// Edit dialog body — own signal so the conditional pricing fields follow the
+// type select the same way the New Project dialog does. Re-mounts on every
+// dialog open, so values always start from the live project row.
+function EditProjectForm(props: { p: Project; companies: { id: string; name: string }[] }) {
+	const [type, setType] = createSignal(props.p.engagementType);
+	const isHourly = () => type() !== "project";
+	return (
+		<>
+			<div class="form-group">
+				<label for="edit_name">Project Name</label>
+				<input type="text" id="edit_name" name="name" required value={props.p.name} />
+			</div>
+			<div class="form-group">
+				<label for="edit_company">Company</label>
+				<SelectField
+					id="edit_company"
+					name="company_id"
+					required
+					value={props.p.companyId}
+					options={props.companies.map((c) => ({ value: c.id, label: c.name }))}
+				/>
+			</div>
+			<div class="form-row">
+				<div class="form-group">
+					<label for="edit_type">Engagement Type</label>
+					<SelectField
+						id="edit_type"
+						name="engagement_type"
+						value={type()}
+						onChange={setType}
+						options={[
+							{ value: "hourly", label: "Hourly" },
+							{ value: "retainer", label: "Retainer (monthly cap)" },
+							{ value: "project", label: "Project (fixed price)" },
+						]}
+					/>
+				</div>
+				<Show when={isHourly()}>
+					<div class="form-group">
+						<label for="edit_hourly_rate">Hourly Rate ($)</label>
+						<input type="number" id="edit_hourly_rate" name="hourly_rate" step="1" min="0" value={String(props.p.hourlyRate)} />
+					</div>
+				</Show>
+				<Show when={!isHourly()}>
+					<div class="form-group">
+						<label for="edit_fixed_price">Fixed Price ($)</label>
+						<input type="number" id="edit_fixed_price" name="fixed_price" step="100" min="0" required value={String(props.p.fixedPrice ?? "")} />
+					</div>
+				</Show>
+				<Show when={type() === "retainer"}>
+					<div class="form-group">
+						<label for="edit_cap">Monthly Cap (hours)</label>
+						<input
+							type="number"
+							id="edit_cap"
+							name="monthly_cap_hours"
+							step="1"
+							min="0"
+							value={props.p.monthlyCapHours != null ? String(props.p.monthlyCapHours) : ""}
+							placeholder="Leave blank if uncapped"
+						/>
+					</div>
+				</Show>
+			</div>
+			<div class="form-row">
+				<div class="form-group">
+					<label for="edit_status">Status</label>
+					<SelectField
+						id="edit_status"
+						name="status"
+						value={props.p.status}
+						options={PROJECT_STATUS_OPTIONS.map((s) => ({ value: s, label: s }))}
+					/>
+				</div>
+				<div class="form-group">
+					<label for="edit_start">Start Date</label>
+					<input type="date" id="edit_start" name="start_date" value={props.p.startDate ?? ""} />
+				</div>
+				<div class="form-group">
+					<label for="edit_end">End Date</label>
+					<input type="date" id="edit_end" name="end_date" value={props.p.endDate ?? ""} />
+				</div>
+			</div>
+			<div class="form-group">
+				<label for="edit_notes">Scope / Notes</label>
+				<textarea id="edit_notes" name="notes" rows={3}>{props.p.notes ?? ""}</textarea>
+			</div>
+		</>
 	);
 }

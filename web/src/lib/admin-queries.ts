@@ -43,6 +43,7 @@ import { campaignStats } from "~/lib/campaign-stats";
 import { setProspectVideo } from "~/lib/videos";
 import { createDoc } from "~/lib/docs";
 import { computeQuoteTotals } from "~/lib/quotes";
+import { getProjectQuery, getProjectsQuery } from "~/lib/queries";
 import { getProjectActuals } from "~/lib/quote-actuals";
 import type { Video } from "~/db/schema";
 import type { QuoteStatus } from "~/db/schema";
@@ -1380,6 +1381,21 @@ export const getQuotesQuery = query(async () => {
 	}));
 }, "admin-quotes");
 
+export const getProjectQuotesQuery = query(async (projectId: string) => {
+	"use server";
+	await requireAdmin();
+	const rows = await db
+		.select({ id: quotes.id, title: quotes.title, status: quotes.status, updatedAt: quotes.updatedAt })
+		.from(quotes)
+		.where(eq(quotes.projectId, projectId))
+		.orderBy(desc(quotes.updatedAt));
+	const allItems = await db.select().from(quoteItems);
+	return rows.map((q) => ({
+		...q,
+		total: computeQuoteTotals(allItems.filter((i) => i.quoteId === q.id)).total,
+	}));
+}, "admin-project-quotes");
+
 export const getQuoteQuery = query(async (id: string) => {
 	"use server";
 	await requireAdmin();
@@ -1439,16 +1455,46 @@ export const updateQuoteMetaAction = action(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id"));
-	await db
-		.update(quotes)
-		.set({
-			title: String(formData.get("title") || "").trim() || undefined,
-			projectId: formData.get("project_id") ? String(formData.get("project_id")) : null,
-			validDays: Number(formData.get("valid_days")) || 30,
-			quotedCapHours: formData.get("quoted_cap_hours") ? Number(formData.get("quoted_cap_hours")) : null,
-		})
-		.where(eq(quotes.id, id));
-	await revalidate([getQuoteQuery.keyFor(id), getQuotesQuery.key]);
+	// Partial update (drizzle ignores undefined): the quote detail form
+	// submits every field; the project page sends only id + project_id.
+	const values: Partial<typeof quotes.$inferInsert> = {};
+	if (formData.has("title")) {
+		const title = String(formData.get("title") || "").trim();
+		if (title) values.title = title;
+	}
+	if (formData.has("project_id")) {
+		const projectId = String(formData.get("project_id") || "") || null;
+		if (projectId) {
+			// portal access is company-scoped: a quote may only link to a
+			// project of the same company
+			const [project] = await db
+				.select({ companyId: projects.companyId })
+				.from(projects)
+				.where(eq(projects.id, projectId))
+				.limit(1);
+			const [quote] = await db
+				.select({ companyId: quotes.companyId })
+				.from(quotes)
+				.where(eq(quotes.id, id))
+				.limit(1);
+			if (!project || !quote || project.companyId !== quote.companyId) {
+				return { error: "Quote belongs to a different company." };
+			}
+		}
+		values.projectId = projectId;
+	}
+	if (formData.has("valid_days")) values.validDays = Number(formData.get("valid_days")) || 30;
+	if (formData.has("quoted_cap_hours")) {
+		values.quotedCapHours = formData.get("quoted_cap_hours") ? Number(formData.get("quoted_cap_hours")) : null;
+	}
+	await db.update(quotes).set(values).where(eq(quotes.id, id));
+	await revalidate([
+		getQuoteQuery.keyFor(id),
+		getQuotesQuery.key,
+		getProjectQuotesQuery.key,
+		getProjectQuery.key,
+		getProjectsQuery.key,
+	]);
 	return { success: "Saved." };
 }, "updateQuoteMeta");
 
@@ -1515,6 +1561,6 @@ export const setQuoteStatusAction = action(async (formData: FormData) => {
 	if (status === "accepted" && q.projectId) {
 		await db.update(projects).set({ fixedPrice: totals.total }).where(eq(projects.id, q.projectId));
 	}
-	await revalidate([getQuoteQuery.keyFor(id), getQuotesQuery.key]);
+	await revalidate([getQuoteQuery.keyFor(id), getQuotesQuery.key, getProjectQuotesQuery.key, getProjectQuery.key, getProjectsQuery.key]);
 	return { success: `Status → ${status}.` };
 }, "setQuoteStatus");

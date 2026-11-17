@@ -374,6 +374,8 @@ export const projects = pgTable(
 		// retainer only; null = uncapped
 		monthlyCapHours: doublePrecision("monthly_cap_hours"),
 		status: projectStatus("status").notNull().default("active"),
+		startDate: date("start_date"),
+		endDate: date("end_date"),
 		notes: text("notes"),
 		createdAt: timestamp("created_at").notNull().defaultNow(),
 		updatedAt: timestamp("updated_at")

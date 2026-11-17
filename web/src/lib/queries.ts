@@ -11,7 +11,7 @@ import {
 	deliverableUpdates,
 	timer,
 } from "~/db/schema";
-import type { Project, EngagementType } from "~/db/schema";
+import type { Project, EngagementType, ProjectStatus } from "~/db/schema";
 
 // ── Auth ──────────────────────────────────────────────────────────
 
@@ -70,10 +70,14 @@ export const getProjectQuery = query(async (id: string) => {
 export const createProjectAction = action(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
+	const name = String(formData.get("name") || "").trim();
+	if (!name) return { error: "Project name is required." };
+	const companyId = String(formData.get("company_id") || "");
+	if (!companyId) return { error: "Company is required." };
 	const type = String(formData.get("engagement_type")) as EngagementType;
 	await db.insert(projects).values({
-		name: String(formData.get("name")),
-		companyId: String(formData.get("company_id")),
+		name,
+		companyId,
 		engagementType: type,
 		hourlyRate: Number(formData.get("hourly_rate") || 0),
 		fixedPrice: type === "project" ? Number(formData.get("fixed_price") || 0) : null,
@@ -82,10 +86,55 @@ export const createProjectAction = action(async (formData: FormData) => {
 				? Number(formData.get("monthly_cap_hours"))
 				: null,
 		status: "active",
+		startDate: dateOrNull(formData.get("start_date")),
+		endDate: dateOrNull(formData.get("end_date")),
 		notes: String(formData.get("notes") || ""),
 	});
 	throw redirect("/admin/projects");
 }, "createProject");
+
+// "" or missing → null; keeps nullable date inputs clearing cleanly
+function dateOrNull(v: FormDataEntryValue | null): string | null {
+	const s = String(v || "").trim();
+	return s || null;
+}
+
+export const updateProjectAction = action(async (formData: FormData) => {
+	"use server";
+	await requireAdmin();
+	const id = String(formData.get("id") || "");
+	if (!id) return { error: "Project id is required." };
+	// Partial update: only FormData-present fields change, so the header
+	// status select (id+status) and the full edit dialog share this action.
+	const values: Partial<typeof projects.$inferInsert> = {};
+	if (formData.has("name")) {
+		const name = String(formData.get("name") || "").trim();
+		if (!name) return { error: "Project name is required." };
+		values.name = name;
+	}
+	if (formData.has("company_id")) {
+		const companyId = String(formData.get("company_id") || "");
+		if (!companyId) return { error: "Company is required." };
+		values.companyId = companyId;
+	}
+	if (formData.has("engagement_type")) values.engagementType = String(formData.get("engagement_type")) as EngagementType;
+	if (formData.has("hourly_rate")) values.hourlyRate = Number(formData.get("hourly_rate") || 0);
+	if (formData.has("fixed_price")) values.fixedPrice = Number(formData.get("fixed_price") || 0);
+	if (formData.has("monthly_cap_hours")) {
+		const cap = String(formData.get("monthly_cap_hours") || "").trim();
+		values.monthlyCapHours = cap ? Number(cap) : null;
+	}
+	if (formData.has("status")) values.status = String(formData.get("status")) as ProjectStatus;
+	if (formData.has("start_date")) values.startDate = dateOrNull(formData.get("start_date"));
+	if (formData.has("end_date")) values.endDate = dateOrNull(formData.get("end_date"));
+	if (formData.has("notes")) values.notes = String(formData.get("notes") || "");
+	if (values.startDate && values.endDate && values.endDate < values.startDate) {
+		return { error: "End date must be after start date." };
+	}
+	await db.update(projects).set(values).where(eq(projects.id, id));
+	await revalidate([getProjectQuery.key, getProjectsQuery.key]);
+	return { success: "Saved." };
+}, "updateProject");
 
 // ── Time entries ──────────────────────────────────────────────────
 
