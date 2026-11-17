@@ -41,9 +41,10 @@ import { contactSuggestionsFor, latestThreadFor } from "~/lib/outreach-email";
 import { triggerSyncIfStale } from "~/lib/email-queries";
 import { campaignStats } from "~/lib/campaign-stats";
 import { setProspectVideo } from "~/lib/videos";
-import type { Video } from "~/db/schema";
 import { createDoc } from "~/lib/docs";
-import { computeQuoteTotals, getProjectActuals } from "~/lib/quotes";
+import { computeQuoteTotals } from "~/lib/quotes";
+import { getProjectActuals } from "~/lib/quote-actuals";
+import type { Video } from "~/db/schema";
 import type { QuoteStatus } from "~/db/schema";
 
 // ── Auth guard ────────────────────────────────────────────────────
