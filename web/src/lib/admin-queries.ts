@@ -1,6 +1,7 @@
 import { query, action, redirect, revalidate } from "@solidjs/router";
 import { eq, and, desc, asc, inArray, isNull, isNotNull, ilike, gt, lte, notInArray } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm";
+import { dateOrNull } from "./queries";
 import { getAuthedClient } from "./session";
 import { supabaseService } from "./supabase";
 import { db } from "~/db";
@@ -1461,7 +1462,7 @@ export const getProjectQuotesQuery = query(async (projectId: string) => {
 	"use server";
 	await requireAdmin();
 	const rows = await db
-		.select({ id: quotes.id, title: quotes.title, status: quotes.status, updatedAt: quotes.updatedAt })
+		.select({ id: quotes.id, title: quotes.title, status: quotes.status, updatedAt: quotes.updatedAt, startDate: quotes.startDate, endDate: quotes.endDate })
 		.from(quotes)
 		.where(eq(quotes.projectId, projectId))
 		.orderBy(desc(quotes.updatedAt));
@@ -1563,6 +1564,8 @@ export const updateQuoteMetaAction = action(async (formData: FormData) => {
 	if (formData.has("quoted_cap_hours")) {
 		values.quotedCapHours = formData.get("quoted_cap_hours") ? Number(formData.get("quoted_cap_hours")) : null;
 	}
+	if (formData.has("start_date")) values.startDate = dateOrNull(formData.get("start_date"));
+	if (formData.has("end_date")) values.endDate = dateOrNull(formData.get("end_date"));
 	await db.update(quotes).set(values).where(eq(quotes.id, id));
 	await revalidate([
 		getQuoteQuery.keyFor(id),
@@ -1573,6 +1576,55 @@ export const updateQuoteMetaAction = action(async (formData: FormData) => {
 	]);
 	return { success: "Saved." };
 }, "updateQuoteMeta");
+
+// Attach a quote to a project = link + contract dates + deliverables in one go.
+// Required line items become deliverables, idempotent by title (safe to re-run).
+export const importQuoteToProjectAction = action(async (formData: FormData) => {
+	"use server";
+	await requireAdmin();
+	const quoteId = String(formData.get("quote_id") || "");
+	const projectId = String(formData.get("project_id") || "");
+	if (!quoteId || !projectId) return { error: "Quote and project are required." };
+	const [quote] = await db.select().from(quotes).where(eq(quotes.id, quoteId)).limit(1);
+	const [project] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
+	if (!quote || !project) return { error: "Quote or project not found." };
+	if (quote.companyId !== project.companyId) return { error: "Quote belongs to a different company." };
+	if (quote.projectId && quote.projectId !== projectId) return { error: "Quote is attached to another project." };
+
+	await db.update(quotes).set({ projectId }).where(eq(quotes.id, quoteId));
+	// accepted quote = the contract: its dates win, but never clear the project's
+	const projectValues: Partial<typeof projects.$inferInsert> = {};
+	if (quote.startDate) projectValues.startDate = quote.startDate;
+	if (quote.endDate) projectValues.endDate = quote.endDate;
+	if (Object.keys(projectValues).length) {
+		await db.update(projects).set(projectValues).where(eq(projects.id, projectId));
+	}
+
+	const items = await db
+		.select()
+		.from(quoteItems)
+		.where(and(eq(quoteItems.quoteId, quoteId), eq(quoteItems.group, "required")));
+	const existing = await db
+		.select({ title: deliverables.title })
+		.from(deliverables)
+		.where(eq(deliverables.projectId, projectId));
+	const taken = new Set(existing.map((d) => d.title.toLowerCase()));
+	const fresh = items.filter((i) => !taken.has(i.name.toLowerCase()));
+	if (fresh.length) {
+		await db.insert(deliverables).values(
+			fresh.map((i) => ({ projectId, title: i.name, description: i.detail ?? "", sortOrder: i.sortOrder })),
+		);
+	}
+	await revalidate([
+		getQuoteQuery.keyFor(quoteId),
+		getQuotesQuery.key,
+		getProjectQuotesQuery.key,
+		getProjectQuery.key,
+		getProjectsQuery.key,
+		getDeliverablesQuery.key,
+	]);
+	return { success: fresh.length ? `Attached — imported ${fresh.length} deliverable(s).` : "Attached." };
+}, "importQuoteToProject");
 
 export const upsertQuoteItemAction = action(async (formData: FormData) => {
 	"use server";

@@ -66,7 +66,7 @@ export default function Projects() {
 							<SelectField
 								id="engagement_type"
 								name="engagement_type"
-								value="hourly"
+								value={engagementType()}
 								onChange={setEngagementType}
 								options={[
 									{ value: "hourly", label: "Hourly" },
