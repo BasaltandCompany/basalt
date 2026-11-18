@@ -42,7 +42,6 @@ jobs:
       - name: publish if src changed (bump version if not bumped in PR)
         working-directory: packages/ui
         run: |
-        run: |
           # hash of src/** inside a packed tarball, order-stable
           src_hash() {
             local dir
