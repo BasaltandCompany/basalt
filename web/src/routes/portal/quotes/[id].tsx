@@ -30,7 +30,8 @@ export default function PortalQuoteDetail() {
 					<div style={{ "max-width": "820px", margin: "0 auto" }}>
 						<div style={{ display: "flex", "justify-content": "space-between", "align-items": "center", gap: "12px", "margin-bottom": "24px" }}>
 							<h1 class="page-title" style={{ margin: 0 }}>{q().title}</h1>
-							<Button as="a" variant="outline" size="sm" href={`/api/quotes/${q().id}/pdf`}>PDF</Button>
+							{/* download attr: solid router would otherwise intercept the click and client-side-navigate to the API URL — no download (see admin/quotes/[id]) */}
+							<Button as="a" variant="outline" size="sm" href={`/api/quotes/${q().id}/pdf`} download="">PDF</Button>
 						</div>
 
 						<Show when={q().status === "sent"}>
