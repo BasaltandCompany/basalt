@@ -1,5 +1,5 @@
 import { query, action, redirect, revalidate } from "@solidjs/router";
-import { eq, and, desc, asc, inArray, isNull, isNotNull, ilike, gt, lte, notInArray } from "drizzle-orm";
+import { eq, and, desc, asc, inArray, isNull, isNotNull, ilike, gt, gte, lte, notInArray, sql } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm";
 import { dateOrNull } from "./queries";
 import { getAuthedClient, getCurrentUser } from "./session";
@@ -35,6 +35,8 @@ import {
 	pullRequests,
 	githubUsers,
 	githubInstallations,
+	reviewerInstallations,
+	reviewerReviews,
 } from "~/db/schema";
 import type {
 	DocumentType,
@@ -1842,6 +1844,62 @@ export const getGithubIdentitiesQuery = query(async () => {
 	await requireAdmin();
 	return db.select().from(githubUsers).orderBy(desc(githubUsers.linkedAt));
 }, "github-identities");
+
+// ── Basalt Reviewer (PR-review product, written by the reviewer service) ──
+
+/** Recent PR reviews with their installation's company name, for
+ *  /admin/github/reviews and the company page. Read-only — the reviewer
+ *  service owns writes. */
+export const getReviewerReviewsQuery = query(async (companyId?: string) => {
+	"use server";
+	await requireAdmin();
+	const rows = await db
+		.select({
+			review: reviewerReviews,
+			companyName: companies.name,
+			accountLogin: reviewerInstallations.accountLogin,
+		})
+		.from(reviewerReviews)
+		.leftJoin(reviewerInstallations, eq(reviewerInstallations.installationId, reviewerReviews.installationId))
+		.leftJoin(companies, eq(companies.id, reviewerInstallations.companyId))
+		.where(companyId ? eq(reviewerInstallations.companyId, companyId) : undefined)
+		.orderBy(desc(reviewerReviews.createdAt))
+		.limit(companyId ? 30 : 100);
+	return rows;
+}, "reviewer-reviews");
+
+/** This month's reviewer usage for one company's installations: fast/deep
+ *  counts, security findings total, and install approval state. */
+export const getCompanyReviewerUsageQuery = query(async (companyId: string) => {
+	"use server";
+	await requireAdmin();
+	const installs = await db
+		.select()
+		.from(reviewerInstallations)
+		.where(eq(reviewerInstallations.companyId, companyId));
+	if (!installs.length) return { installs, counts: [] };
+	const monthStart = new Date();
+	monthStart.setUTCDate(1);
+	monthStart.setUTCHours(0, 0, 0, 0);
+	const counts = await db
+		.select({
+			lane: reviewerReviews.lane,
+			reviews: sql<number>`count(*)::int`,
+			securityFindings: sql<number>`coalesce(sum(${reviewerReviews.securityCount}), 0)::int`,
+		})
+		.from(reviewerReviews)
+		.where(
+			and(
+				inArray(
+					reviewerReviews.installationId,
+					installs.map((i) => i.installationId),
+				),
+				gte(reviewerReviews.createdAt, monthStart),
+			),
+		)
+		.groupBy(reviewerReviews.lane);
+	return { installs, counts };
+}, "company-reviewer-usage");
 
 export type GithubLinkPreview =
 	| { status: "invalid-state" }

@@ -32,6 +32,8 @@ import {
 	invoices,
 	deliverables,
 	pullRequests,
+	reviewerInstallations,
+	reviewerReviews,
 	quotes,
 	quoteItems,
 	quoteSignatures,
@@ -280,6 +282,40 @@ const pullRequest = defineComponent({
 	search: { columns: [pullRequests.title, pullRequests.repo, pullRequests.headBranch] },
 });
 
+// Automated Basalt code+security reviews, written by the basalt-reviewer
+// GitHub App service into reviewer_reviews. One row per (PR, commit, lane);
+// deep reviews carry test results. Linked to the PR mirror via entity_links.
+const prReview = defineComponent({
+	kind: "pr_review",
+	label: "PR review",
+	description:
+		"An automated Basalt review of one PR at one commit — code findings + a security pass, posted on the PR by the Basalt Reviewer GitHub App. Deep reviews also ran the repo's tests in a sandbox. Status tracks delivery (posted/failed/skipped_reason); requests counts OpenCode Go usage.",
+	table: reviewerReviews,
+	title: (r) => `${r.repo}#${r.prNumber}`,
+	subtitle: (r) => [
+		r.lane,
+		r.model,
+		r.securityCount > 0 ? `${r.securityCount} security finding${r.securityCount === 1 ? "" : "s"}` : null,
+	]
+		.filter(Boolean)
+		.join(" · "),
+	status: {
+		get: (r) => r.status,
+		labels: {
+			posted: "posted",
+			failed: "failed",
+			skipped_draft: "skipped — draft",
+			skipped_bot: "skipped — bot PR",
+			skipped_unapproved: "skipped — unapproved install",
+			skipped_budget: "skipped — budget",
+			skipped_too_large: "skipped — diff too large",
+			failed_ledger: "posted; ledger write failed",
+		},
+	},
+	adminPath: () => `/admin/github/reviews`,
+	search: { columns: [reviewerReviews.repo] },
+});
+
 // Quote = fixed-price proposal that becomes the contract once accepted and
 // signed in the client portal. Narrative body lives in a docs row; the priced
 // structure is quote_line_items in two groups (required / optional). Totals
@@ -433,6 +469,7 @@ export const COMPONENTS: Record<string, AnyComponentDefinition> = {
 	invoice: invoice as AnyComponentDefinition,
 	deliverable: deliverable as AnyComponentDefinition,
 	"pull_request": pullRequest as AnyComponentDefinition,
+	"pr_review": prReview as AnyComponentDefinition,
 	"quote": quote as AnyComponentDefinition,
 	tool: tool as AnyComponentDefinition,
 	"funnel-run": funnelRun as AnyComponentDefinition,
