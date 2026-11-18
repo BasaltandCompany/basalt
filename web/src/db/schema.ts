@@ -651,6 +651,11 @@ export const deliverables = pgTable(
 			.notNull()
 			.references(() => projects.id, { onDelete: "cascade" }),
 		title: text("title").notNull(),
+		// DEL-<n> key — humans put it in branch names / PR titles; the GitHub
+		// webhook matches it (see lib/github-prs.ts). The sequence + backfill
+		// + DEFAULT live in a custom migration (drizzle can't emit an identity
+		// column that replays safely on a populated table).
+		number: integer("number").unique(),
 		description: text("description").default(""),
 		status: deliverableStatus("status").notNull().default("planned"),
 		sortOrder: integer("sort_order").notNull().default(0),
@@ -676,6 +681,32 @@ export const deliverableUpdates = pgTable(
 	(t) => [
 		index("idx_deliverable_updates_deliverable").on(t.deliverableId),
 	],
+);
+
+// ── Pull requests (GitHub App webhook mirror) ─────────────────────
+// Rows mirror GitHub PRs; githubId is the stable API id so webhook
+// redelivery upserts instead of duplicating. Never owned by basalt —
+// linked to deliverables via entity_links (linkType "pr").
+export const pullRequests = pgTable(
+	"pull_requests",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		githubId: bigint("github_id", { mode: "number" }).notNull().unique(),
+		repo: text("repo").notNull(), // owner/name
+		number: integer("number").notNull(),
+		title: text("title").notNull(),
+		state: text("state").notNull().default("open"),
+		merged: boolean("merged").notNull().default(false),
+		url: text("url").notNull(),
+		author: text("author").notNull(),
+		headBranch: text("head_branch").notNull(),
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+		updatedAt: timestamp("updated_at")
+			.notNull()
+			.defaultNow()
+			.$onUpdate(() => new Date()),
+	},
+	(t) => [index("idx_pull_requests_repo_number").on(t.repo, t.number)],
 );
 
 // ── Timer (singleton — one running timer, id always 1) ────────────

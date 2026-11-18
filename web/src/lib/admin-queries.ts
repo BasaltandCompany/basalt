@@ -29,6 +29,8 @@ import {
 	quoteItems,
 	quoteVersions,
 	quoteSignatures,
+	entityLinks,
+	pullRequests,
 } from "~/db/schema";
 import type {
 	DocumentType,
@@ -462,9 +464,38 @@ export const getDeliverablesQuery = query(async (projectId: string) => {
 		updatesByDeliverable.set(u.deliverableId, arr);
 	}
 
+
+	const allPrLinks = await db
+		.select({
+			fromId: entityLinks.fromId,
+			repo: pullRequests.repo,
+			number: pullRequests.number,
+			title: pullRequests.title,
+			state: pullRequests.state,
+			merged: pullRequests.merged,
+			url: pullRequests.url,
+		})
+		.from(entityLinks)
+		.innerJoin(pullRequests, eq(pullRequests.id, entityLinks.toId))
+		.where(
+			and(
+				eq(entityLinks.fromKind, "deliverable"),
+				eq(entityLinks.toKind, "pull_request"),
+				eq(entityLinks.linkType, "pr"),
+				inArray(entityLinks.fromId, delvs.map((d) => d.id)),
+			),
+		);
+	const prsByDeliverable = new Map<string, typeof allPrLinks>();
+	for (const l of allPrLinks) {
+		const arr = prsByDeliverable.get(l.fromId) ?? [];
+		arr.push(l);
+		prsByDeliverable.set(l.fromId, arr);
+	}
+
 	return delvs.map((d) => ({
 		...d,
 		updates: updatesByDeliverable.get(d.id) ?? [],
+		prs: prsByDeliverable.get(d.id) ?? [],
 	}));
 }, "admin-deliverables");
 

@@ -205,7 +205,16 @@ export default function ProjectDetail() {
 														<Card style={{ padding: "20px" }}>
 															<div style={{ display: "flex", "justify-content": "space-between", "align-items": "flex-start", gap: "12px" }}>
 																<div style={{ flex: "1" }}>
-																	<span style={{ "font-size": "15px", "font-weight": "500" }}>{delv.title}</span>
+															<span style={{ "font-size": "15px", "font-weight": "500" }}>{delv.title}</span>
+															<Show when={delv.number != null}>
+																<span
+																	class="muted"
+																	style={{ "font-size": "12px", "margin-left": "8px", "font-family": "monospace" }}
+																	title="Put this key in the branch name or PR title and the GitHub App links the PR here"
+																>
+																	DEL-{delv.number}
+																</span>
+															</Show>
 																			<span class={`badge ${statusBadge[delv.status]}`} style={{ "margin-left": "8px", "text-transform": "capitalize" }}>
 																				{delv.status.replace("_", " ")}
 																			</span>
@@ -228,9 +237,37 @@ export default function ProjectDetail() {
 																	/>
 																</form>
 															</div>
-															<Show when={delv.description}>
-																<p class="muted" style={{ "font-size": "13px", "margin-top": "6px" }}>{delv.description}</p>
-															</Show>
+													<Show when={delv.description}>
+														<p class="muted" style={{ "font-size": "13px", "margin-top": "6px" }}>{delv.description}</p>
+													</Show>
+
+													{/* Linked PRs (GitHub App webhook) — chip dot follows GitHub state */}
+													<Show when={delv.prs.length > 0}>
+														<div style={{ display: "flex", "flex-wrap": "wrap", gap: "6px", "margin-top": "10px" }}>
+															<For each={delv.prs}>
+																{(pr) => (
+																	<a
+																		href={pr.url}
+																		target="_blank"
+																		rel="noreferrer"
+																		class="badge badge-paused"
+																		style={{ "font-size": "12px", "text-transform": "none", display: "inline-flex", "align-items": "center", gap: "6px" }}
+																	>
+																		<span
+																			style={{
+																				width: "7px",
+																				height: "7px",
+																				"border-radius": "50%",
+																				background: pr.merged ? "#a371f7" : pr.state === "open" ? "#3fb950" : "#8b949e",
+																			}}
+																		/>
+																		#{pr.number} {pr.title}
+																		<span class="muted">{pr.repo}</span>
+																	</a>
+																)}
+															</For>
+														</div>
+													</Show>
 
 															{/* Updates */}
 															<Show when={delv.updates.length > 0}>

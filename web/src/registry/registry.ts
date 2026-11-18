@@ -31,6 +31,7 @@ import {
 	shortLinks,
 	invoices,
 	deliverables,
+	pullRequests,
 	quotes,
 	quoteItems,
 	quoteSignatures,
@@ -261,6 +262,24 @@ const deliverable = defineComponent({
 	ownerLinks: [{ key: "projectId", column: deliverables.projectId, kind: "project" }],
 });
 
+// Pull requests mirror GitHub via the App webhook (lib/github-prs.ts).
+// External objects — never owned by basalt; linked to deliverables via
+// entity_links so a PR card survives a deleted deliverable and vice versa.
+const pullRequest = defineComponent({
+	kind: "pull_request",
+	label: "Pull request",
+	description:
+		"A GitHub PR mirrored from the webhook. Matched to deliverables by the DEL-<n> key in branch name, title, or body; a merged PR moves linked deliverables to review.",
+	table: pullRequests,
+	title: (r) => `#${r.number} ${r.title}`,
+	subtitle: (r) => `${r.repo} · ${r.author}`,
+	status: {
+		get: (r) => (r.merged ? "merged" : r.state),
+		labels: { open: "open", merged: "merged", closed: "closed" },
+	},
+	search: { columns: [pullRequests.title, pullRequests.repo, pullRequests.headBranch] },
+});
+
 // Quote = fixed-price proposal that becomes the contract once accepted and
 // signed in the client portal. Narrative body lives in a docs row; the priced
 // structure is quote_line_items in two groups (required / optional). Totals
@@ -413,6 +432,7 @@ export const COMPONENTS: Record<string, AnyComponentDefinition> = {
 	"short-link": shortLink as AnyComponentDefinition,
 	invoice: invoice as AnyComponentDefinition,
 	deliverable: deliverable as AnyComponentDefinition,
+	"pull_request": pullRequest as AnyComponentDefinition,
 	"quote": quote as AnyComponentDefinition,
 	tool: tool as AnyComponentDefinition,
 	"funnel-run": funnelRun as AnyComponentDefinition,
