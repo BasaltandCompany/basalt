@@ -709,6 +709,37 @@ export const pullRequests = pgTable(
 	(t) => [index("idx_pull_requests_repo_number").on(t.repo, t.number)],
 );
 
+// ── GitHub identities (Basalt ↔ GitHub account links) ─────────────
+// A basalt admin completed the GitHub App user-authorization flow at
+// /admin/github/link. basaltUserId is a Supabase auth user id — no FK,
+// auth.users lives outside our schema (same pattern as slack_users).
+export const githubUsers = pgTable(
+	"github_users",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		githubId: bigint("github_id", { mode: "number" }).notNull().unique(),
+		login: text("login").notNull(),
+		basaltUserId: uuid("basalt_user_id").notNull(),
+		linkedAt: timestamp("linked_at").notNull().defaultNow(),
+	},
+	(t) => [index("idx_github_users_basalt").on(t.basaltUserId)],
+);
+
+// App installations mirrored from webhooks (installation events, and
+// opportunistically from pull_request payloads) — the /admin/github page
+// shows what's connected.
+export const githubInstallations = pgTable("github_installations", {
+	id: uuid("id").primaryKey().defaultRandom(),
+	installationId: bigint("installation_id", { mode: "number" }).notNull().unique(),
+	accountLogin: text("account_login").notNull().default(""),
+	repoSelection: text("repo_selection").notNull().default(""),
+	createdAt: timestamp("created_at").notNull().defaultNow(),
+	updatedAt: timestamp("updated_at")
+		.notNull()
+		.defaultNow()
+		.$onUpdate(() => new Date()),
+});
+
 // ── Timer (singleton — one running timer, id always 1) ────────────
 // A running timer is a row here; stopping converts it into a time entry.
 

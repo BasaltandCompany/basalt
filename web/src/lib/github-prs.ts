@@ -3,9 +3,10 @@
 // Matching mirrors Linear's model: the DEL-<n> key in the branch name, PR
 // title, or body links the PR to that deliverable, and PR events move
 // deliverable status forward (planned → in_progress → review).
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "~/db";
-import { deliverables, pullRequests } from "~/db/schema";
+import { deliverables, githubInstallations, pullRequests } from "~/db/schema";
 import { linkComponents } from "~/lib/entity-links";
 
 export type PullRequestPayload = {
@@ -21,7 +22,17 @@ export type PullRequestPayload = {
 		user?: { login?: string };
 		head: { ref: string };
 	};
-	repository?: { full_name?: string };
+	repository?: { full_name?: string; owner?: { login?: string } };
+	installation?: { id?: number };
+};
+
+export type InstallationPayload = {
+	action: string;
+	installation: {
+		id: number;
+		account?: { login?: string };
+		repository_selection?: string;
+	};
 };
 
 /** Actions the webhook acts on; GitHub sends ~20 others (assigned, labeleled…) */
@@ -90,6 +101,15 @@ export async function applyPullRequest(
 		})
 		.returning();
 
+	// Self-healing installation mirror: PRs may arrive before/without an
+	// installation event (apps installed before this feature).
+	if (payload.installation?.id) {
+		await upsertInstallation({
+			id: payload.installation.id,
+			account: { login: payload.repository?.owner?.login },
+		});
+	}
+
 	let linked = 0;
 	let statusChanged = 0;
 	for (const n of parseDeliverableNumbers(pr)) {
@@ -111,4 +131,83 @@ export async function applyPullRequest(
 		}
 	}
 	return { linked, statusChanged };
+}
+
+function upsertInstallation(installation: InstallationPayload["installation"]) {
+	return db
+		.insert(githubInstallations)
+		.values({
+			installationId: installation.id,
+			accountLogin: installation.account?.login ?? "",
+			repoSelection: installation.repository_selection ?? "",
+		})
+		.onConflictDoUpdate({
+			target: githubInstallations.installationId,
+			set: {
+				accountLogin: installation.account?.login ?? "",
+				repoSelection: installation.repository_selection ?? "",
+			},
+		});
+}
+
+/** installation.created → mirror, installation.deleted → forget. Other
+ *  installation actions (suspend, new_permissions_accepted) are no-ops. */
+export async function applyInstallation(payload: InstallationPayload): Promise<{ ok: boolean }> {
+	if (payload.action === "created") {
+		await upsertInstallation(payload.installation);
+	} else if (payload.action === "deleted") {
+		await db.delete(githubInstallations).where(eq(githubInstallations.installationId, payload.installation.id));
+	}
+	return { ok: true };
+}
+
+/** CSRF state for redirects WE initiate to GitHub's authorize URL
+ *  (/api/github/authorize): timestamp + HMAC under the webhook secret.
+ *  Install-initiated callbacks (GitHub → us, no state) are instead guarded
+ *  by the confirm step on the link page. */
+export function makeGithubAuthState(secret: string, now = Date.now()): string {
+	const ts = String(Math.floor(now / 1000));
+	const sig = createHmac("sha256", secret).update(ts).digest("hex").slice(0, 32);
+	return `${ts}.${sig}`;
+}
+
+export function verifyGithubAuthState(
+	state: string,
+	secret: string,
+	maxAgeSec = 600,
+	now = Date.now(),
+): boolean {
+	const [ts, sig] = state.split(".");
+	if (!ts || !sig || !/^\d+$/.test(ts)) return false;
+	if (Math.floor(now / 1000) - Number(ts) > maxAgeSec) return false;
+	const expected = createHmac("sha256", secret).update(ts).digest("hex").slice(0, 32);
+	const a = Buffer.from(sig, "hex");
+	const b = Buffer.from(expected, "hex");
+	return a.length === b.length && timingSafeEqual(a, b);
+}
+
+export type GithubIdentity = { githubId: number; login: string };
+
+/** Exchange the user-authorization code for the GitHub user behind it.
+ *  Only needs client_id/client_secret — no app private key. The user token
+ *  is used once here and discarded; we store the identity, not the token. */
+export async function exchangeGithubCode(code: string): Promise<GithubIdentity> {
+	const clientId = process.env.GITHUB_APP_CLIENT_ID;
+	const clientSecret = process.env.GITHUB_APP_CLIENT_SECRET;
+	if (!clientId || !clientSecret) throw new Error("GITHUB_APP_CLIENT_ID / GITHUB_APP_CLIENT_SECRET not set");
+	const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
+		method: "POST",
+		headers: { "Content-Type": "application/json", Accept: "application/json" },
+		body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code }),
+	});
+	const tokenJson = (await tokenRes.json()) as { access_token?: string; error_description?: string };
+	if (!tokenJson.access_token) {
+		throw new Error(tokenJson.error_description ?? "GitHub code exchange failed");
+	}
+	const userRes = await fetch("https://api.github.com/user", {
+		headers: { Authorization: `Bearer ${tokenJson.access_token}`, Accept: "application/vnd.github+json" },
+	});
+	const user = (await userRes.json()) as { id?: number; login?: string };
+	if (!user.id || !user.login) throw new Error("GitHub /user lookup failed");
+	return { githubId: user.id, login: user.login };
 }

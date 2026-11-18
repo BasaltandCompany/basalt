@@ -2,7 +2,12 @@
 // the deliverable status transition table. The DB half (applyPullRequest) is
 // exercised by the manual end-to-end webhook replay.
 import { describe, expect, test } from "bun:test";
-import { nextDeliverableStatus, parseDeliverableNumbers } from "./github-prs";
+import {
+	makeGithubAuthState,
+	nextDeliverableStatus,
+	parseDeliverableNumbers,
+	verifyGithubAuthState,
+} from "./github-prs";
 
 const pr = (headRef: string, title: string, body: string | null = null) => ({
 	head: { ref: headRef },
@@ -78,5 +83,32 @@ describe("nextDeliverableStatus", () => {
 	test("unrelated actions are no-ops", () => {
 		expect(nextDeliverableStatus("planned", "synchronize", false)).toBeNull();
 		expect(nextDeliverableStatus("planned", "edited", false)).toBeNull();
+	});
+});
+
+describe("github auth state (CSRF guard for /api/github/authorize)", () => {
+	const now = 1_700_000_000_000;
+	const secret = "whsec";
+
+	test("roundtrip: made state verifies", () => {
+		const state = makeGithubAuthState(secret, now);
+		expect(verifyGithubAuthState(state, secret, 600, now + 60_000)).toBe(true);
+	});
+
+	test("expired beyond the window fails", () => {
+		const state = makeGithubAuthState(secret, now);
+		expect(verifyGithubAuthState(state, secret, 600, now + 601_000)).toBe(false);
+	});
+
+	test("tampered signature or wrong secret fails", () => {
+		const state = makeGithubAuthState(secret, now);
+		expect(verifyGithubAuthState(`${state.slice(0, -2)}ff`, secret, 600, now)).toBe(false);
+		expect(verifyGithubAuthState(state, "other-secret", 600, now)).toBe(false);
+	});
+
+	test("garbage shapes fail", () => {
+		expect(verifyGithubAuthState("", secret, 600, now)).toBe(false);
+		expect(verifyGithubAuthState("no-dot", secret, 600, now)).toBe(false);
+		expect(verifyGithubAuthState("abc.def", secret, 600, now)).toBe(false);
 	});
 });

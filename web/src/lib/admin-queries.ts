@@ -1,7 +1,8 @@
 import { query, action, redirect, revalidate } from "@solidjs/router";
 import { eq, and, desc, asc, inArray, isNull, isNotNull, ilike, gt, lte, notInArray } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm";
-import { getAuthedClient } from "./session";
+import { getAuthedClient, getCurrentUser } from "./session";
+import { exchangeGithubCode, verifyGithubAuthState } from "./github-prs";
 import { supabaseService } from "./supabase";
 import { db } from "~/db";
 import {
@@ -31,6 +32,8 @@ import {
 	quoteSignatures,
 	entityLinks,
 	pullRequests,
+	githubUsers,
+	githubInstallations,
 } from "~/db/schema";
 import type {
 	DocumentType,
@@ -1773,3 +1776,73 @@ export const unlinkPersonCompanyAction = action(async (formData: FormData) => {
 	await revalidate([getPersonQuery.keyFor(memberId), getPeopleQuery.key]);
 	return { success: "Company unlinked." };
 }, "unlink-person-company");
+
+// ── GitHub identities (Basalt OAuth-issued sessions ↔ GitHub users) ──
+
+export const getGithubInstallationsQuery = query(async () => {
+	"use server";
+	await requireAdmin();
+	return db.select().from(githubInstallations).orderBy(desc(githubInstallations.createdAt));
+}, "github-installations");
+
+export const getGithubIdentitiesQuery = query(async () => {
+	"use server";
+	await requireAdmin();
+	return db.select().from(githubUsers).orderBy(desc(githubUsers.linkedAt));
+}, "github-identities");
+
+export type GithubLinkPreview =
+	| { status: "invalid-state" }
+	| { status: "no-code" }
+	| { status: "error"; message: string }
+	| { status: "ready"; githubId: number; login: string; installationId: string };
+
+/** The GitHub-redirected link page: verify state (if the flow was ours),
+ *  exchange the code, and hand back who wants to link. */
+export const getGithubLinkPreviewQuery = query(
+	async (code: string, state: string, installationId: string): Promise<GithubLinkPreview> => {
+		"use server";
+		await requireAdmin();
+		const secret = process.env.GITHUB_WEBHOOK_SECRET;
+		if (state) {
+			if (!secret || !verifyGithubAuthState(state, secret)) return { status: "invalid-state" };
+		}
+		if (!code) return { status: "no-code" };
+		try {
+			const identity = await exchangeGithubCode(code);
+			return { status: "ready", ...identity, installationId };
+		} catch (e) {
+			return { status: "error", message: e instanceof Error ? e.message : "GitHub link failed" };
+		}
+	},
+	"github-link-preview",
+);
+
+export const linkGithubIdentityAction = action(async (formData: FormData) => {
+	"use server";
+	const supabase = await getAuthedClient();
+	if (!supabase) throw redirect("/admin/login");
+	const user = await getCurrentUser();
+	const githubId = Number(formData.get("github_id"));
+	const login = String(formData.get("login"));
+	if (!user?.id || !githubId || !login) return { error: "Missing user or GitHub identity" };
+	await db
+		.insert(githubUsers)
+		.values({ githubId, login, basaltUserId: user.id })
+		.onConflictDoUpdate({
+			target: githubUsers.githubId,
+			set: { login, basaltUserId: user.id, linkedAt: new Date() },
+		});
+	await revalidate([getGithubIdentitiesQuery.key]);
+	throw redirect("/admin/github");
+}, "link-github-identity");
+
+export const unlinkGithubIdentityAction = action(async (formData: FormData) => {
+	"use server";
+	await requireAdmin();
+	const githubId = Number(formData.get("github_id"));
+	if (!githubId) return { error: "Missing github_id" };
+	await db.delete(githubUsers).where(eq(githubUsers.githubId, githubId));
+	await revalidate([getGithubIdentitiesQuery.key]);
+	return { success: "GitHub identity unlinked." };
+}, "unlink-github-identity");

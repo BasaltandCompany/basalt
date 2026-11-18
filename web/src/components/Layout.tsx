@@ -37,6 +37,7 @@ const links = [
 	{ href: "/admin/secure-shares", label: "Secure", icon: "M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5zM9 7a3 3 0 1 1 6 0v3H9V7z" },
 	{ href: "/admin/api-keys", label: "API Keys", icon: "M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3" },
 	{ href: "/admin/oauth", label: "OAuth Apps", icon: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" },
+	{ href: "/admin/github", label: "GitHub App", icon: "M16 3h4a2 2 0 0 1 2 2v4M8 3H4a2 2 0 0 0-2 2v4m4 12h12a2 2 0 0 0 2-2v-4M3 15v4a2 2 0 0 0 2 2" },
 ];
 
 const NavIcon: ParentComponent<{ d: string }> = (p) => (

@@ -1,6 +1,6 @@
 import type { APIEvent } from "@solidjs/start/server";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { applyPullRequest, type PullRequestPayload } from "~/lib/github-prs";
+import { applyInstallation, applyPullRequest, type InstallationPayload, type PullRequestPayload } from "~/lib/github-prs";
 
 // GitHub App webhook receiver — pull_request events only. The App itself is
 // just delivery (no API credentials; the payload carries everything). Setup:
@@ -37,6 +37,9 @@ export const POST = async (event: APIEvent) => {
 		return json({ error: "Bad JSON" }, 400);
 	}
 	if (event.request.headers.get("x-github-event") !== "pull_request") {
+		if (event.request.headers.get("x-github-event") === "installation") {
+			return json({ ...(await applyInstallation(payload as unknown as InstallationPayload)) });
+		}
 		return json({ ok: true, ignored: true });
 	}
 	return json({ ok: true, ...(await applyPullRequest(payload)) });
