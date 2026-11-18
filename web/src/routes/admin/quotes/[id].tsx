@@ -25,6 +25,12 @@ const statusBadge: Record<string, string> = {
 
 type ItemLike = { id: string; name: string; detail: string | null; hours: number; unitRate: number; sortOrder: number };
 
+// ponytail: scrollHeight-fit instead of a library; upgrade path = field-sizing: content when baselines support it
+function fit(el: HTMLTextAreaElement) {
+	el.style.height = "auto";
+	el.style.height = `${el.scrollHeight}px`;
+}
+
 function ItemRows(props: {
 	items: ItemLike[];
 	quoteId: string;
@@ -71,7 +77,7 @@ function ItemRows(props: {
 								<input type="hidden" name="group" value={props.group} />
 								<input name="sort_order" type="number" value={item.sortOrder} style={{ width: "52px" }} title="Sort order" />
 								<input name="name" value={item.name} required style={{ width: "180px" }} />
-								<input name="detail" value={item.detail ?? ""} style={{ flex: "1", "min-width": "160px" }} placeholder="What it covers" />
+								<textarea name="detail" rows={1} ref={fit} onInput={(e) => fit(e.currentTarget)} style={{ flex: "1", "min-width": "160px", "min-height": "64px", resize: "vertical" }}>{item.detail ?? ""}</textarea>
 								<input name="hours" type="number" step="0.5" value={item.hours} style={{ width: "80px" }} title="Hours" />
 								<input name="unit_rate" type="number" step="1" value={item.unitRate} style={{ width: "100px" }} title="Rate" />
 								<span class="mono" style={{ "min-width": "80px", "text-align": "right" }}>{money(item.hours * item.unitRate)}</span>
@@ -94,7 +100,7 @@ function ItemRows(props: {
 				<input type="hidden" name="group" value={props.group} />
 				<input name="sort_order" type="number" value={props.items.length + 1} style={{ width: "52px" }} title="Sort order" />
 				<input name="name" placeholder="Line item name" required style={{ width: "180px" }} />
-				<input name="detail" placeholder="What it covers" style={{ flex: "1", "min-width": "160px" }} />
+				<textarea name="detail" rows={1} ref={fit} onInput={(e) => fit(e.currentTarget)} placeholder="What it covers" style={{ flex: "1", "min-width": "160px", "min-height": "48px", resize: "vertical" }} />
 				<input name="hours" type="number" step="0.5" placeholder="Hours" style={{ width: "80px" }} />
 				<input name="unit_rate" type="number" step="1" placeholder="Rate" style={{ width: "100px" }} />
 				<Button type="submit" size="sm" disabled={busy()}>Add line</Button>
@@ -163,9 +169,12 @@ export default function AdminQuoteDetail() {
 									<Button as="a" size="sm" variant="outline" href={`/admin/docs/${q().bodyDoc!.id}`}>
 										Edit body prose ↗
 									</Button>
-									<Button as="a" size="sm" variant="outline" href={`/api/quotes/${q().id}/pdf`}>
-										PDF
-									</Button>
+										{/* download attr: without it the solid router intercepts the click and
+client-side-navigates to the API URL — no file ever downloads. Skips interception
+for a native same-tab download (Content-Disposition still names the file). */}
+										<Button as="a" size="sm" variant="outline" href={`/api/quotes/${q().id}/pdf`} download="">
+											PDF
+										</Button>
 								</Show>
 							</div>
 						</div>
