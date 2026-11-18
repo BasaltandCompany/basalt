@@ -25,10 +25,19 @@ const statusBadge: Record<string, string> = {
 
 type ItemLike = { id: string; name: string; detail: string | null; hours: number; unitRate: number; sortOrder: number };
 
-// ponytail: scrollHeight-fit instead of a library; upgrade path = field-sizing: content when baselines support it
+// ponytail: field-sizing: content does this natively in Chrome/Edge 123+; JS fit is the Safari/Firefox fallback. Drop fit() once Safari ships field-sizing.
+const canFieldSize = typeof CSS !== "undefined" && !!CSS.supports?.("field-sizing", "content");
 function fit(el: HTMLTextAreaElement) {
+	if (canFieldSize) return;
 	el.style.height = "auto";
 	el.style.height = `${el.scrollHeight}px`;
+}
+
+if (!canFieldSize && typeof document !== "undefined") {
+	const refitAll = () => document.querySelectorAll<HTMLTextAreaElement>("textarea[name='detail']").forEach(fit);
+	// late web-font load and window resizes invalidate the measured height; re-fit so fallback browsers self-heal instead of flapping
+	document.fonts.ready.then(refitAll);
+	window.addEventListener("resize", refitAll);
 }
 
 function ItemRows(props: {
@@ -77,7 +86,7 @@ function ItemRows(props: {
 								<input type="hidden" name="group" value={props.group} />
 								<input name="sort_order" type="number" value={item.sortOrder} style={{ width: "52px" }} title="Sort order" />
 								<input name="name" value={item.name} required style={{ width: "180px" }} />
-								<textarea name="detail" rows={1} ref={fit} onInput={(e) => fit(e.currentTarget)} style={{ flex: "1", "min-width": "160px", "min-height": "64px", resize: "vertical" }}>{item.detail ?? ""}</textarea>
+								<textarea name="detail" rows={1} ref={fit} onInput={(e) => fit(e.currentTarget)} style={{ flex: "1", "min-width": "160px", "min-height": "64px", resize: "vertical", "field-sizing": "content" }}>{item.detail ?? ""}</textarea>
 								<input name="hours" type="number" step="0.5" value={item.hours} style={{ width: "80px" }} title="Hours" />
 								<input name="unit_rate" type="number" step="1" value={item.unitRate} style={{ width: "100px" }} title="Rate" />
 								<span class="mono" style={{ "min-width": "80px", "text-align": "right" }}>{money(item.hours * item.unitRate)}</span>
@@ -100,7 +109,7 @@ function ItemRows(props: {
 				<input type="hidden" name="group" value={props.group} />
 				<input name="sort_order" type="number" value={props.items.length + 1} style={{ width: "52px" }} title="Sort order" />
 				<input name="name" placeholder="Line item name" required style={{ width: "180px" }} />
-				<textarea name="detail" rows={1} ref={fit} onInput={(e) => fit(e.currentTarget)} placeholder="What it covers" style={{ flex: "1", "min-width": "160px", "min-height": "48px", resize: "vertical" }} />
+							<textarea name="detail" rows={1} ref={fit} onInput={(e) => fit(e.currentTarget)} placeholder="What it covers" style={{ flex: "1", "min-width": "160px", "min-height": "48px", resize: "vertical", "field-sizing": "content" }} />
 				<input name="hours" type="number" step="0.5" placeholder="Hours" style={{ width: "80px" }} />
 				<input name="unit_rate" type="number" step="1" placeholder="Rate" style={{ width: "100px" }} />
 				<Button type="submit" size="sm" disabled={busy()}>Add line</Button>
