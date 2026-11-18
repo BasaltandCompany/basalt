@@ -1,5 +1,5 @@
 {
-  "id": "4f87fdb5-9ea6-4082-9be8-789d14f7cb2f",
+  "id": "cd0fd73a-cbb8-4c2d-be61-246c58d8e8e9",
   "prevId": "835e8da1-29db-4ec7-8154-47a561289f59",
   "version": "7",
   "dialect": "postgresql",
@@ -1930,12 +1930,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "number": {
-          "name": "number",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
         "description": {
           "name": "description",
           "type": "text",
@@ -2006,15 +2000,7 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "deliverables_number_unique": {
-          "name": "deliverables_number_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "number"
-          ]
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -4046,126 +4032,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.pull_requests": {
-      "name": "pull_requests",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "github_id": {
-          "name": "github_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "repo": {
-          "name": "repo",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "number": {
-          "name": "number",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "title": {
-          "name": "title",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "state": {
-          "name": "state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'open'"
-        },
-        "merged": {
-          "name": "merged",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "url": {
-          "name": "url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "author": {
-          "name": "author",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "head_branch": {
-          "name": "head_branch",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "idx_pull_requests_repo_number": {
-          "name": "idx_pull_requests_repo_number",
-          "columns": [
-            {
-              "expression": "repo",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "number",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "pull_requests_github_id_unique": {
-          "name": "pull_requests_github_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "github_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.quote_line_items": {
       "name": "quote_line_items",
       "schema": "",
@@ -4513,6 +4379,18 @@
           "primaryKey": false,
           "notNull": true,
           "default": 30
+        },
+        "start_date": {
+          "name": "start_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "end_date": {
+          "name": "end_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
         },
         "quoted_cap_hours": {
           "name": "quoted_cap_hours",

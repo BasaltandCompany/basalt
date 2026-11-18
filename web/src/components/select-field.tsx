@@ -33,9 +33,13 @@ export default function SelectField(props: {
   )
   const labels = createMemo(() => new Map(opts().map((o) => [o.value, o.label])))
   return (
+    // undefined = uncontrolled; null would be Kobalte "controlled-empty", which
+    // swallows selections for selects without onChange (company pickers)
     <Select
       options={opts().map((o) => o.value)}
-      value={props.value ?? null}
+      // "" = no selection → uncontrolled, else Kobalte's controlled mode pins the
+      // value and swallows clicks for callers without onChange
+      value={props.value || undefined}
       onChange={(v) => props.onChange?.(v ?? "")}
       placeholder={props.placeholder ?? "Select…"}
       itemComponent={(p) => (
@@ -48,7 +52,14 @@ export default function SelectField(props: {
         <SelectHiddenSelect name={props.name} id={props.id} required={props.required} />
       </Show>
       <SelectTrigger id={props.id} class={props.class} style={props.style} aria-label={props["aria-label"]}>
-        <SelectValue />
+        {/* Kobalte renders NOTHING for a bare <SelectValue /> — the label must
+            come from this render-prop, mapped through the option labels. */}
+        <SelectValue>
+          {(state) => {
+            const v = state.selectedOption() as string;
+            return labels().get(v) ?? v;
+          }}
+        </SelectValue>
       </SelectTrigger>
       <SelectContent />
     </Select>

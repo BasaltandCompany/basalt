@@ -12,7 +12,7 @@ import {
 	getProjectQuery,
 	getUserQuery,
 } from "~/lib/queries";
-import { createDeliverableAction, getDeliverablesQuery, deleteDeliverableAction, updateQuoteMetaAction, getProjectQuotesQuery, getQuotesQuery, getCompaniesForSelectQuery } from "~/lib/admin-queries";
+import { createDeliverableAction, getDeliverablesQuery, deleteDeliverableAction, updateQuoteMetaAction, importQuoteToProjectAction, getProjectQuotesQuery, getQuotesQuery, getCompaniesForSelectQuery } from "~/lib/admin-queries";
 import { updateProjectAction } from "~/lib/queries";
 import type { DeliverableStatus, ProjectStatus, QuoteStatus, Project } from "~/db/schema";
 import { money } from "~/lib/quotes";
@@ -60,6 +60,7 @@ export default function ProjectDetail() {
 	const createDeliverable = useAction(createDeliverableAction);
 	const updateProject = useAction(updateProjectAction);
 	const updateQuoteMeta = useAction(updateQuoteMetaAction);
+	const importQuote = useAction(importQuoteToProjectAction);
 	const statusForms: Record<string, HTMLFormElement> = {};
 	const [error, setError] = createSignal("");
 	// Guard + in-flight indicator: a second click while the action runs must
@@ -111,6 +112,14 @@ export default function ProjectDetail() {
 		fd.set("id", quoteId);
 		fd.set("project_id", "");
 		await updateQuoteMeta(fd);
+	}
+
+	// Same action as Attach — pulls items/dates added after attaching.
+	async function handleImport(quoteId: string) {
+		const fd = new FormData();
+		fd.set("quote_id", quoteId);
+		fd.set("project_id", params.id!);
+		await importQuote(fd);
 	}
 
 	const dateRange = (proj: Pick<Project, "startDate" | "endDate">) => {
@@ -332,9 +341,9 @@ export default function ProjectDetail() {
 									submitLabel="Attach"
 									triggerClass="btn btn-sm btn-primary"
 									onSubmit={async (fd) => {
-										fd.set("id", String(fd.get("quote_id") || ""));
+										fd.set("quote_id", String(fd.get("quote_id") || ""));
 										fd.set("project_id", p().id);
-										return updateQuoteMeta(fd) as Promise<{ error?: string; success?: string } | undefined>;
+										return importQuote(fd) as Promise<{ error?: string; success?: string } | undefined>;
 									}}
 								>
 									<div class="form-group">
@@ -352,7 +361,7 @@ export default function ProjectDetail() {
 										/>
 									</div>
 									<p class="muted" style={{ "font-size": "12px", margin: "8px 0 0" }}>
-										Only quotes with no project yet, from this project's company. Manage quote contents at /admin/quotes.
+										Only quotes with no project yet, from this project's company. Attaching links the quote, copies its start/end dates onto the project, and imports its required line items as deliverables.
 									</p>
 								</CreateDialog>
 							</div>
@@ -363,16 +372,22 @@ export default function ProjectDetail() {
 											<div style={{ display: "flex", "flex-direction": "column", gap: "12px", "margin-bottom": "40px" }}>
 												<For each={list()}>
 													{(q) => (
-														<Card style={{ padding: "20px" }}>
-															<div style={{ display: "flex", "justify-content": "space-between", "align-items": "center", gap: "12px" }}>
-																<A href={`/admin/quotes/${q.id}`} style={{ "font-size": "15px", "font-weight": "500" }}>{q.title}</A>
-																<div style={{ display: "flex", "align-items": "center", gap: "12px" }}>
-																	<span class={`badge ${quoteBadge[q.status]}`} style={{ "text-transform": "capitalize" }}>{q.status}</span>
-																	<span class="mono muted" style={{ "font-size": "13px" }}>{money(q.total)}</span>
-																	<Button variant="outline" size="sm" onClick={() => handleUnlink(q.id)}>Unlink</Button>
+															<Card style={{ padding: "20px" }}>
+																<div style={{ display: "flex", "justify-content": "space-between", "align-items": "center", gap: "12px" }}>
+																	<A href={`/admin/quotes/${q.id}`} style={{ "font-size": "15px", "font-weight": "500" }}>{q.title}</A>
+																	<div style={{ display: "flex", "align-items": "center", gap: "12px" }}>
+																		<span class={`badge ${quoteBadge[q.status]}`} style={{ "text-transform": "capitalize" }}>{q.status}</span>
+																		<span class="mono muted" style={{ "font-size": "13px" }}>{money(q.total)}</span>
+																		<Button variant="outline" size="sm" onClick={() => handleImport(q.id)}>Import</Button>
+																		<Button variant="outline" size="sm" onClick={() => handleUnlink(q.id)}>Unlink</Button>
+																	</div>
 																</div>
-															</div>
-														</Card>
+																<Show when={q.startDate || q.endDate}>
+																	<p class="muted" style={{ "font-size": "12px", margin: "6px 0 0" }}>
+																		{[q.startDate, q.endDate].filter(Boolean).join(" → ")}
+																	</p>
+																</Show>
+															</Card>
 													)}
 												</For>
 											</div>

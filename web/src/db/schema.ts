@@ -548,6 +548,9 @@ export const quotes = pgTable(
 		title: text("title").notNull(),
 		status: quoteStatus("status").notNull().default("draft"),
 		validDays: integer("valid_days").notNull().default(30),
+		// contract period, copied onto the linked project on attach/import
+		startDate: date("start_date"),
+		endDate: date("end_date"),
 		// CDL-style hour cap; null = pure per-line fixed price
 		quotedCapHours: doublePrecision("quoted_cap_hours"),
 		notes: text("notes"),
