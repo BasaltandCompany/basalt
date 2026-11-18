@@ -743,6 +743,72 @@ export const githubInstallations = pgTable("github_installations", {
 		.$onUpdate(() => new Date()),
 });
 
+// ── Basalt Reviewer (the PR-review product's tables) ──────────────
+// Owned and written by the basalt-reviewer service (own repo, own Fly
+// app) but stored HERE so reviews are first-class basalt data:
+// pr_review registry component, company-page section, links to the
+// pull_requests mirror. Basalt reads; the service writes. Column
+// shapes are mirrored in the reviewer repo — change both together.
+export const REVIEWER_REVIEW_STATUSES = [
+	"posted",
+	"failed",
+	"skipped_draft",
+	"skipped_bot",
+	"skipped_unapproved",
+	"skipped_budget",
+	"skipped_too_large",
+	"failed_ledger",
+] as const;
+
+export const reviewerInstallations = pgTable("reviewer_installations", {
+	id: uuid("id").primaryKey().defaultRandom(),
+	installationId: bigint("installation_id", { mode: "number" }).notNull().unique(),
+	accountLogin: text("account_login").notNull().default(""),
+	// which client this GitHub org belongs to — set by hand in the
+	// reviewer's /admin; null until mapped. Reviews survive a deleted
+	// company, the mapping just degrades.
+	companyId: uuid("company_id").references(() => companies.id, { onDelete: "set null" }),
+	approved: boolean("approved").notNull().default(false),
+	enabled: boolean("enabled").notNull().default(true),
+	note: text("note"),
+	createdAt: timestamp("created_at").notNull().defaultNow(),
+	updatedAt: timestamp("updated_at")
+		.notNull()
+		.defaultNow()
+		.$onUpdate(() => new Date()),
+});
+
+export const reviewerReviews = pgTable(
+	"reviewer_reviews",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		installationId: bigint("installation_id", { mode: "number" }).notNull(),
+		repo: text("repo").notNull(), // owner/name
+		prNumber: integer("pr_number").notNull(),
+		prGithubId: bigint("pr_github_id", { mode: "number" }).notNull(),
+		commitSha: text("commit_sha").notNull(),
+		lane: text("lane").notNull().default("fast"), // fast | deep
+		// posted | failed | skipped_draft | skipped_bot | skipped_unapproved
+		// | skipped_budget | skipped_too_large | failed_ledger
+		status: text("status").notNull().default("posted"),
+		model: text("model"),
+		fallbackUsed: boolean("fallback_used").notNull().default(false),
+		// OpenCode Go bills per request, not tokens — the ledger counts requests
+		requests: integer("requests").notNull().default(0),
+		securityCount: integer("security_count").notNull().default(0),
+		qualityCount: integer("quality_count").notNull().default(0),
+		testsPassed: integer("tests_passed"), // deep lane only
+		testsFailed: integer("tests_failed"),
+		error: text("error"),
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+	},
+	(t) => [
+		uniqueIndex("reviewer_reviews_uq").on(t.prGithubId, t.commitSha, t.lane),
+		index("idx_reviewer_reviews_installation").on(t.installationId, t.createdAt),
+		index("idx_reviewer_reviews_repo_number").on(t.repo, t.prNumber),
+	],
+);
+
 // ── Timer (singleton — one running timer, id always 1) ────────────
 // A running timer is a row here; stopping converts it into a time entry.
 

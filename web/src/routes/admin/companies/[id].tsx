@@ -24,6 +24,8 @@ import {
 	updateToolAction,
 	deleteToolAction,
 	getCompanyValueQuery,
+	getReviewerReviewsQuery,
+	getCompanyReviewerUsageQuery,
 } from "~/lib/admin-queries";
 import { grossSavedForTool, usd } from "~/lib/value";
 import { getUserQuery } from "~/lib/queries";
@@ -69,6 +71,8 @@ export default function CompanyDetail() {
 	const [success, setSuccess] = createSignal("");
 
 	const companyTools = createAsync(() => getCompanyToolsQuery(companyId()), { deferStream: true });
+	const reviewerUsage = createAsync(() => getCompanyReviewerUsageQuery(companyId()), { deferStream: true });
+	const companyReviews = createAsync(() => getReviewerReviewsQuery(companyId()), { deferStream: true });
 	const companyValue = createAsync(() => getCompanyValueQuery(companyId()), { deferStream: true });
 	const addTool = useAction(createToolAction);
 	const updateTool = useAction(updateToolAction);
@@ -395,6 +399,53 @@ export default function CompanyDetail() {
 								</Show>
 							</div>
 						</Suspense>
+				{/* ── Basalt Reviewer (automated PR reviews) ── */}
+				<Suspense fallback={<p class="muted">Loading…</p>}>
+					<div style={{ "margin-top": "40px" }}>
+						<div class="section-heading">PR reviews</div>
+						<Show
+							when={(reviewerUsage()?.installs?.length ?? 0) > 0}
+							fallback={<Card class="empty">No Basalt Reviewer installation mapped to this company yet — approve the install and map it in the reviewer admin.</Card>}
+						>
+							<div style={{ display: "flex", gap: "8px", "flex-wrap": "wrap", "margin-bottom": "12px" }}>
+								<For each={reviewerUsage()?.installs ?? []}>
+									{(inst) => (
+										<span class="badge">{inst.accountLogin || "(account pending)"}{inst.approved ? "" : " · unapproved"}</span>
+									)}
+								</For>
+								<For each={reviewerUsage()?.counts ?? []}>
+									{(c) => (
+										<span class="badge">
+											{c.lane}: {c.reviews} this month
+											{c.securityFindings > 0 ? ` · 🔒 ${c.securityFindings}` : ""}
+											</span>
+									)}
+								</For>
+							</div>
+							<Show when={companyReviews()?.length}>
+								<div style={{ display: "flex", "flex-direction": "column", gap: "8px" }}>
+									<For each={companyReviews()}>
+										{(row) => (
+											<Card style={{ padding: "10px 16px", display: "flex", "align-items": "center", gap: "10px", "flex-wrap": "wrap" }}>
+												<span class="mono" style={{ "font-size": "13px", "font-weight": "600" }}>
+													{row.review.repo}#{row.review.prNumber}
+												</span>
+												<span class="badge">{row.review.lane}</span>
+												<span class="badge">{row.review.status}</span>
+												<Show when={row.review.securityCount > 0}>
+													<span class="badge">🔒 {row.review.securityCount}</span>
+												</Show>
+												<span class="muted" style={{ "font-size": "12px", "margin-left": "auto" }}>
+													{new Date(row.review.createdAt).toLocaleString()}
+												</span>
+											</Card>
+										)}
+									</For>
+								</div>
+							</Show>
+						</Show>
+					</div>
+				</Suspense>
 					</>
 				)}
 			</Show>
