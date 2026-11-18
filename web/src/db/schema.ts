@@ -654,6 +654,11 @@ export const deliverables = pgTable(
 			.notNull()
 			.references(() => projects.id, { onDelete: "cascade" }),
 		title: text("title").notNull(),
+		// DEL-<n> key — humans put it in branch names / PR titles; the GitHub
+		// webhook matches it (see lib/github-prs.ts). The sequence + backfill
+		// + DEFAULT live in a custom migration (drizzle can't emit an identity
+		// column that replays safely on a populated table).
+		number: integer("number").unique(),
 		description: text("description").default(""),
 		status: deliverableStatus("status").notNull().default("planned"),
 		sortOrder: integer("sort_order").notNull().default(0),
@@ -680,6 +685,63 @@ export const deliverableUpdates = pgTable(
 		index("idx_deliverable_updates_deliverable").on(t.deliverableId),
 	],
 );
+
+// ── Pull requests (GitHub App webhook mirror) ─────────────────────
+// Rows mirror GitHub PRs; githubId is the stable API id so webhook
+// redelivery upserts instead of duplicating. Never owned by basalt —
+// linked to deliverables via entity_links (linkType "pr").
+export const pullRequests = pgTable(
+	"pull_requests",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		githubId: bigint("github_id", { mode: "number" }).notNull().unique(),
+		repo: text("repo").notNull(), // owner/name
+		number: integer("number").notNull(),
+		title: text("title").notNull(),
+		state: text("state").notNull().default("open"),
+		merged: boolean("merged").notNull().default(false),
+		url: text("url").notNull(),
+		author: text("author").notNull(),
+		headBranch: text("head_branch").notNull(),
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+		updatedAt: timestamp("updated_at")
+			.notNull()
+			.defaultNow()
+			.$onUpdate(() => new Date()),
+	},
+	(t) => [index("idx_pull_requests_repo_number").on(t.repo, t.number)],
+);
+
+// ── GitHub identities (Basalt ↔ GitHub account links) ─────────────
+// A basalt admin completed the GitHub App user-authorization flow at
+// /admin/github/link. basaltUserId is a Supabase auth user id — no FK,
+// auth.users lives outside our schema (same pattern as slack_users).
+export const githubUsers = pgTable(
+	"github_users",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		githubId: bigint("github_id", { mode: "number" }).notNull().unique(),
+		login: text("login").notNull(),
+		basaltUserId: uuid("basalt_user_id").notNull(),
+		linkedAt: timestamp("linked_at").notNull().defaultNow(),
+	},
+	(t) => [index("idx_github_users_basalt").on(t.basaltUserId)],
+);
+
+// App installations mirrored from webhooks (installation events, and
+// opportunistically from pull_request payloads) — the /admin/github page
+// shows what's connected.
+export const githubInstallations = pgTable("github_installations", {
+	id: uuid("id").primaryKey().defaultRandom(),
+	installationId: bigint("installation_id", { mode: "number" }).notNull().unique(),
+	accountLogin: text("account_login").notNull().default(""),
+	repoSelection: text("repo_selection").notNull().default(""),
+	createdAt: timestamp("created_at").notNull().defaultNow(),
+	updatedAt: timestamp("updated_at")
+		.notNull()
+		.defaultNow()
+		.$onUpdate(() => new Date()),
+});
 
 // ── Timer (singleton — one running timer, id always 1) ────────────
 // A running timer is a row here; stopping converts it into a time entry.
