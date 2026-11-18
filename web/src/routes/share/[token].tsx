@@ -1,6 +1,7 @@
 import { Title } from "@solidjs/meta";
 import { useParams } from "@solidjs/router";
-import { createResource, For, Match, Switch } from "solid-js";
+import { createEffect, createResource, For, Match, Switch } from "solid-js";
+import { Logo } from "~/brand/logo";
 import { getDocByShareToken } from "~/lib/docs-share";
 import { mentionTitles } from "~/lib/mention-render-server";
 
@@ -43,19 +44,36 @@ export default function SharedDoc() {
 		return d ? { ...d, markdown: await mentionTitles(d.markdown) } : null;
 	});
 
+	// One Title outside the branches: under streaming SSR, branch titles leave
+	// the fallback's tag in <head> first and browsers keep the first title.
+	// Hydration never re-applies solid-meta's reactive text to the SSR'd
+	// element, so drive document.title explicitly once the resource resolves.
+	const title = () => (doc.loading ? "Basalt" : doc() ? `${doc()!.title} — Basalt` : "Not found — Basalt");
+	createEffect(() => {
+		document.title = title();
+	});
+
 	return (
-		<main style={{ "max-width": "720px", margin: "48px auto", padding: "0 24px", "font-family": "Georgia, 'Times New Roman', serif" }}>
-			<Switch fallback={<Title>Not found</Title>}>
-				<Match when={!doc.loading && !doc()}>
-					<Title>Not found — Basalt</Title>
-					<p class="muted">This share link is invalid or was unshared.</p>
-				</Match>
-				<Match when={doc()}>
-					<Title>{doc()!.title} — Basalt</Title>
-					<h1>{doc()!.title}</h1>
-					<For each={[mdToHtml(doc()!.markdown)]}>{(html) => <div innerHTML={html} />}</For>
-				</Match>
-			</Switch>
-		</main>
+		<div class="flex min-h-screen flex-col bg-background text-foreground">
+			<Title>{title()}</Title>
+			<header class="flex items-center border-b border-border px-6 py-5">
+				<a href="/" aria-label="Basalt & Company home">
+					<Logo variant="word" redDot suffix="& Company" class="text-[20px]" />
+				</a>
+			</header>
+			<main class="mx-auto w-full max-w-[720px] flex-1 px-6 py-16">
+				<Switch fallback={null}>
+					<Match when={!doc.loading && !doc()}>
+						<p class="text-sm text-muted-foreground">This share link is invalid or was unshared.</p>
+					</Match>
+					<Match when={doc()}>
+						<h1 class="serif-display font-serif text-3xl leading-tight">{doc()!.title}</h1>
+						<For each={[mdToHtml(doc()!.markdown)]}>
+							{(html) => <div class="mt-8 space-y-4 text-[15px] leading-relaxed" innerHTML={html} />}
+						</For>
+					</Match>
+				</Switch>
+			</main>
+		</div>
 	);
 }
