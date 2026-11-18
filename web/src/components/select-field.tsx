@@ -37,7 +37,9 @@ export default function SelectField(props: {
     // swallows selections for selects without onChange (company pickers)
     <Select
       options={opts().map((o) => o.value)}
-      value={props.value ?? undefined}
+      // "" = no selection → uncontrolled, else Kobalte's controlled mode pins the
+      // value and swallows clicks for callers without onChange
+      value={props.value || undefined}
       onChange={(v) => props.onChange?.(v ?? "")}
       placeholder={props.placeholder ?? "Select…"}
       itemComponent={(p) => (
