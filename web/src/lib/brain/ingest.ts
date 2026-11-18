@@ -4,7 +4,7 @@
 //   backfill_timeline: recent email threads → entity page timelines
 //   recompute_weight: salience per page
 // These run every cycle; the LLM phases (distill.ts) run after them.
-import { and, desc, eq, gte, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, or, sql } from "drizzle-orm";
 import { db, raw } from "~/db";
 import {
 	brainFacts,
@@ -13,11 +13,14 @@ import {
 	brainTimeline,
 	clientMembers,
 	companies,
+	emailMessages,
+	emailThreads,
 	outreachProspects,
 	projects,
 } from "~/db/schema";
 import { computeEmotionalWeight, factHash, loopDedupKey, planLoopForThread, slugify, type ThreadSummary } from "./core";
 import { campaignStats } from "~/lib/campaign-stats";
+import { emailsForPerson, reconcileProspectContacts } from "~/lib/people";
 
 /**
  * Person pages from every corpus that names humans: meeting transcript
@@ -69,9 +72,13 @@ export async function syncPersons(): Promise<{ created: number }> {
 		if (/reply/i.test(name) || /^usr\b/i.test(local) || /\b(in|the|and|for|of|a|an)\b/i.test(name)) continue;
 		await ensure(name);
 	}
-	// portal members
-	for (const m of await db.select({ name: clientMembers.name }).from(clientMembers)) {
+	// portal members — coupled like companies: page points at the CRM row,
+	// frontmatter carries every known address
+	for (const m of await db.select({ id: clientMembers.id, name: clientMembers.name }).from(clientMembers)) {
 		await ensure(m.name);
+		const slug = `person-${slugify(m.name)}`;
+		const emails = await emailsForPerson(m.id);
+		await db.update(brainPages).set({ contactId: m.id, frontmatter: { emails } }).where(eq(brainPages.slug, slug));
 	}
 	// slack members (real names only)
 	const slack = await raw<{ real_name: string; name: string }>(sql`
@@ -90,6 +97,8 @@ export async function syncProspects(): Promise<{ created: number; loopsOpened: n
 	let created = 0;
 	let loopsOpened = 0;
 	let loopsClosed = 0;
+	// unify: exact email → contact_id, exact/alias company name → company_id
+	await reconcileProspectContacts();
 	const prospects = await db.select().from(outreachProspects);
 	for (const p of prospects) {
 		const slug = `prospect-${slugify(p.company)}`;
@@ -346,6 +355,50 @@ export async function backfillTimeline(days = 30): Promise<{ inserted: number }>
 			sourceId: r.thread_id,
 		});
 		inserted++;
+	}
+
+	// person pages: per-message entries on the person's own timeline — any
+	// message from/to one of their addresses, deduped like the company pass
+	const members = await db.select({ id: clientMembers.id }).from(clientMembers);
+	for (const m of members) {
+		const addrs = await emailsForPerson(m.id);
+		if (addrs.length === 0) continue;
+		const [page] = await db.select({ id: brainPages.id }).from(brainPages).where(eq(brainPages.contactId, m.id)).limit(1);
+		if (!page) continue;
+		const conds = addrs.flatMap((a) => [
+			sql`lower(${emailMessages.fromEmail}) = ${a}`,
+			sql`${emailMessages.toEmails} ILIKE ${`%${a}%`}`,
+		]);
+		const msgs = await db
+			.select({ id: emailMessages.id, subject: emailThreads.subject, date: emailMessages.date })
+			.from(emailMessages)
+			.innerJoin(emailThreads, eq(emailMessages.threadId, emailThreads.id))
+			.where(and(or(...conds), gte(emailMessages.date, new Date(since))))
+			.orderBy(desc(emailMessages.date))
+			.limit(10);
+		for (const msg of msgs) {
+			const dup = await db
+				.select({ id: brainTimeline.id })
+				.from(brainTimeline)
+				.where(
+					and(
+						eq(brainTimeline.pageId, page.id),
+						eq(brainTimeline.sourceTable, "email_messages"),
+						eq(brainTimeline.sourceId, msg.id),
+					),
+				)
+				.limit(1);
+			if (dup.length > 0) continue;
+			await db.insert(brainTimeline).values({
+				pageId: page.id,
+				date: new Date(msg.date).toISOString().slice(0, 10),
+				source: "email",
+				summary: msg.subject ?? "(no subject)",
+				sourceTable: "email_messages",
+				sourceId: msg.id,
+			});
+			inserted++;
+		}
 	}
 	return { inserted };
 }

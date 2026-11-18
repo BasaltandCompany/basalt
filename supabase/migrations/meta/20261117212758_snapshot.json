@@ -1,5 +1,5 @@
 {
-  "id": "75eef7e4-1b8f-4cec-8e01-86e82f3d3735",
+  "id": "835e8da1-29db-4ec7-8154-47a561289f59",
   "prevId": "c05c006a-9efa-4b1d-b369-3fba69f6bee3",
   "version": "7",
   "dialect": "postgresql",
@@ -809,6 +809,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "contact_id": {
+          "name": "contact_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "title": {
           "name": "title",
           "type": "text",
@@ -892,6 +898,21 @@
           "method": "btree",
           "with": {}
         },
+        "idx_brain_pages_contact": {
+          "name": "idx_brain_pages_contact",
+          "columns": [
+            {
+              "expression": "contact_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "idx_brain_pages_type": {
           "name": "idx_brain_pages_type",
           "columns": [
@@ -915,6 +936,19 @@
           "tableTo": "companies",
           "columnsFrom": [
             "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "brain_pages_contact_id_client_members_id_fk": {
+          "name": "brain_pages_contact_id_client_members_id_fk",
+          "tableFrom": "brain_pages",
+          "tableTo": "client_members",
+          "columnsFrom": [
+            "contact_id"
           ],
           "columnsTo": [
             "id"
@@ -1610,6 +1644,83 @@
         }
       },
       "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.client_member_emails": {
+      "name": "client_member_emails",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "member_id": {
+          "name": "member_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_member_emails_member": {
+          "name": "idx_member_emails_member",
+          "columns": [
+            {
+              "expression": "member_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "client_member_emails_member_id_client_members_id_fk": {
+          "name": "client_member_emails_member_id_client_members_id_fk",
+          "tableFrom": "client_member_emails",
+          "tableTo": "client_members",
+          "columnsFrom": [
+            "member_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "client_member_emails_email_unique": {
+          "name": "client_member_emails_email_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "email"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -2342,6 +2453,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "attachments": {
+          "name": "attachments",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
         },
         "date": {
           "name": "date",
@@ -3621,6 +3739,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "contact_id": {
+          "name": "contact_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "region": {
           "name": "region",
           "type": "text",
@@ -3689,7 +3819,38 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "idx_prospects_contact": {
+          "name": "idx_prospects_contact",
+          "columns": [
+            {
+              "expression": "contact_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_prospects_company": {
+          "name": "idx_prospects_company",
+          "columns": [
+            {
+              "expression": "company_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "outreach_prospects_campaign_id_campaigns_id_fk": {
           "name": "outreach_prospects_campaign_id_campaigns_id_fk",
@@ -3697,6 +3858,32 @@
           "tableTo": "campaigns",
           "columnsFrom": [
             "campaign_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "outreach_prospects_contact_id_client_members_id_fk": {
+          "name": "outreach_prospects_contact_id_client_members_id_fk",
+          "tableFrom": "outreach_prospects",
+          "tableTo": "client_members",
+          "columnsFrom": [
+            "contact_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "outreach_prospects_company_id_companies_id_fk": {
+          "name": "outreach_prospects_company_id_companies_id_fk",
+          "tableFrom": "outreach_prospects",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
           ],
           "columnsTo": [
             "id"
@@ -4192,18 +4379,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": 30
-        },
-        "start_date": {
-          "name": "start_date",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "end_date": {
-          "name": "end_date",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
         },
         "quoted_cap_hours": {
           "name": "quoted_cap_hours",

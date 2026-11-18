@@ -4,7 +4,9 @@ import { hashKey } from "~/lib/crypto";
 import { db } from "~/db";
 import { apiKeys, companies, outreachProspects, OUTREACH_STAGES, campaigns, campaignCompanies, videos, funnels, funnelRuns, funnelItems, funnelStageResults, funnelSchedules } from "~/db/schema";
 import { brainQuery, entityFacts } from "~/lib/brain/search";
-import { brainJobs, docs, shortLinks, quotes, quoteItems } from "~/db/schema";
+import { brainJobs, docs, shortLinks, quotes, quoteItems, clientMembers, clientMemberEmails, emailMessages, emailThreads, emailAccounts } from "~/db/schema";
+import { getPersonDossier } from "~/lib/people";
+import { fetchAttachment } from "~/lib/gmail";
 import { computeQuoteTotals } from "~/lib/quotes";
 import { getProjectActuals } from "~/lib/quote-actuals";
 import { agentWrite, createDoc, getDoc, getDocVersionDiff, listDocVersions, listDocs, renameDoc, setDocAppendix } from "~/lib/docs";
@@ -691,6 +693,31 @@ chat_uuid: { type: "string" },
 				id: { type: "string", description: "row id (uuid, or slug for short-link)" },
 			},
 			required: ["kind", "id"],
+		},
+	},
+	{
+		name: "get_person",
+		description:
+			"Everything about one person: all their email addresses, recent email to/from any of them (with attachment names), their companies, projects, quotes, invoices, deliverables, outreach lifecycle stage, meetings, docs that mention them, and the brain dossier (facts, open loops, timeline). Resolve by id or fuzzy name/email. Use this for any 'what do we know about Eric' question — do NOT hand-roll per-table queries.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				name: { type: "string", description: "person name or an email address — fuzzy over contact names, exact over addresses" },
+				id: { type: "string", description: "contact uuid (from search_components/get_component)" },
+			},
+		},
+	},
+	{
+		name: "get_email_attachment",
+		description:
+			"Fetch an email attachment's BYTES on demand — sync stores metadata only (nothing on disk), so this is the one path to the content. Pass message_id + attachment_id from get_person recent_email or get_component('contact'). Returns base64 content + filename/size/type. Use it when you actually need the file (a signed PDF, a spreadsheet).",
+		inputSchema: {
+			type: "object",
+			properties: {
+				message_id: { type: "string", description: "email_messages.id (uuid)" },
+				attachment_id: { type: "string", description: "Gmail attachmentId from the message's attachments metadata" },
+			},
+			required: ["message_id", "attachment_id"],
 		},
 	},
 	{
@@ -1922,7 +1949,123 @@ export async function POST(event: APIEvent) {
 								items: items.map((i) => ({ group: i.group, name: i.name, detail: i.detail, hours: i.hours, rate: i.unitRate, amount: i.hours * i.unitRate })),
 							};
 						}
-						result = { card, row, ...quoteExtras, links };
+						// people: the row is scalars-only — attach the person view (addresses,
+						// orgs, outreach, recent email, brain page) so one get_component call
+						// answers "who is this and what's our history"
+						let personExtras: Record<string, unknown> = {};
+						if (kind === "contact" && !card.deleted) {
+							const d = await getPersonDossier(id);
+							if (d) {
+								personExtras = {
+									person: {
+										emails: d.addresses,
+										companies: d.companies.map((c) => c.name),
+										projects: d.projects.map((p) => ({ name: p.name, status: p.status })),
+										outreach: d.prospects.map((p) => ({ company: p.company, stage: p.stage })),
+										quotes: d.quotes.map((q) => ({ title: q.title, status: q.status })),
+										recent_email: d.messages.slice(0, 10).map((m) => ({
+											subject: m.subject,
+											from: m.fromEmail,
+											sent: m.isSent,
+											date: m.date,
+											attachments: m.attachments.map((a) => a.filename),
+										})),
+										brain_page: d.brain
+											? { slug: d.brain.slug, facts: d.brain.facts.slice(0, 10).map((f) => f.fact) }
+											: null,
+									},
+								};
+							}
+						}
+						result = { card, row, ...quoteExtras, ...personExtras, links };
+						break;
+					}
+					case "get_person": {
+						let memberId = toolArgs.id ? String(toolArgs.id) : "";
+						if (!memberId && toolArgs.name) {
+							const needle = String(toolArgs.name).trim();
+							const [byName] = await db
+								.select({ id: clientMembers.id })
+								.from(clientMembers)
+								.where(ilike(clientMembers.name, `%${needle}%`))
+								.limit(1);
+							if (byName) memberId = byName.id;
+							else {
+								const [byEmail] = await db
+									.select({ id: clientMembers.id })
+									.from(clientMembers)
+									.where(ilike(clientMembers.email, needle))
+									.limit(1);
+								memberId = byEmail?.id ?? "";
+								if (!memberId) {
+									const [byExtra] = await db
+										.select({ memberId: clientMemberEmails.memberId })
+										.from(clientMemberEmails)
+										.where(ilike(clientMemberEmails.email, needle))
+										.limit(1);
+									memberId = byExtra?.memberId ?? "";
+								}
+							}
+						}
+						if (!memberId) {
+							result = { error: "pass name (fuzzy) or id — or find the person via search_components" };
+							break;
+						}
+						const d = await getPersonDossier(memberId);
+						if (!d) {
+							result = { error: `no person ${memberId}` };
+							break;
+						}
+						result = {
+							person: { id: d.member.id, name: d.member.name, primary_email: d.member.email },
+							emails: d.addresses,
+							companies: d.companies,
+							projects: d.projects.map((p) => ({ id: p.id, name: p.name, status: p.status })),
+							quotes: d.quotes,
+							invoices: d.invoices.map((i) => ({ number: i.number, amount: i.amount, status: i.status })),
+							deliverables: d.deliverables.map((x) => ({ title: x.title, status: x.status })),
+							outreach: d.prospects,
+							recent_email: d.messages,
+							meetings: d.meetings,
+							mentions: d.links.map((l) => ({ direction: l.direction, type: l.linkType, card: l.card })),
+							brain: d.brain,
+						};
+						break;
+					}
+					case "get_email_attachment": {
+						const messageId = String(toolArgs.message_id ?? "");
+						const attachmentId = String(toolArgs.attachment_id ?? "");
+						const [row] = await db
+							.select({ attachments: emailMessages.attachments, accountId: emailThreads.accountId })
+							.from(emailMessages)
+							.innerJoin(emailThreads, eq(emailMessages.threadId, emailThreads.id))
+							.where(eq(emailMessages.id, messageId))
+							.limit(1);
+						if (!row) {
+							result = { error: `no message ${messageId}` };
+							break;
+						}
+						const [account] = await db
+							.select({ id: emailAccounts.id, refreshToken: emailAccounts.refreshToken })
+							.from(emailAccounts)
+							.where(eq(emailAccounts.id, row.accountId))
+							.limit(1);
+						if (!account) {
+							result = { error: "the message's email account no longer exists" };
+							break;
+						}
+						try {
+							const meta = row.attachments.find((a) => a.attachmentId === attachmentId);
+							const att = await fetchAttachment(account, messageId, attachmentId);
+							result = {
+								filename: meta?.filename ?? att.filename ?? attachmentId,
+								mimeType: meta?.mimeType ?? att.mimeType ?? "application/octet-stream",
+								size: att.size,
+								content_base64: Buffer.from(att.data, "base64url").toString("base64"),
+							};
+						} catch (e) {
+							result = { error: `Gmail fetch failed: ${e instanceof Error ? e.message : e}` };
+						}
 						break;
 					}
 					case "search_components": {
