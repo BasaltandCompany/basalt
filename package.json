@@ -1,5 +1,5 @@
 {
-  "name": "madcactus",
+  "name": "basalt",
   "private": true,
   "workspaces": ["web", "packages/ui"],
   "patchedDependencies": {
