@@ -169,9 +169,12 @@ export default function AdminQuoteDetail() {
 									<Button as="a" size="sm" variant="outline" href={`/admin/docs/${q().bodyDoc!.id}`}>
 										Edit body prose ↗
 									</Button>
-									<Button as="a" size="sm" variant="outline" href={`/api/quotes/${q().id}/pdf`}>
-										PDF
-									</Button>
+										{/* download attr: without it the solid router intercepts the click and
+client-side-navigates to the API URL — no file ever downloads. Skips interception
+for a native same-tab download (Content-Disposition still names the file). */}
+										<Button as="a" size="sm" variant="outline" href={`/api/quotes/${q().id}/pdf`} download="">
+											PDF
+										</Button>
 								</Show>
 							</div>
 						</div>
