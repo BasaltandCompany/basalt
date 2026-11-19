@@ -18,9 +18,54 @@ type DraftDiffPart = { added?: boolean; removed?: boolean; value: string };
 
 // Hotkeys mirror macro: j/k move + open, h/l list↔pane, e archive, shift+e
 // unarchive, u unread, r reply, f forward, c compose, / search, Esc close.
+// t theater mode (n/p walk messages, space pages, j/k switches threads).
 // V = visual multi-select: j/k extend the range, then e/u/!/# act on all of it.
 
 type ThreadFull = { thread: EmailThread; messages: EmailMessage[] };
+
+// newest-first thread body, shared by the reading pane and theater mode:
+// index 0 (the latest message) renders expanded, every earlier message
+// collapses to a one-liner underneath — click to expand
+const ThreadMessages = (props: { messages: EmailMessage[]; openMsg: number; onOpen: (i: number) => void }) => (
+	<For each={props.messages}>
+		{(m, i) =>
+			i() === 0 || props.openMsg === i() ? (
+				<div data-msg-idx={i()} style={{ "margin-bottom": "16px", "padding-bottom": "16px", "border-bottom": "1px solid rgba(0,0,0,0.08)" }}>
+					<div class="muted" style={{ "font-size": "12px", "margin-bottom": "6px" }}>
+						{m.fromName ?? m.fromEmail} · {new Date(m.date).toLocaleString()}
+					</div>
+					<Show
+						when={m.bodyHtml}
+						fallback={<pre style={{ "white-space": "pre-wrap", "font-family": "inherit", "font-size": "14px", margin: 0 }}>{m.bodyText}</pre>}
+					>
+						{(html) => (
+							// untrusted email HTML: sandbox without allow-scripts = no JS can run;
+							// allow-same-origin lets us auto-size; email CSS stays inside the frame
+							<iframe
+								sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+								srcdoc={html()}
+								style={{ width: "100%", border: "0", display: "block", "min-height": "160px" }}
+								onLoad={(e) => {
+									const doc = e.currentTarget.contentDocument;
+									if (doc?.body) e.currentTarget.style.height = `${doc.body.scrollHeight}px`;
+								}}
+							/>
+						)}
+					</Show>
+				</div>
+			) : (
+				<div
+					data-msg-idx={i()}
+					class="muted"
+					style={{ "font-size": "13px", cursor: "pointer", "margin-bottom": "8px", "padding-bottom": "8px", "border-bottom": "1px solid rgba(0,0,0,0.08)" }}
+					onClick={() => props.onOpen(i())}
+				>
+					{m.fromName ?? m.fromEmail} · {new Date(m.date).toLocaleString()} — {m.bodyText?.slice(0, 80)}…
+				</div>
+			)
+		}
+	</For>
+);
 
 export default function AdminEmail() {
 	const status = createAsync(() => getEmailStatusQuery(), { deferStream: true });
@@ -35,9 +80,11 @@ export default function AdminEmail() {
 
 	const [q, setQ] = createSignal(String(searchParams.q ?? ""));
 	const [selected, setSelected] = createSignal<ThreadFull | null>(null);
-	// older messages collapse to one line — the latest stays expanded; this is
+	// newest-first display: the current message is index 0 and expanded; this is
 	// the index of a manually expanded one, reset on every thread paint
 	const [openMsg, setOpenMsg] = createSignal(-1);
+	// theater mode — fullscreen focused read of the selected thread
+	const [theater, setTheater] = createSignal(false);
 	const [selIdx, setSelIdx] = createSignal(0);
 	// optimistic triage state — ops mutate these instead of refetching the
 	// whole list; the next sync (≤10min or the Sync button) reconciles
@@ -45,6 +92,9 @@ export default function AdminEmail() {
 	const [readOverride, setReadOverride] = createSignal<Record<string, boolean>>({});
 	const visibleThreads = () => (inbox()?.threads ?? []).filter((t) => !hiddenIds().has(t.id));
 	const isUnread = (t: EmailThread) => readOverride()[t.id] ?? t.unread;
+	// display order = newest first — the current message on top, the rest of
+	// the thread underneath (data order untouched: r/f still read .at(-1))
+	const shownMessages = () => [...(selected()?.messages ?? [])].reverse();
 	// confirmation modal for destructive macros (spam / delete / unsubscribe)
 	const [pending, setPending] = createSignal<{ title: string; body: string; confirm: string; danger: boolean; run: () => Promise<unknown> } | null>(null);
 	// visual multi-select (V): range = anchor..cursor, ops apply to the range
@@ -589,6 +639,30 @@ export default function AdminEmail() {
 				}
 				return;
 			}
+			// theater mode owns these keys; j/k and the triage ops fall through —
+			// they already act on selected() and repaint the overlay in place
+			if (theater() && selected()) {
+				const scroller = document.querySelector<HTMLElement>("[data-theater-scroll]");
+				if (e.key === "Escape" || e.key === "t") {
+					e.preventDefault();
+					setTheater(false);
+					return;
+				}
+				if (e.key === "n" || e.key === "p") {
+					e.preventDefault();
+					const count = selected()!.messages.length;
+					const cur = openMsg() >= 0 ? openMsg() : 0;
+					const next = Math.min(Math.max(cur + (e.key === "n" ? 1 : -1), 0), count - 1);
+					setOpenMsg(next);
+					scroller?.querySelector<HTMLElement>(`[data-msg-idx="${next}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+					return;
+				}
+				if (e.key === " ") {
+					e.preventDefault();
+					scroller?.scrollBy({ top: (e.shiftKey ? -1 : 1) * scroller.clientHeight * 0.85, behavior: "smooth" });
+					return;
+				}
+			}
 			const threads = listThreads();
 			if (e.key === "/") {
 				e.preventDefault();
@@ -641,6 +715,12 @@ export default function AdminEmail() {
 			if (compose() || openDraft()) return;
 			if (e.key === "c") {
 				setCompose({ to: "", subject: "", body: "" });
+				return;
+			}
+			// t opens theater on the open thread (selected() gates it to inbox/sent)
+			if (e.key === "t" && !visMode() && selected()) {
+				e.preventDefault();
+				setTheater(true);
 				return;
 			}
 			// h/l cycle the folder tabs (wrap) — works on every tab
@@ -744,6 +824,12 @@ export default function AdminEmail() {
 		onCleanup(() => clearInterval(timer));
 	});
 
+	createEffect(() => {
+		// j/k inside theater repaints the overlay in place — restart every
+		// thread change at the top so the read always starts at the newest
+		if (theater() && selected()) document.querySelector<HTMLElement>("[data-theater-scroll]")?.scrollTo({ top: 0 });
+	});
+
 	return (
 		<Layout>
 			<Title>Email — Basalt</Title>
@@ -763,7 +849,7 @@ export default function AdminEmail() {
 				</Show>
 			</div>
 			<p class="page-subtitle">
-				j/k move · h/l tabs · V select · e done · u unread · r reply · f forward · ! spam · # delete · x unsub · c compose · / search
+		j/k move · h/l tabs · V select · e done · u unread · r reply · f forward · ! spam · # delete · x unsub · c compose · / search · t theater · n/p msg
 			</p>
 
 			<Show when={searchParams.connect}>
@@ -1004,50 +1090,13 @@ export default function AdminEmail() {
 				{/* reading pane */}
 				<Show when={selected()}>
 					<div class="card" style={{ padding: "20px 24px" }}>
-						<h2 style={{ "font-size": "18px", margin: "0 0 4px" }}>{selected()!.thread.subject}</h2>
-						<div class="muted" style={{ "font-size": "13px", "margin-bottom": "12px" }}>{selected()!.thread.fromEmail}</div>
-						<For each={selected()!.messages}>
-							{(m, i) => {
-								// newest message open, everything before it one line — click to expand
-								const isLast = i() === selected()!.messages.length - 1;
-								if (isLast || openMsg() === i()) {
-									return (
-										<div style={{ "margin-bottom": "16px", "padding-bottom": "16px", "border-bottom": "1px solid rgba(0,0,0,0.08)" }}>
-											<div class="muted" style={{ "font-size": "12px", "margin-bottom": "6px" }}>
-												{m.fromName ?? m.fromEmail} · {new Date(m.date).toLocaleString()}
-											</div>
-											<Show
-												when={m.bodyHtml}
-												fallback={<pre style={{ "white-space": "pre-wrap", "font-family": "inherit", "font-size": "14px", margin: 0 }}>{m.bodyText}</pre>}
-											>
-												{(html) => (
-													// untrusted email HTML: sandbox without allow-scripts = no JS can run;
-													// allow-same-origin lets us auto-size; email CSS stays inside the frame
-													<iframe
-														sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-														srcdoc={html()}
-														style={{ width: "100%", border: "0", display: "block", "min-height": "160px" }}
-														onLoad={(e) => {
-															const doc = e.currentTarget.contentDocument;
-															if (doc?.body) e.currentTarget.style.height = `${doc.body.scrollHeight}px`;
-														}}
-													/>
-												)}
-											</Show>
-										</div>
-									);
-								}
-								return (
-									<div
-										class="muted"
-										style={{ "font-size": "13px", cursor: "pointer", "margin-bottom": "8px", "padding-bottom": "8px", "border-bottom": "1px solid rgba(0,0,0,0.08)" }}
-										onClick={() => setOpenMsg(i())}
-									>
-										{m.fromName ?? m.fromEmail} · {new Date(m.date).toLocaleString()} — {m.bodyText?.slice(0, 80)}…
-									</div>
-								);
-							}}
-						</For>
+					<div style={{ display: "flex", gap: "12px", "align-items": "baseline" }}>
+						<h2 style={{ "font-size": "18px", margin: 0, flex: 1 }}>{selected()!.thread.subject}</h2>
+						<Button variant="outline" size="sm" type="button"  onClick={() => setTheater(true)}>Theater (t)</Button>
+					</div>
+					<div class="muted" style={{ "font-size": "13px", "margin-bottom": "12px" }}>{selected()!.thread.fromEmail}</div>
+					{/* newest on top, the rest of the thread underneath (t = fullscreen theater) */}
+					<ThreadMessages messages={shownMessages()} openMsg={openMsg()} onOpen={setOpenMsg} />
 						<div style={{ display: "flex", gap: "8px", "margin-top": "8px" }}>
 							<Button variant="outline" size="sm" type="button"  onClick={() => threadOp(selected()!.thread.id, "archive")}>Done (e)</Button>
 							<Button variant="outline" size="sm" type="button"  onClick={() => threadOp(selected()!.thread.id, "unread")}>Unread (u)</Button>
@@ -1060,6 +1109,39 @@ export default function AdminEmail() {
 			</div>
 			</Show>
 
+			{/* theater mode — fullscreen focused read: the current message takes
+			    the screen, the rest of the thread underneath. n/p walk messages,
+			    space pages, j/k switches threads and keeps the overlay open.
+			    z 45 sits under the compose/draft overlays (50) and confirm modal (60),
+			    so r/f/! opened from here float on top instead of hiding behind it. */}
+			<Show when={theater() && selected()}>
+				<div
+					data-theater-scroll=""
+					style={{ position: "fixed", inset: "0", background: "var(--background)", "z-index": 45, "overflow-y": "auto" }}
+					onClick={() => setTheater(false)}
+				>
+					<div style={{ "max-width": "860px", margin: "0 auto", padding: "32px 24px 64px" }} onClick={(e) => e.stopPropagation()}>
+						<div style={{ display: "flex", gap: "12px", "align-items": "baseline" }}>
+							<h2 style={{ "font-size": "22px", margin: 0, flex: 1 }}>{selected()!.thread.subject}</h2>
+							<Button variant="outline" size="sm" type="button"  onClick={() => setTheater(false)}>Exit (esc)</Button>
+						</div>
+						<div class="muted" style={{ "font-size": "13px", "margin-top": "6px" }}>{selected()!.thread.fromEmail}</div>
+						<div class="muted" style={{ "font-size": "12px", "margin-top": "12px", "padding-top": "10px", "border-top": "1px solid rgba(0,0,0,0.08)" }}>
+							n/p next/prev message · space page · j/k next thread · esc exit
+						</div>
+						<div style={{ "margin-top": "16px" }}>
+							<ThreadMessages messages={shownMessages()} openMsg={openMsg()} onOpen={setOpenMsg} />
+						</div>
+						<div style={{ display: "flex", gap: "8px", "margin-top": "8px" }}>
+							<Button variant="outline" size="sm" type="button"  onClick={() => threadOp(selected()!.thread.id, "archive")}>Done (e)</Button>
+							<Button variant="outline" size="sm" type="button"  onClick={() => threadOp(selected()!.thread.id, "unread")}>Unread (u)</Button>
+							<Button variant="outline" size="sm" type="button"  onClick={askUnsub}>Unsub (x)</Button>
+							<Button variant="outline" size="sm" type="button"  style={{ "border-color": "#a33", color: "#a33" }} onClick={askSpam}>Spam (!)</Button>
+							<Button variant="outline" size="sm" type="button"  style={{ "border-color": "#a33", color: "#a33" }} onClick={askDelete}>Delete (#)</Button>
+						</div>
+					</div>
+				</div>
+			</Show>
 			{/* destructive-action confirm modal (spam / delete / unsubscribe) */}
 			<Show when={pending()}>
 				<div
