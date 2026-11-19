@@ -8,7 +8,7 @@
 import { and, desc, eq, isNotNull, ne } from "drizzle-orm";
 import { db } from "~/db";
 import { emailMessages, emailOutbox, emailThreads } from "~/db/schema";
-import { getPrimaryAccount, threadWithMessages, sendGmail } from "~/lib/gmail";
+import { buildReplyQuote, getPrimaryAccount, threadWithMessages, sendGmail } from "~/lib/gmail";
 import { trackText } from "~/lib/crdt-text-db";
 import { lintVoiceText, recordLintOverrides } from "~/lib/voice-lint-db";
 import { SIGNATURES } from "~/lib/email-signature";
@@ -189,22 +189,32 @@ export async function sendOutboxInner(
 		await recordLintOverrides(lint.violations.map((v) => v.patternId), outboxId);
 	}
 
-	// reply threading: find the last message in the thread
+	// reply threading + quoted history: find the last message in the thread.
+	// The composer holds only the human's words — the "On … wrote:" quote is
+	// built here, send-only: row.body/lint/version history stay pure, and the
+	// contains-check keeps retries from stacking the quote.
 	let inReplyToGmailId: string | undefined;
+	let sendBody = body;
 	if (row.threadId) {
 		const [thread] = await db.select().from(emailThreads).where(eq(emailThreads.id, row.threadId));
 		if (thread) {
 			const full = await threadWithMessages(account, thread.id);
 			// last inbound so the reply threads onto their message; a sent-only
 			// thread (follow-up to unanswered cold email) threads onto my own send
-			inReplyToGmailId = full?.messages.filter((m) => !m.isSent).at(-1)?.gmailId ?? full?.messages.at(-1)?.gmailId;
+			const target = full?.messages.filter((m) => !m.isSent).at(-1) ?? full?.messages.at(-1);
+			inReplyToGmailId = target?.gmailId;
+			if (target) {
+				const quote = buildReplyQuote(target);
+				if (!body.includes(quote.split("\n")[0])) sendBody = `${body}\n\n${quote}`;
+			}
 		}
 	}
 
 	// signature: explicit per-draft choice wins; NULL = auto (campaign → plain,
-	// otherwise full). 'none' = bare send.
+	// otherwise full). 'none' = bare send. Footer is the last thing in every
+	// outbound email — below the quoted history on replies.
 	const sig = row.signature === "none" ? undefined : (row.signature ?? (row.campaignCompanyId ? "plain" : "full")) as "full" | "plain" | undefined;
-	const deliveredBody = sig ? `${body}\n\n${SIGNATURES[sig].plain}` : body;
+	const deliveredBody = sig ? `${sendBody}\n\n${SIGNATURES[sig].plain}` : sendBody;
 
 	try {
 		// a missing/corrupt attachment file fails the send — never deliver the
@@ -215,7 +225,7 @@ export async function sendOutboxInner(
 			cc: row.ccEmail,
 			bcc: row.bccEmail,
 			subject: row.subject,
-			body,
+			body: sendBody,
 			signature: sig,
 			inReplyToGmailId,
 			attachments: mimeAttachments.length ? mimeAttachments : undefined,

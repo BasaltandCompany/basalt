@@ -1,7 +1,7 @@
 // Self-check for gmail payload parsing + mime building (pure functions).
 // Run: DATABASE_URL=postgres://dummy bun test src/lib/gmail.test.ts
 import { describe, expect, test } from "bun:test";
-import { buildMime, extractText, extractHtml, addr, latestMessage, isTrashed, threadSubject, extractAttachments } from "./gmail";
+import { buildMime, buildReplyQuote, extractText, extractHtml, addr, latestMessage, isTrashed, threadSubject, extractAttachments } from "./gmail";
 import { toBase64 } from "./crypto";
 
 const part = (mimeType: string, data: string): any => ({
@@ -372,5 +372,23 @@ describe("extractAttachments", () => {
 	test("body parts without attachmentId are skipped", () => {
 		const p = msg([], [part("text/plain", "just text")]);
 		expect(extractAttachments(p)).toEqual([]);
+	});
+});
+
+describe("buildReplyQuote", () => {
+	test("header + > prefixed lines", () => {
+		const q = buildReplyQuote({ date: new Date(2026, 10, 19, 16, 42), fromName: "Jane Smith", fromEmail: "jane@acme.com", bodyText: "line one\nline two" });
+		expect(q.split("\n")[0]).toMatch(/^On Nov 19, 2026, 4:42 PM, Jane Smith <jane@acme\.com> wrote:$/);
+		expect(q).toContain("> line one\n> line two");
+	});
+
+	test("blank lines become bare >", () => {
+		const q = buildReplyQuote({ date: new Date(2026, 10, 19), fromName: "Jane", bodyText: "a\n\nb" });
+		expect(q.split("\n").slice(1)).toEqual(["> a", ">", "> b"]);
+	});
+
+	test("no name → email only; empty body → header + bare >", () => {
+		const q = buildReplyQuote({ date: new Date(2026, 10, 19), fromEmail: "x@y.z", bodyText: "" });
+		expect(q.split("\n")).toEqual([expect.stringMatching(/^On .*x@y\.z wrote:$/), ">"]);
 	});
 });

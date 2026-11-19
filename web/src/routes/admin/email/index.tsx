@@ -1,6 +1,6 @@
 import { Title } from "@solidjs/meta";
 import { createAsync, revalidate, useAction, useSearchParams } from "@solidjs/router";
-import { For, Show, createSignal, createEffect, onMount, onCleanup } from "solid-js";
+import { For, Show, createSignal, createEffect, createMemo, onMount, onCleanup } from "solid-js";
 import Layout from "~/components/Layout";
 import { VoiceLintPanel } from "~/components/VoiceLintPanel";
 import { LintedTextarea } from "~/components/LintedTextarea";
@@ -11,6 +11,7 @@ import {
 	getEmailStatusQuery,
 } from "~/lib/email-queries";
 import type { EmailThread, EmailMessage, EmailOutbox } from "~/db/schema";
+import { SIGNATURES } from "~/lib/email-signature";
 import { Button } from "@basaltac/ui";
 
 type DraftVersionRow = { id: string; version: number; author: string; createdAt: string; updatedAt: string };
@@ -156,6 +157,15 @@ export default function AdminEmail() {
 	// per-draft CRDT history (Drafts tab); clicking a draft row opens the
 	// corner editor for that draft id
 	const [openDraft, setOpenDraft] = createSignal<string | null>(null);
+	// stable row identity for the editor overlay: a refetch rebuilds the drafts
+	// array, and a fresh object identity would remount the <Show keyed> editor —
+	// killing focus/caret mid-typing. ?? prev keeps the same row object across
+	// refetches; the effect below closes the editor when the row really goes
+	// away (sent/discarded).
+	const openDraftRow = createMemo<EmailOutbox | undefined>((prev) => inbox()?.drafts.find((x) => x.id === openDraft()) ?? prev);
+	createEffect(() => {
+		if (openDraft() && !inbox()?.drafts.find((x) => x.id === openDraft())) setOpenDraft(null);
+	});
 	const [openDraftHistory, setOpenDraftHistory] = createSignal<string | null>(null);
 	const [draftVersions, setDraftVersions] = createSignal<Record<string, DraftVersionRow[]>>({});
 	const [draftDiff, setDraftDiff] = createSignal<{ id: string; parts: DraftDiffPart[] | null } | null>(null);
@@ -644,7 +654,7 @@ export default function AdminEmail() {
 			}
 			// theater mode owns these keys; j/k and the triage ops fall through —
 			// they already act on selected() and repaint the overlay in place
-			if (theater() && selected()) {
+			if (theater() && selected() && !compose()) {
 				const scroller = document.querySelector<HTMLElement>("[data-theater-scroll]");
 				if (e.key === "Escape" || e.key === "t") {
 					e.preventDefault();
@@ -783,7 +793,9 @@ export default function AdminEmail() {
 				setCompose({
 					to: last ? (last.isSent ? (last.toEmails ?? "") : (last.fromEmail ?? "")) : "",
 					subject: selected()!.thread.subject.startsWith("Re:") ? selected()!.thread.subject : `Re: ${selected()!.thread.subject}`,
-					body: `\n\n${(last?.bodyText ?? "").slice(0, 2000)}`,
+					// the composer holds only the human's words — quoted history is
+					// appended at send time (buildReplyQuote in email-outbox)
+					body: "",
 					threadId: selected()!.thread.id,
 				});
 			} else if (e.key === "f" && !visMode() && selected()) {
@@ -817,7 +829,9 @@ export default function AdminEmail() {
 			const st = status();
 			const waitingFirstSync = snap?.connected && snap.threads.length === 0 && folder() === "inbox";
 			const waitingStamp = st?.email && !st.lastSyncAt;
-			if ((waitingFirstSync || waitingStamp) && ticks++ < 60) {
+			// editing a draft or composing: skip poll ticks — a revalidate mid-edit
+			// remounts overlays and eats focus
+			if (!openDraft() && !compose() && (waitingFirstSync || waitingStamp) && ticks++ < 60) {
 				void revalidate("email-inbox");
 				void revalidate("email-status");
 			} else {
@@ -1171,7 +1185,7 @@ export default function AdminEmail() {
 			{/* draft editor overlay — click a Drafts row; every field autosaves
 			    (body CRDT-tracked → History shows what changed), send/schedule
 			    stay lint-gated */}
-			<Show when={inbox()?.drafts.find((d) => d.id === openDraft())} keyed>
+			<Show when={openDraftRow()} keyed>
 				{(d) => (
 					<div
 						class="card"
@@ -1228,6 +1242,10 @@ export default function AdminEmail() {
 								rows={12}
 							/>
 							<VoiceLintPanel result={draftLint()[d.id] ?? null} stale={lintStale()[d.id]} />
+							{/* footer is appended at send time — preview the variant that will land */}
+							<Show when={(editMeta()[d.id]?.signature ?? d.signature ?? "") !== "none"}>
+								<pre class="muted" style={{ "font-size": "11px", "white-space": "pre-wrap", margin: "0 0 8px", "font-family": "inherit", color: "#8a8375" }}>{`— Footer added on send —\n${SIGNATURES[(editMeta()[d.id]?.signature || (d.campaignCompanyId ? "plain" : "full")) as "full" | "plain"].plain}`}</pre>
+							</Show>
 							<div style={{ display: "flex", gap: "6px", "flex-wrap": "wrap", "align-items": "center", margin: "8px 0" }}>
 								<For each={d.attachments ?? []}>
 									{(a) => (
@@ -1361,6 +1379,17 @@ export default function AdminEmail() {
 							onInput={(e) => setCompose({ ...compose()!, subject: e.currentTarget.value })}
 							style={{ width: "100%", "margin-bottom": "8px", padding: "8px", border: "1px solid rgba(0,0,0,0.12)" }}
 						/>
+						<textarea
+							aria-label="Message body"
+							placeholder="Your message…"
+							value={compose()!.body}
+							onInput={(e) => setCompose({ ...compose()!, body: e.currentTarget.value })}
+							rows={8}
+							ref={(el) => setTimeout(() => el.focus())}
+							style={{ width: "100%", "margin-bottom": "8px", padding: "8px", border: "1px solid rgba(0,0,0,0.12)", "font-family": "inherit", "font-size": "14px", "line-height": "1.5", "box-sizing": "border-box", resize: "vertical", display: "block" }}
+						/>
+						{/* footer is appended at send time — preview it where it will land */}
+						<pre class="muted" style={{ "font-size": "11px", "white-space": "pre-wrap", margin: "0 0 8px", "font-family": "inherit", color: "#8a8375" }}>{`— Footer added on send —\n${SIGNATURES.full.plain}`}</pre>
 						<Show when={composeFiles().length}>
 							<div style={{ display: "flex", gap: "6px", "flex-wrap": "wrap", "margin-bottom": "8px" }}>
 								<For each={composeFiles()}>
