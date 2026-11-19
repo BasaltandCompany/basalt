@@ -159,10 +159,14 @@ export default function AdminEmail() {
 	const [openDraft, setOpenDraft] = createSignal<string | null>(null);
 	// stable row identity for the editor overlay: a refetch rebuilds the drafts
 	// array, and a fresh object identity would remount the <Show keyed> editor —
-	// killing focus/caret mid-typing. ?? prev keeps the same row object across
-	// refetches; the effect below closes the editor when the row really goes
-	// away (sent/discarded).
-	const openDraftRow = createMemo<EmailOutbox | undefined>((prev) => inbox()?.drafts.find((x) => x.id === openDraft()) ?? prev);
+	// killing focus/caret mid-typing (the 5s /api/changes revalidate fires after
+	// every autosave PUT). Returning prev while the id is unchanged keeps the
+	// overlay mounted; a missing row (close/send/discard/schedule) drops it, so
+	// Close/Esc actually closes — the old `?? prev` kept the overlay alive forever.
+	const openDraftRow = createMemo<EmailOutbox | undefined>((prev) => {
+		const row = inbox()?.drafts.find((x) => x.id === openDraft());
+		return row && prev?.id === row.id ? prev : row;
+	});
 	createEffect(() => {
 		if (openDraft() && !inbox()?.drafts.find((x) => x.id === openDraft())) setOpenDraft(null);
 	});
@@ -1247,7 +1251,8 @@ export default function AdminEmail() {
 								<pre class="muted" style={{ "font-size": "11px", "white-space": "pre-wrap", margin: "0 0 8px", "font-family": "inherit", color: "#8a8375" }}>{`— Footer added on send —\n${SIGNATURES[(editMeta()[d.id]?.signature || (d.campaignCompanyId ? "plain" : "full")) as "full" | "plain"].plain}`}</pre>
 							</Show>
 							<div style={{ display: "flex", gap: "6px", "flex-wrap": "wrap", "align-items": "center", margin: "8px 0" }}>
-								<For each={d.attachments ?? []}>
+								{/* attachments ride the live row — frozen d would hide uploads that land via revalidate */}
+								<For each={inbox()?.drafts.find((x) => x.id === d.id)?.attachments ?? []}>
 									{(a) => (
 										<span style={{ "font-size": "12px", padding: "2px 8px", border: "1px solid rgba(0,0,0,0.12)", "border-radius": "12px", display: "inline-flex", gap: "6px", "align-items": "center" }}>
 											{a.filename} ({(a.size / 1048576).toFixed(1)}MB)
