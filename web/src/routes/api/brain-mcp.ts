@@ -677,7 +677,7 @@ lessons_reviewed: { type: "boolean", description: "true = you called get_voice_l
 	{
 		name: "create_email_draft",
 		description:
-			"Create an email for Collin to review in the dashboard Drafts tab. Read get_voice_lessons FIRST and pre-check with lint_voice_text (surface=email). HARD GATE: any avoid-violation REJECTS the call before anything is saved — fix the flagged text and resubmit; nothing lands until it's clean. First write attempt auto-no's: the call bounces with the top voice lessons ranked for YOUR text — apply them, then resubmit with lessons_applied=true. To revise a draft you already created, pass its draft_id (same fields) instead of creating a new one. The human sends by default; pass send_at (ISO) to schedule auto-send via the outbox ticker — the voice gate applies either way. Pass chat_uuid = your session id for provenance. Attachments: pass absolute server-local file paths; each caps at 20MB, total at ~24MB (Gmail's send limit). Read-before-write gate: revising via draft_id requires a prior get_component(kind=\"email-draft\", id) read — new drafts are unrestricted (chat_uuid scopes the ledger).",
+			"Create an email for Collin to review in the dashboard Drafts tab. Read get_voice_lessons FIRST and pre-check with lint_voice_text (surface=email). HARD GATE: any avoid-violation REJECTS the call before anything is saved — fix the flagged text and resubmit; nothing lands until it's clean. First write attempt auto-no's: the call bounces with the top voice lessons ranked for YOUR text — apply them, then resubmit with lessons_applied=true. To revise a draft you already created, pass its draft_id (same fields) instead of creating a new one. NEVER hand-write a sign-off (Thanks,/Best,/— Collin) at the end of the body — the footer/signature is appended at send time from the signature field, and a hand-written one lands doubled above it; end the body on your last content line. The human sends by default; pass send_at (ISO) to schedule auto-send via the outbox ticker — the voice gate applies either way. Pass chat_uuid = your session id for provenance. Attachments: pass absolute server-local file paths; each caps at 20MB, total at ~24MB (Gmail's send limit). Read-before-write gate: revising via draft_id requires a prior get_component(kind=\"email-draft\", id) read — it returns the full draft (complete body) — new drafts are unrestricted (chat_uuid scopes the ledger).",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -1999,11 +1999,12 @@ export async function POST(event: APIEvent) {
 						const card = await resolveCard({ kind, id });
 						const links = await linksFor({ kind, id });
 						if (!card.deleted && card.title) noteRead(readSession, [`${kind}:${id}`, nameKey(kind, card.title)]);
+						const rawRow = card.deleted ? null : ((await loadRow(def, id)) ?? null);
 						// row subset: scalars only, long strings truncated (bodies never dump)
-						const row = card.deleted ? null : Object.fromEntries(
-							Object.entries((await loadRow(def, id)) ?? {}).filter(([, v]) => ["string", "number", "boolean"].includes(typeof v))
+						const row = rawRow ? Object.fromEntries(
+							Object.entries(rawRow).filter(([, v]) => ["string", "number", "boolean"].includes(typeof v))
 								.map(([k, v]) => [k, typeof v === "string" && v.length > 200 ? v.slice(0, 200) + "…" : v]),
-						);
+						) : null;
 						// quotes: the priced lines ARE the payload — row is scalars-only by design,
 						// so attach a compact items + totals view
 						let quoteExtras: Record<string, unknown> = {};
@@ -2042,7 +2043,27 @@ export async function POST(event: APIEvent) {
 								};
 							}
 						}
-						result = { card, row, ...quoteExtras, ...personExtras, links };
+						// email drafts: the body IS the payload — revising via create_email_draft(draft_id)
+						// is gated on reading the draft first, so a 200-char preview dead-ends every edit.
+						// Full editable fields ride alongside the truncated generic row (same pattern as
+						// quote items / person dossier).
+						const draftExtras = kind === "email-draft" && rawRow ? {
+							draft: {
+								to: rawRow.toEmail,
+								cc: rawRow.ccEmail,
+								bcc: rawRow.bccEmail,
+								subject: rawRow.subject,
+								body: rawRow.body,
+								status: rawRow.status,
+								sendAt: rawRow.sendAt,
+								signature: rawRow.signature,
+								threadId: rawRow.threadId,
+								campaignCompanyId: rawRow.campaignCompanyId,
+								campaignStep: rawRow.campaignStep,
+								attachments: rawRow.attachments,
+							},
+						} : {};
+						result = { card, row, ...quoteExtras, ...personExtras, ...draftExtras, links };
 						break;
 					}
 					case "get_person": {

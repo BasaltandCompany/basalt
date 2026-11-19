@@ -1,6 +1,6 @@
 import { Title } from "@solidjs/meta";
 import { createAsync, revalidate, useAction, useSearchParams } from "@solidjs/router";
-import { For, Show, createSignal, createEffect, createMemo, onMount, onCleanup } from "solid-js";
+import { For, Show, createSignal, createEffect, createMemo, onMount, onCleanup, untrack } from "solid-js";
 import Layout from "~/components/Layout";
 import { VoiceLintPanel } from "~/components/VoiceLintPanel";
 import { LintedTextarea } from "~/components/LintedTextarea";
@@ -194,11 +194,13 @@ export default function AdminEmail() {
 			}
 		}, 700);
 	};
-	// opening a draft lints its current body once (edits re-lint via editDraft)
+	// opening a draft lints its current body once (edits re-lint via editDraft).
+	// lintDraft is untracked: it reads lintStale() inside setLintStale — tracked,
+	// that self-write re-queues this effect forever (stack overflow on open).
 	createEffect(() => {
 		const id = openDraft();
 		if (!id || draftLint()[id] !== undefined) return;
-		lintDraft(id, editBody()[id] ?? inbox()?.drafts.find((d) => d.id === id)?.body ?? "");
+		untrack(() => lintDraft(id, editBody()[id] ?? inbox()?.drafts.find((d) => d.id === id)?.body ?? ""));
 	});
 
 	// Linear/Superhuman trick: the pane paints from an in-memory thread cache
@@ -1246,9 +1248,19 @@ export default function AdminEmail() {
 								rows={12}
 							/>
 							<VoiceLintPanel result={draftLint()[d.id] ?? null} stale={lintStale()[d.id]} />
-							{/* footer is appended at send time — preview the variant that will land */}
-							<Show when={(editMeta()[d.id]?.signature ?? d.signature ?? "") !== "none"}>
-								<pre class="muted" style={{ "font-size": "11px", "white-space": "pre-wrap", margin: "0 0 8px", "font-family": "inherit", color: "#8a8375" }}>{`— Footer added on send —\n${SIGNATURES[(editMeta()[d.id]?.signature || (d.campaignCompanyId ? "plain" : "full")) as "full" | "plain"].plain}`}</pre>
+							{/* footer is appended at send time — preview the EXACT variant that will land:
+							    full renders the branded HTML block (the plain-text version read like no footer at all) */}
+							<Show when={(editMeta()[d.id]?.signature ?? d.signature ?? "") !== "none"} fallback={<div class="muted" style={{ "font-size": "11px", margin: "0 0 8px", color: "#8a8375" }}>— No footer (None selected) —</div>}>
+								<Show
+									when={(editMeta()[d.id]?.signature || (d.campaignCompanyId ? "plain" : "full")) === "full"}
+									fallback={
+										<pre class="muted" style={{ "font-size": "11px", "white-space": "pre-wrap", margin: "0 0 8px", "font-family": "inherit", color: "#8a8375", border: "1px dashed rgba(0,0,0,0.15)", padding: "8px", "border-radius": "4px" }}>{`— Footer added on send (plain) —\n${SIGNATURES.plain.plain}`}</pre>
+									}
+								>
+									<div class="muted" style={{ "font-size": "11px", margin: "0 0 4px", color: "#8a8375" }}>— Footer added on send (full) —</div>
+									{/* SIGNATURES.full.html is our own static markup — safe for innerHTML */}
+									<div style={{ margin: "0 0 8px", border: "1px dashed rgba(0,0,0,0.15)", padding: "8px", "border-radius": "4px", background: "#faf9f6" }} innerHTML={SIGNATURES.full.html} />
+								</Show>
 							</Show>
 							<div style={{ display: "flex", gap: "6px", "flex-wrap": "wrap", "align-items": "center", margin: "8px 0" }}>
 								{/* attachments ride the live row — frozen d would hide uploads that land via revalidate */}
@@ -1394,7 +1406,9 @@ export default function AdminEmail() {
 							style={{ width: "100%", "margin-bottom": "8px", padding: "8px", border: "1px solid rgba(0,0,0,0.12)", "font-family": "inherit", "font-size": "14px", "line-height": "1.5", "box-sizing": "border-box", resize: "vertical", display: "block" }}
 						/>
 						{/* footer is appended at send time — preview it where it will land */}
-						<pre class="muted" style={{ "font-size": "11px", "white-space": "pre-wrap", margin: "0 0 8px", "font-family": "inherit", color: "#8a8375" }}>{`— Footer added on send —\n${SIGNATURES.full.plain}`}</pre>
+						<div class="muted" style={{ "font-size": "11px", margin: "0 0 4px", color: "#8a8375" }}>— Footer added on send —</div>
+						{/* SIGNATURES.full.html is our own static markup — safe for innerHTML */}
+						<div style={{ margin: "0 0 8px", border: "1px dashed rgba(0,0,0,0.15)", padding: "8px", "border-radius": "4px", background: "#faf9f6" }} innerHTML={SIGNATURES.full.html} />
 						<Show when={composeFiles().length}>
 							<div style={{ display: "flex", gap: "6px", "flex-wrap": "wrap", "margin-bottom": "8px" }}>
 								<For each={composeFiles()}>
