@@ -1,6 +1,7 @@
 import type { APIEvent } from "@solidjs/start/server";
 import { eq, and, desc, inArray, sql, ilike, lte, isNotNull } from "drizzle-orm";
 import { hashKey } from "~/lib/crypto";
+import { supabaseService } from "~/lib/supabase";
 import { db } from "~/db";
 import { apiKeys, companies, outreachProspects, OUTREACH_STAGES, campaigns, campaignCompanies, videos, funnels, funnelRuns, funnelItems, funnelStageResults, funnelSchedules } from "~/db/schema";
 import { brainQuery, entityFacts } from "~/lib/brain/search";
@@ -195,6 +196,29 @@ async function resolveClient(name: string) {
 		)
 		.limit(1);
 	return company ?? null;
+}
+
+// OAuth apps live in Supabase Auth admin (not our Postgres) — see oauth-queries.ts.
+const OAUTH_AUTH_METHODS = ["none", "client_secret_basic", "client_secret_post"] as const;
+type OAuthAuthMethod = (typeof OAUTH_AUTH_METHODS)[number];
+
+/** redirect_uris from tool args → string[] (each must parse as a URL) or null. */
+function oauthRedirectUris(raw: unknown): string[] | null {
+	const uris = Array.isArray(raw) ? raw.map((u) => String(u).trim()).filter(Boolean) : [];
+	if (uris.length === 0) return null;
+	for (const uri of uris) {
+		try {
+			new URL(uri);
+		} catch {
+			return null;
+		}
+	}
+	return uris;
+}
+
+function oauthAuthMethod(raw: unknown): OAuthAuthMethod | null {
+	const m = String(raw ?? "none");
+	return (OAUTH_AUTH_METHODS as readonly string[]).includes(m) ? (m as OAuthAuthMethod) : null;
 }
 
 // ── Tool definitions ───────────────────────────────────────────────
@@ -1016,6 +1040,47 @@ chat_uuid: { type: "string" },
 			required: ["item_id", "stage", "verdict"],
 		},
 	},
+	{
+		name: "list_oauth_apps",
+		description:
+			"List every OAuth client app registered with Supabase Auth (name, client_id, redirect_uris, auth_method). Call first before update_oauth_app — read-before-write gate — and to look up client_ids.",
+		inputSchema: {
+			type: "object",
+			properties: { chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" } },
+		},
+	},
+	{
+		name: "create_oauth_app",
+		description:
+			"Register a new OAuth client app (Supabase Auth): name + redirect_uris (string[]) required; auth_method one of none|client_secret_basic|client_secret_post (default none = public/PKCE). client_secret is returned ONCE in the result — store it immediately.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				name: { type: "string" },
+				redirect_uris: { type: "array", items: { type: "string" }, description: "exact redirect URIs; web = https, mobile apps may use custom schemes" },
+				auth_method: { type: "string", enum: ["none", "client_secret_basic", "client_secret_post"] },
+				chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" },
+			},
+			required: ["name", "redirect_uris"],
+		},
+	},
+	{
+		name: "update_oauth_app",
+		description:
+			"Update an OAuth client: rename it, replace redirect_uris (WHOLE-LIST replace — pass the complete new list, anything omitted is dropped), or change auth_method. Pass client_id + only the fields changing. Read-before-write gate: list_oauth_apps first.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				client_id: { type: "string" },
+				name: { type: "string" },
+				redirect_uris: { type: "array", items: { type: "string" }, description: "complete replacement list" },
+				auth_method: { type: "string", enum: ["none", "client_secret_basic", "client_secret_post"] },
+				chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" },
+			},
+			required: ["client_id"],
+		},
+	},
+
 ] as const;
 
 
@@ -2629,6 +2694,95 @@ export async function POST(event: APIEvent) {
 						});
 						break;
 					}
+				case "list_oauth_apps": {
+					const { data, error } = await supabaseService().auth.admin.oauth.listClients();
+					if (error) {
+						result = { error: error.message };
+						break;
+					}
+					const apps = (data?.clients ?? []).map((c) => ({
+						client_id: c.client_id,
+						name: c.client_name,
+						redirect_uris: c.redirect_uris,
+						auth_method: c.token_endpoint_auth_method,
+						created_at: c.created_at,
+					}));
+					noteRead(readSession, apps.flatMap((a) => [`oauth_app:${a.client_id}`, nameKey("oauth_app", a.name)]));
+					result = { apps };
+					break;
+				}
+				case "create_oauth_app": {
+					const name = String(toolArgs.name ?? "").trim();
+					const uris = oauthRedirectUris(toolArgs.redirect_uris);
+					const authMethod = oauthAuthMethod(toolArgs.auth_method);
+					if (!name || !uris || !authMethod) {
+						result = {
+							error: [
+								!name ? "name is required" : null,
+								uris ? null : "redirect_uris (string[]) needs at least one URI that parses as a URL",
+								authMethod ? null : `auth_method must be one of: ${OAUTH_AUTH_METHODS.join(", ")}`,
+							]
+								.filter(Boolean)
+								.join("; "),
+						};
+						break;
+					}
+					const { data, error } = await supabaseService().auth.admin.oauth.createClient({
+						client_name: name,
+						redirect_uris: uris,
+						token_endpoint_auth_method: authMethod,
+					});
+					if (error || !data) {
+						result = { error: error?.message ?? "Failed to create OAuth app" };
+						break;
+					}
+					// client_secret is only ever returned at creation — surface it once
+					result = {
+						client_id: data.client_id,
+						client_secret: data.client_secret ?? null,
+						name,
+						redirect_uris: uris,
+						auth_method: authMethod,
+						note: "client_secret is returned ONLY here, once — store it now",
+					};
+					break;
+				}
+				case "update_oauth_app": {
+					const clientId = String(toolArgs.client_id ?? "");
+					if (!clientId) {
+						result = { error: "client_id is required — list_oauth_apps has ids" };
+						break;
+					}
+					const rg = requireRead(readSession, `oauth_app:${clientId}`, "call list_oauth_apps first — this edits a live OAuth app");
+					if (!rg.ok) {
+						result = rg;
+						break;
+					}
+					const update: { client_name?: string; redirect_uris?: string[]; token_endpoint_auth_method?: OAuthAuthMethod } = {};
+					let updateErr: string | null = null;
+					if (typeof toolArgs.name === "string" && toolArgs.name.trim()) update.client_name = toolArgs.name.trim();
+					if (toolArgs.redirect_uris !== undefined) {
+						const uris = oauthRedirectUris(toolArgs.redirect_uris);
+						if (!uris) updateErr = "redirect_uris (string[]) needs at least one URI that parses as a URL";
+						else update.redirect_uris = uris;
+					}
+					if (toolArgs.auth_method !== undefined) {
+						const m = oauthAuthMethod(toolArgs.auth_method);
+						if (!m) updateErr = `auth_method must be one of: ${OAUTH_AUTH_METHODS.join(", ")}`;
+						else update.token_endpoint_auth_method = m;
+					}
+					if (updateErr || Object.keys(update).length === 0) {
+						result = { error: updateErr ?? "nothing to update — pass name, redirect_uris, and/or auth_method" };
+						break;
+					}
+					const { data, error } = await supabaseService().auth.admin.oauth.updateClient(clientId, update);
+					if (error) {
+						result = { error: error.message };
+						break;
+					}
+					result = { client_id: data?.client_id ?? clientId, updated: update, note: "redirect_uris replaced the whole list" };
+					break;
+				}
 					default:
 						return rpcError(id, -32601, `Unknown tool: ${toolName}`);
 				}
