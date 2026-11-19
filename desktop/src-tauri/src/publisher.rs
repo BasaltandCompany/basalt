@@ -1,8 +1,10 @@
-// Runs the meeting-publisher job inside the app, replacing the launchd agent
-// (com.madcactus.meeting-publisher). One pass = spawn the bundled Bun sidecar
-// on the bundled tools/meeting-publisher/publish.ts, with config + state in
-// the app data dir. The script owns all business logic, retries and its own
-// state/log; this module only schedules, configures and reports.
+// Anarlog → dashboard meeting publisher, native Rust (no Bun sidecar).
+// Reads hyprnote's local app.db, transforms transcripts into speaker blocks,
+// and uploads draft + audio to the dashboard API. One pass per minute; the
+// tray can trigger a pass now. State/config live in the app data dir using
+// the SAME file formats as the old bun script (pushed.txt / attempts.tsv /
+// log), so existing installs keep their dedupe history.
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -11,6 +13,8 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
+use chrono::Utc;
+use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
@@ -18,11 +22,45 @@ const PASS_EVERY: Duration = Duration::from_secs(60);
 const OLD_STATE: &str = ".madcactus/meeting-publisher/state";
 const OLD_PLIST: &str = "Library/LaunchAgents/com.madcactus.meeting-publisher.plist";
 
+// business constants — ported 1:1 from the original bun script
+// (tools/meeting-publisher, deleted; git history has it)
+const MIN_WORDS: i64 = 2000; // less than this = note/chitchat, not a meeting
+const PAUSE_MS: i64 = 1500; // utterance split: silence gap
+const MERGE_GAP_MS: i64 = 5000; // merge consecutive same-speaker utterances
+const MAX_BLOCK_WORDS: usize = 400;
+const MAX_ATTEMPTS: u32 = 3;
+const MAX_AUDIO_BYTES: u64 = 45 * 1024 * 1024; // server's re-encode threshold
+const CLIENTS_TIMEOUT: Duration = Duration::from_secs(30);
+const UPLOAD_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+
 #[derive(Serialize, Deserialize)]
 struct Config {
 	url: String,
 	#[serde(rename = "apiKey")]
 	api_key: String,
+}
+
+#[derive(Deserialize)]
+struct Client {
+	name: String,
+	#[serde(default)]
+	aliases: Vec<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct Word {
+	text: String,
+	start_ms: i64,
+	end_ms: i64,
+	channel: i64,
+}
+
+#[derive(serde::Serialize)]
+struct Block {
+	speaker: String,
+	start_ms: i64,
+	end_ms: i64,
+	text: String,
 }
 
 /// Tray → pass loop "run now" signal.
@@ -131,7 +169,413 @@ pub fn spawn_loop(app: AppHandle) {
 	});
 }
 
+// ── the pass ────────────────────────────────────────────────────────
+
+fn db_path() -> PathBuf {
+	home().join("Library/Application Support/hyprnote/app.db")
+}
+
+/// Readonly when possible. Falls back to read-write (SELECT-only) because a
+/// readonly connection cannot create the WAL -shm file when Anarlog is
+/// closed — the probe query catches it, same trick the bun script used.
+fn open_db() -> Result<Connection, String> {
+	let p = db_path();
+	if !p.exists() {
+		return Err(format!("Anarlog database not found at {}", p.display()));
+	}
+	Connection::open_with_flags(&p, OpenFlags::SQLITE_OPEN_READ_ONLY)
+		.and_then(|c| {
+			c.query_row("SELECT 1", [], |_| Ok(()))?;
+			Ok(c)
+		})
+		.or_else(|_| Connection::open(&p))
+		.map_err(|e| e.to_string())
+}
+
+/// Finished meetings: real transcript, quiet ≥10 min, recent, batch row or
+/// quiet ≥45 min. julianday() because ISO 'T' timestamps never string-match
+/// datetime('now').
+const READY_SQL: &str = "
+	SELECT s.id
+	FROM sessions s
+	JOIN transcripts t ON t.session_id = s.id AND t.deleted_at IS NULL
+	GROUP BY s.id
+	HAVING MAX(length(t.words_json)) > ?1
+		AND julianday(MAX(t.updated_at)) < julianday('now', '-10 minutes')
+		AND julianday(s.created_at) > julianday('now', '-7 days')
+		AND (
+			MAX(CASE WHEN t.source = 'batch_transcription' THEN 1 ELSE 0 END) = 1
+			OR julianday(MAX(t.updated_at)) < julianday('now', '-45 minutes')
+		)";
+
+fn ready_sessions(db: &Connection) -> Vec<String> {
+	let mut stmt = match db.prepare(READY_SQL) {
+		Ok(s) => s,
+		Err(e) => {
+			log::error!("ready-sessions query failed: {e}");
+			return vec![];
+		}
+	};
+	let rows = stmt.query_map([MIN_WORDS], |r| r.get::<_, String>(0));
+	rows.map(|it| it.filter_map(Result::ok).collect())
+		.unwrap_or_default()
+}
+
+fn session_title(db: &Connection, id: &str) -> String {
+	db.query_row("SELECT title FROM sessions WHERE id = ?1", [id], |r| {
+		r.get::<_, Option<String>>(0)
+	})
+	.ok()
+	.flatten()
+	.unwrap_or_else(|| "Untitled Meeting".into())
+}
+
+/// Which client (+ token) the title matches, or None = don't push.
+/// Match: title contains the client name or any pseudonym (case-insensitive).
+fn match_client<'a>(title: &str, clients: &'a [Client]) -> Option<(&'a Client, String)> {
+	let t = title.to_lowercase();
+	for c in clients {
+		let tokens = std::iter::once(&c.name).chain(c.aliases.iter());
+		for token in tokens.filter(|t| !t.is_empty()) {
+			if t.contains(&token.to_lowercase()) {
+				return Some((c, token.clone()));
+			}
+		}
+	}
+	None
+}
+
+/// Flatten Anarlog's ProseMirror memo JSON to plain text ("" if absent).
+fn memo_to_text(raw: Option<&str>) -> String {
+	let Some(raw) = raw else { return String::new() };
+	let Ok(doc) = serde_json::from_str::<serde_json::Value>(raw) else {
+		return String::new(); // not JSON → not a memo
+	};
+	if doc.get("type").and_then(|t| t.as_str()) != Some("doc") {
+		return String::new();
+	}
+	collapse_newlines(walk_node(&doc).trim())
+}
+
+fn walk_node(node: &serde_json::Value) -> String {
+	match node.get("type").and_then(|t| t.as_str()) {
+		Some("text") => node
+			.get("text")
+			.and_then(|t| t.as_str())
+			.unwrap_or("")
+			.to_string(),
+		_ => {
+			let inner: String = node
+				.get("content")
+				.and_then(|c| c.as_array())
+				.map(|arr| arr.iter().map(walk_node).collect())
+				.unwrap_or_default();
+			let blocky = [
+				"paragraph",
+				"listItem",
+				"heading",
+				"blockquote",
+				"codeBlock",
+			]
+			.contains(&node.get("type").and_then(|t| t.as_str()).unwrap_or(""));
+			if blocky {
+				format!("{inner}\n")
+			} else {
+				inner
+			}
+		}
+	}
+}
+
+/// `\n{3,}` → `\n\n` without pulling in a regex crate.
+fn collapse_newlines(s: &str) -> String {
+	let mut out = String::with_capacity(s.len());
+	let mut run = 0usize;
+	for ch in s.chars() {
+		if ch == '\n' {
+			run += 1;
+			if run <= 2 {
+				out.push(ch);
+			}
+		} else {
+			run = 0;
+			out.push(ch);
+		}
+	}
+	out
+}
+
+/// words → utterances (channel/pause split) → merged speaker blocks.
+/// Mirrors meetings-cli's utterance algorithm; labels are `Speaker N`.
+fn build_blocks(words: &[Word]) -> Vec<Block> {
+	if words.is_empty() {
+		return vec![];
+	}
+
+	// utterances: split on channel change or gap > PAUSE_MS
+	let mut utterances: Vec<Vec<&Word>> = vec![vec![&words[0]]];
+	for w in &words[1..] {
+		let cur = utterances.last_mut().unwrap();
+		let prev = *cur.last().unwrap();
+		if w.channel != prev.channel || w.start_ms - prev.end_ms > PAUSE_MS {
+			utterances.push(vec![w]);
+		} else {
+			cur.push(w);
+		}
+	}
+
+	// blocks: merge consecutive same-channel utterances
+	let mut blocks: Vec<(i64, i64, i64, String)> = vec![]; // (channel, start, end, text)
+	for chunk in utterances {
+		let text: String = chunk
+			.iter()
+			.map(|w| w.text.as_str())
+			.collect::<Vec<_>>()
+			.join("")
+			.split_whitespace()
+			.collect::<Vec<_>>()
+			.join(" ");
+		if text.is_empty() {
+			continue;
+		}
+		let utt = (
+			chunk[0].channel,
+			chunk[0].start_ms,
+			chunk.last().unwrap().end_ms,
+			text.clone(),
+		);
+		if let Some(last) = blocks.last_mut() {
+			let joined_words =
+				last.3.split(' ').count() + text.split(' ').count();
+			if last.0 == utt.0 && utt.1 - last.2 <= MERGE_GAP_MS && joined_words <= MAX_BLOCK_WORDS {
+				last.3 = format!("{} {}", last.3, text);
+				last.2 = utt.2;
+				continue;
+			}
+		}
+		blocks.push(utt);
+	}
+	blocks
+		.into_iter()
+		.map(|(ch, start, end, text)| Block {
+			speaker: format!("Speaker {ch}"),
+			start_ms: start,
+			end_ms: end,
+			text,
+		})
+		.collect()
+}
+
+fn state_log(state: &Path, msg: &str) {
+	let line = format!("{} {msg}\n", Utc::now().format("%Y-%m-%dT%H:%M:%S"));
+	use std::io::Write;
+	if let Ok(mut f) = std::fs::OpenOptions::new()
+		.create(true)
+		.append(true)
+		.open(state.join("log"))
+	{
+		let _ = f.write_all(line.as_bytes());
+	}
+	log::info!("{msg}");
+}
+
+fn fetch_clients(cfg: &Config) -> Result<Vec<Client>, String> {
+	let url = format!("{}/api/clients", cfg.url.trim_end_matches('/'));
+	let res = reqwest::blocking::Client::new()
+		.get(&url)
+		.timeout(CLIENTS_TIMEOUT)
+		.bearer_auth(&cfg.api_key)
+		.send()
+		.and_then(|r| r.error_for_status())
+		.map_err(|e| format!("fetching clients from {url} failed: {e} — pushing nothing this pass"))?;
+	let text = res.text().map_err(|e| e.to_string())?;
+	#[derive(serde::Deserialize)]
+	struct ClientsResp {
+		#[serde(default)]
+		clients: Vec<Client>,
+	}
+	serde_json::from_str::<ClientsResp>(&text)
+		.map(|r| r.clients)
+		.map_err(|e| format!("clients response not JSON: {e}"))
+}
+
+fn load_pushed(state: &Path) -> HashSet<String> {
+	fs::read_to_string(state.join("pushed.txt"))
+		.map(|s| s.lines().map(|l| l.trim().to_string()).collect())
+		.unwrap_or_default()
+}
+
+fn mark_pushed(state: &Path, id: &str) {
+	use std::io::Write;
+	if let Ok(mut f) = std::fs::OpenOptions::new()
+		.create(true)
+		.append(true)
+		.open(state.join("pushed.txt"))
+	{
+		let _ = writeln!(f, "{id}");
+	}
+}
+
+fn load_attempts(state: &Path) -> BTreeMap<String, u32> {
+	fs::read_to_string(state.join("attempts.tsv"))
+		.map(|s| {
+			s.lines()
+				.filter_map(|l| {
+					let (sid, n) = l.split_once('\t')?;
+					Some((sid.to_string(), n.trim().parse().ok()?))
+				})
+				.collect()
+		})
+		.unwrap_or_default()
+}
+
+fn save_attempts(state: &Path, counts: &BTreeMap<String, u32>) {
+	let body: String = counts
+		.iter()
+		.map(|(sid, n)| format!("{sid}\t{n}\n"))
+		.collect();
+	let _ = fs::write(state.join("attempts.tsv"), body);
+}
+
+struct TRow {
+	words_json: String,
+	started_at_ms: i64,
+	memo: Option<String>,
+}
+
+/// final transcript row: batch beats live; latest wins within each
+fn final_transcript(db: &Connection, sid: &str) -> Option<TRow> {
+	db.query_row(
+		"SELECT words_json, started_at_ms, memo FROM transcripts
+		 WHERE session_id = ?1 AND deleted_at IS NULL AND words_json IS NOT NULL
+		 ORDER BY CASE source WHEN 'batch_transcription' THEN 0 ELSE 1 END,
+				updated_at DESC LIMIT 1",
+		[sid],
+		|r| {
+			Ok(TRow {
+				words_json: r.get(0)?,
+				started_at_ms: r.get(1)?,
+				memo: r.get(2)?,
+			})
+		},
+	)
+	.ok()
+}
+
+/// Push one session. Ok(()) on success (including the typed-note skip).
+fn publish(db: &Connection, cfg: &Config, state: &Path, sid: &str) -> Result<(), String> {
+	let title = session_title(db, sid);
+	let trow = final_transcript(db, sid).ok_or("no transcript")?;
+	let words: Vec<Word> = serde_json::from_str(&trow.words_json)
+		.map_err(|e| format!("words_json parse: {e}"))?;
+
+	let audio = home()
+		.join("Library/Application Support/hyprnote/sessions")
+		.join(sid)
+		.join("audio.mp3");
+	if !audio.exists() {
+		// no recording on disk → typed note, not a meeting; push nothing
+		mark_pushed(state, sid);
+		state_log(state, &format!("{sid} skipped (no audio file — not a recorded meeting)"));
+		return Ok(());
+	}
+
+	// Fly's proxy rejects bodies ≥100MB before the dashboard's own re-encode
+	// can run, and 45-90MB uploads stall out mid-flight anyway — so downmix
+	// anything over the server's 45MB re-encode threshold to mono AAC sized
+	// to land under it (one transcode, not two).
+	let mut audio_path = audio.clone();
+	if audio.metadata().map_err(|e| e.to_string())?.len() > MAX_AUDIO_BYTES {
+		let tmp = std::env::temp_dir().join(format!("{sid}-mono.m4a"));
+		let dur: f64 = String::from_utf8_lossy(
+			&Command::new("ffprobe")
+				.args(["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0"])
+				.arg(&audio)
+				.output()
+				.map_err(|e| format!("downmix failed (is ffmpeg installed?): {e}"))?
+				.stdout,
+		)
+		.trim()
+		.parse()
+		.map_err(|_| "downmix failed: ffprobe returned no duration".to_string())?;
+		// fit under 40MB with headroom; floor at 16k so audio stays intelligible
+		let bitrate = ((40.0 * 1024.0 * 1024.0 * 8.0) / dur / 1000.0).floor()
+			.clamp(16.0, 48.0) as i64;
+		Command::new("ffmpeg")
+			.args(["-y", "-i"])
+			.arg(&audio)
+			.args(["-ac", "1", "-b:a"])
+			.arg(format!("{bitrate}k"))
+			.arg(&tmp)
+			.output()
+			.map_err(|e| format!("downmix failed (is ffmpeg installed?): {e}"))?;
+		audio_path = tmp;
+		state_log(
+			state,
+			&format!("{sid} downmixed {dur:.0}s to mono {bitrate}k"),
+		);
+	}
+
+	let blocks = build_blocks(&words);
+	if blocks.is_empty() {
+		return Err("no speakable blocks".into());
+	}
+
+	// "Knowledge Transfer — Oct 18" (UTC), same as the old script
+	let started = chrono::DateTime::from_timestamp_millis(trow.started_at_ms)
+		.ok_or("bad started_at_ms")?;
+	let full_title = format!("{} — {}", title, started.format("%b %-d"));
+	let content = blocks
+		.iter()
+		.map(|b| format!("{}: {}", b.speaker, b.text))
+		.collect::<Vec<_>>()
+		.join("\n\n");
+	let memo = memo_to_text(trow.memo.as_deref());
+
+	let mut form = reqwest::blocking::multipart::Form::new()
+		.text("visibility", "draft")
+		.text("title", full_title);
+	if !memo.is_empty() {
+		form = form.text("description", memo);
+	}
+	form = form
+		.text("content", content)
+		.text("transcript_json", serde_json::to_string(&blocks).unwrap_or_default())
+		.part(
+			"audio",
+			reqwest::blocking::multipart::Part::file(&audio_path)
+				.map_err(|e| format!("audio read failed: {e}"))?
+				.file_name("audio.mp3")
+				.mime_str("audio/mpeg")
+				.map_err(|e| e.to_string())?,
+		);
+
+	let url = format!("{}/api/upload-transcript", cfg.url.trim_end_matches('/'));
+	let res = reqwest::blocking::Client::new()
+		.post(&url)
+		.timeout(UPLOAD_TIMEOUT)
+		.bearer_auth(&cfg.api_key)
+		.multipart(form)
+		.send()
+		.map_err(|e| format!("upload failed: {e}"))?;
+	let status = res.status();
+	let body = res.text().unwrap_or_default();
+	let ok = status == reqwest::StatusCode::CREATED
+		&& serde_json::from_str::<serde_json::Value>(&body)
+			.ok()
+			.and_then(|v| v.get("ok").and_then(|b| b.as_bool()))
+			== Some(true);
+	if ok {
+		return Ok(());
+	}
+	let snippet: String = body.chars().take(200).collect();
+	Err(format!("upload failed: http={status} {snippet}"))
+}
+
 fn run_pass(app: &AppHandle) {
+	let state = state_dir(app);
+	let _ = fs::create_dir_all(&state);
+
 	let config = match load_config(app) {
 		Some(c) => c,
 		None => {
@@ -142,29 +586,64 @@ fn run_pass(app: &AppHandle) {
 			return;
 		}
 	};
-	let (Some(bun), Some(script)) = (bun_path(), publish_script(app)) else {
-		log::error!("bun sidecar or publish.ts resource missing — build the app via scripts/fetch-bun.sh");
-		return;
+	let db = match open_db() {
+		Ok(db) => db,
+		Err(e) => {
+			log::error!("{e}");
+			return;
+		}
+	};
+	// dashboard unreachable → fail closed, retry next pass
+	let clients = match fetch_clients(&config) {
+		Ok(c) => c,
+		Err(e) => {
+			log::error!("{e}");
+			return;
+		}
 	};
 
-	match Command::new(&bun)
-		.arg(&script)
-		.env("MADCACTUS_URL", &config.url)
-		.env("MADCACTUS_API_KEY", &config.api_key)
-		.env("PUBLISHER_STATE_DIR", state_dir(app))
-		// GUI apps get a minimal PATH — the script shells out to ffprobe (brew).
-		.env("PATH", "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin")
-		.current_dir(data_dir(app))
-		.output()
-	{
-		// The script logs its own activity to state/log; only surface failures.
-		Ok(o) if o.status.success() => {}
-		Ok(o) => log::error!(
-			"publish.ts exited {:?}: {}",
-			o.status.code(),
-			String::from_utf8_lossy(&o.stderr).trim()
-		),
-		Err(e) => log::error!("spawning publisher: {e}"),
+	let pushed = load_pushed(&state);
+	let mut attempts = load_attempts(&state);
+
+	for sid in ready_sessions(&db) {
+		if pushed.contains(&sid) {
+			continue;
+		}
+		let title = session_title(&db, &sid);
+		let Some((client, via)) = match_client(&title, &clients) else {
+			continue; // default-deny: not a client meeting
+		};
+
+		let n = attempts.get(&sid).copied().unwrap_or(0);
+		if n >= MAX_ATTEMPTS {
+			let line = format!(
+				"{} {sid} gave up after {MAX_ATTEMPTS} attempts\n",
+				Utc::now().format("%Y-%m-%dT%H:%M:%S")
+			);
+			use std::io::Write;
+			if let Ok(mut f) = std::fs::OpenOptions::new()
+				.create(true)
+				.append(true)
+				.open(state.join("failed.log"))
+			{
+				let _ = f.write_all(line.as_bytes());
+			}
+			continue;
+		}
+
+		attempts.insert(sid.clone(), n + 1);
+		save_attempts(&state, &attempts);
+		state_log(
+			&state,
+			&format!("{sid} pushing \"{title}\" → {} via \"{via}\" (attempt {})", client.name, n + 1),
+		);
+		match publish(&db, &config, &state, &sid) {
+			Ok(()) => {
+				mark_pushed(&state, &sid);
+				state_log(&state, &format!("{sid} pushed"));
+			}
+			Err(e) => state_log(&state, &format!("{sid} ERROR: {e}")),
+		}
 	}
 }
 
@@ -173,51 +652,76 @@ fn load_config(app: &AppHandle) -> Option<Config> {
 	serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
 }
 
-/** Sidecar lands next to the main binary. Prod bundles use the
- *  triple-suffixed name; `tauri dev` copies it in as plain `bun`. */
-fn bun_path() -> Option<PathBuf> {
-	let dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
-	let plain = if cfg!(windows) { "bun.exe" } else { "bun" };
-	[dir.join(bun_sidecar()), dir.join(plain)]
-		.into_iter()
-		.find(|p| p.exists())
-}
+// ── tests: ported logic mirrors the bun script 1:1 ──────────────────
 
-fn bun_sidecar() -> &'static str {
-	#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-	{
-		"bun-aarch64-apple-darwin"
-	}
-	#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-	{
-		"bun-x86_64-apple-darwin"
-	}
-	#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-	{
-		"bun-x86_64-pc-windows-msvc.exe"
-	}
-	#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-	{
-		"bun-x86_64-unknown-linux-gnu"
-	}
-	#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-	{
-		"bun-aarch64-unknown-linux-gnu"
-	}
-}
+#[cfg(test)]
+mod tests {
+	use super::*;
 
-/** Bundled flat at resource_dir()/publish.ts (map-form resource). Dev
- *  fallback runs it straight from the repo checkout. */
-fn publish_script(app: &AppHandle) -> Option<PathBuf> {
-	if let Ok(rd) = app.path().resource_dir() {
-		let p = rd.join("publish.ts");
-		if p.exists() {
-			return Some(p);
-		}
+	fn word(text: &str, start: i64, end: i64, channel: i64) -> Word {
+		Word { text: text.into(), start_ms: start, end_ms: end, channel }
 	}
-	Path::new(env!("CARGO_MANIFEST_DIR"))
-		.join("../../tools/meeting-publisher/publish.ts")
-		.canonicalize()
-		.ok()
-		.filter(|p| p.is_file())
+
+	#[test]
+	fn blocks_split_on_pause_and_channel_then_merge() {
+		// Speaker 0 says hi (fast), 3.5s gap still merges (≤ MERGE_GAP_MS),
+		// then channel flips → new speaker. Real Anarlog words carry their
+		// own trailing spaces — the script joins with "" then collapses \s+.
+		let words = vec![
+			word("Hello ", 0, 500, 0),
+			word("there ", 600, 1000, 0),
+			word("More ", 4500, 5000, 0), // 3.5s gap → same block
+			word("Hi", 6000, 6500, 1),   // channel change → new block
+		];
+		let b = build_blocks(&words);
+		assert_eq!(b.len(), 2);
+		assert_eq!(b[0].speaker, "Speaker 0");
+		assert_eq!(b[0].text, "Hello there More");
+		assert_eq!(b[0].end_ms, 5000);
+		assert_eq!(b[1].speaker, "Speaker 1");
+	}
+
+	#[test]
+	fn long_gap_starts_new_block() {
+		let words = vec![
+			word("First", 0, 1000, 0),
+			word("Second", 0 + 1000 + MERGE_GAP_MS + 1, 0 + 2000 + MERGE_GAP_MS + 1, 0),
+		];
+		let b = build_blocks(&words);
+		assert_eq!(b.len(), 2);
+	}
+
+	#[test]
+	fn memo_walk_flattens_prosemirror() {
+		let memo = r#"{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Agenda:"},{"type":"text","text":" pricing"}]},{"type":"paragraph","content":[{"type":"text","text":"Next steps discussed"}]}]}"#;
+		assert_eq!(memo_to_text(Some(memo)), "Agenda: pricing\nNext steps discussed");
+		assert_eq!(memo_to_text(None), "");
+		assert_eq!(memo_to_text(Some("not json")), "");
+	}
+
+	#[test]
+	fn client_match_is_case_insensitive_and_uses_aliases() {
+		let clients = vec![
+			Client { name: "BCW Supplies".into(), aliases: vec!["B.C.W.".into()] },
+			Client { name: "Acme".into(), aliases: vec![] },
+		];
+		let (c, via) = match_client("bcw supplies site visit", &clients).unwrap();
+		assert_eq!(c.name, "BCW Supplies");
+		assert_eq!(via, "BCW Supplies");
+		let (c, via) = match_client("meeting re: b.c.w. rollout", &clients).unwrap();
+		assert_eq!(c.name, "BCW Supplies");
+		assert_eq!(via, "B.C.W.");
+		assert!(match_client("random hangout", &clients).is_none());
+	}
+
+	#[test]
+	fn attempts_roundtrip() {
+		let dir = std::env::temp_dir().join(format!("pub-test-{}", std::process::id()));
+		fs::create_dir_all(&dir).unwrap();
+		let mut m = load_attempts(&dir);
+		m.insert("s1".into(), 2);
+		save_attempts(&dir, &m);
+		assert_eq!(load_attempts(&dir).get("s1"), Some(&2));
+		let _ = fs::remove_dir_all(&dir);
+	}
 }

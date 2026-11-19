@@ -6,7 +6,8 @@ Mad Cactus monorepo.
 | --- | --- | --- |
 | `web/` | The whole site — marketing, app (`/admin`), live Cactus Dispatch issues (SSR from DB) — served at madcactus.org / basalt.ac | SolidStart + Nitro, Postgres (Supabase), deployed to Fly (`fly deploy` from `web/`) |
 | `supabase/` | DB config, migrations, seed data | Supabase |
-| `tools/` | Meeting publisher service | Bun |
+| `tools/` | Personal automation notes (jobs moved into the desktop app) | — |
+| `desktop/` | Basalt Desktop — Tauri shell for `/admin` + native Anarlog meeting sync (Rust) | Rust/Tauri |
 
 ## Dashboard quickstart
 
