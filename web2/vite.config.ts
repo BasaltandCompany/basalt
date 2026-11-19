@@ -11,6 +11,7 @@ export default defineConfig({
 		solid({
 			start: {
 				middleware: "./src/middleware.ts",
+				serverSetup: "./src/server-setup.ts",
 			},
 			ssr: true,
 			serverFunctions: true,

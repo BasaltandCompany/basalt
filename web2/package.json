@@ -9,9 +9,11 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
+		"@kobalte/core": "2.0.0-alpha.4",
 		"@solidjs/meta": "^2.0.0",
 		"@solidjs/router": "^2.0.0",
 		"@solidjs/web": "^2.0.3",
+		"cmdk-solid": "2.0.0-rc.0",
 		"solid-js": "^2.0.3"
 	},
 	"devDependencies": {
