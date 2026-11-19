@@ -5,14 +5,15 @@ import type { APIEvent } from "@solidjs/start/server";
 import { desc, eq, count } from "drizzle-orm";
 import { db } from "~/db";
 import { funnelItems, funnelRuns, funnels } from "~/db/schema";
-import { ensureFreightFunnel, ensureMepFunnel, funnelAuthed } from "~/lib/funnels";
+import { ensureFreightFunnel, ensureMepFunnel } from "~/lib/funnels";
+import { funnelAuthed } from "~/lib/funnel-auth";
 
 function json(body: unknown, status = 200) {
 	return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
 export const GET = async (event: APIEvent) => {
-	if (!(await funnelAuthed(event.request))) return json({ error: "Unauthorized" }, 401);
+	if (!(await (event.request))) return json({ error: "Unauthorized" }, 401);
 	await ensureFreightFunnel();
 	await ensureMepFunnel();
 	const [funnelRows, runRows] = await Promise.all([
@@ -43,7 +44,7 @@ export const GET = async (event: APIEvent) => {
 };
 
 export const POST = async (event: APIEvent) => {
-	if (!(await funnelAuthed(event.request))) return json({ error: "Unauthorized" }, 401);
+	if (!(await (event.request))) return json({ error: "Unauthorized" }, 401);
 	const body = (await event.request.json().catch(() => ({}))) as { funnelId?: string; source?: string; note?: string };
 	if (!body.funnelId) return json({ error: "funnelId required" }, 400);
 	const [funnel] = await db.select({ id: funnels.id }).from(funnels).where(eq(funnels.id, body.funnelId)).limit(1);

@@ -2,8 +2,6 @@
 // and the promote/un-approve moves shared by the API routes.
 import { and, eq, ilike, inArray, sql } from "drizzle-orm";
 import { db } from "~/db";
-import { checkApiKey } from "~/lib/api-key";
-import { getAuthedClient } from "~/lib/session";
 import {
 	campaigns,
 	entityLinks,
@@ -34,10 +32,6 @@ export const FREIGHT_STAGES: FunnelStage[] = [
 ];
 
 /** Funnels API accepts an admin session (UI) or an mc_ API key (scripts/agents). */
-export async function funnelAuthed(request: Request) {
-	return (await checkApiKey(request)) || (await getAuthedClient()) !== null;
-}
-
 export type ImportRow = {
 	companyName?: string;
 	city?: string | null;

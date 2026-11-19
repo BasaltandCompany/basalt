@@ -1,10 +1,11 @@
 // Stage queue — items with all earlier stages passed and this stage missing.
 // GET /api/funnels/runs/:id/queue?stage=headcount → { stage, items }
 import type { APIEvent } from "@solidjs/start/server";
-import { funnelAuthed, getQueue } from "~/lib/funnels";
+import { getQueue } from "~/lib/funnels";
+import { funnelAuthed } from "~/lib/funnel-auth";
 
 export const GET = async (event: APIEvent) => {
-	if (!(await funnelAuthed(event.request))) {
+	if (!(await (event.request))) {
 		return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { "Content-Type": "application/json" } });
 	}
 	const stage = new URL(event.request.url).searchParams.get("stage") ?? "";
