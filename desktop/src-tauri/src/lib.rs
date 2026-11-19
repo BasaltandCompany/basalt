@@ -9,8 +9,8 @@ use tauri::{
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_opener::OpenerExt;
 
-const ADMIN_URL: &str = "https://madcactus-dashboard.fly.dev/admin";
-const ALLOWED_HOST: &str = "madcactus-dashboard.fly.dev";
+const ADMIN_URL: &str = "https://basalt.ac/admin";
+const ALLOWED_HOST: &str = "basalt.ac";
 
 fn show_main(app: &tauri::AppHandle) {
   if let Some(win) = app.get_webview_window("main") {
@@ -44,7 +44,7 @@ pub fn run() {
       let handle = app.handle().clone();
       let url: tauri::Url = ADMIN_URL.parse().expect("valid admin url");
       WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
-        .title("aspectrr Admin")
+        .title("Basalt Desktop")
         .inner_size(1400.0, 900.0)
         // Kill the rubber-band bounce so it feels like an app pane, not a page.
         .initialization_script(
@@ -59,14 +59,14 @@ pub fn run() {
         })
         .build()?;
 
-      let open = MenuItem::with_id(app, "open", "Open aspectrr Admin", true, None::<&str>)?;
+      let open = MenuItem::with_id(app, "open", "Open Basalt Desktop", true, None::<&str>)?;
       let sync = MenuItem::with_id(app, "sync", "Sync meetings now", true, None::<&str>)?;
       let logs = MenuItem::with_id(app, "logs", "Open data folder", true, None::<&str>)?;
-      let quit = MenuItem::with_id(app, "quit", "Quit aspectrr Admin", true, None::<&str>)?;
+      let quit = MenuItem::with_id(app, "quit", "Quit Basalt Desktop", true, None::<&str>)?;
       let menu = Menu::with_items(app, &[&open, &sync, &logs, &quit])?;
       let tray = TrayIconBuilder::with_id("main-tray")
         .icon(app.default_window_icon().expect("default window icon").clone())
-        .tooltip("aspectrr Admin")
+        .tooltip("Basalt Desktop")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id.as_ref() {
           "open" => show_main(app),
