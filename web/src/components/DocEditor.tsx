@@ -8,6 +8,7 @@ import { getDocQuery, getDocStatsQuery } from "~/lib/docs-queries";
 import { computeBreaks } from "~/lib/doc-pages";
 import { VoiceLintPanel } from "~/components/VoiceLintPanel";
 import { docSurface, type LintResult } from "~/lib/voice-lint";
+import { createRemoteSync } from "~/lib/live-merge";
 import { Button, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@basaltac/ui";
 import SelectField from "~/components/select-field";
 
@@ -60,6 +61,28 @@ export const DocEditor = (props: { id: string; doc: NonNullable<Awaited<ReturnTy
 	const [publishedAt, setPublishedAt] = createSignal(doc().publishedAt?.toISOString() ?? null);
 	const [schedFor, setSchedFor] = createSignal<string | null>(doc().scheduledFor?.toISOString() ?? null);
 	const [publishError, setPublishError] = createSignal(doc().publishError ?? null);
+	// live agent-edit ingestion (see lib/live-merge): the /api/changes poll
+	// refetches the doc query, and agent edits apply in place — never over
+	// unsaved local typing; the note fires only on a true conflict
+	const [liveNote, setLiveNote] = createSignal("");
+	let liveNoteTimer: ReturnType<typeof setTimeout> | undefined;
+	const note = (msg: string) => {
+		setLiveNote(msg);
+		clearTimeout(liveNoteTimer);
+		liveNoteTimer = setTimeout(() => setLiveNote(""), 8000);
+	};
+	const bodySync = createRemoteSync({
+		remote: () => doc().markdown,
+		local: markdown,
+		setLocal: (v) => setMarkdown(v), // LexicalDocEditor re-imports on prop change (echo-guarded)
+		onApplied: () => note("an agent just edited this doc — updated here"),
+		onConflict: () => note("an agent just edited this doc — your unsaved changes kept (theirs is in History)"),
+	});
+	const statusSync = createRemoteSync({
+		remote: () => doc().status,
+		local: docStatus,
+		setLocal: (v) => setDocStatus(v),
+	});
 	const [schedInput, setSchedInput] = createSignal("");
 	const [firstComment, setFirstComment] = createSignal("");
 	const [channel, setChannel] = createSignal<"email+web" | "web">(doc().publishChannel ?? "email+web");
@@ -246,6 +269,7 @@ export const DocEditor = (props: { id: string; doc: NonNullable<Awaited<ReturnTy
 		});
 		if (res.ok) {
 			setVerNum(((await res.json()) as { version: number }).version);
+			bodySync.markSynced(md);
 			setStatus(`saved ${new Date().toLocaleTimeString()}`);
 			if (showHistory()) void loadVersions();
 		} else {
@@ -272,6 +296,7 @@ export const DocEditor = (props: { id: string; doc: NonNullable<Awaited<ReturnTy
 		const r = await post(props.id, { op: "schedule", scheduledFor: when.toISOString(), firstComment: firstComment(), channel: channel() });
 		if (r.ok) {
 			setDocStatus("scheduled");
+			statusSync.markSynced("scheduled");
 			setSchedFor(r.scheduledFor ?? when.toISOString());
 			setPublishError(null);
 			setStatus(`scheduled for ${when.toLocaleString()}`);
@@ -282,6 +307,7 @@ export const DocEditor = (props: { id: string; doc: NonNullable<Awaited<ReturnTy
 		const r = await post(props.id, { op: "unschedule" });
 		if (r.ok) {
 			setDocStatus("final");
+			statusSync.markSynced("final");
 			setSchedFor(null);
 			setStatus("unscheduled");
 		} else setStatus(r.error ?? "unschedule failed");
@@ -294,6 +320,7 @@ export const DocEditor = (props: { id: string; doc: NonNullable<Awaited<ReturnTy
 		const r = await post(props.id, { op: "schedule", scheduledFor: new Date().toISOString(), channel: channel() });
 		if (r.ok) {
 			setDocStatus("scheduled");
+			statusSync.markSynced("scheduled");
 			setSchedFor(r.scheduledFor ?? new Date().toISOString());
 			setPublishError(null);
 			setStatus("publishing — goes out within 60 seconds");
@@ -317,6 +344,7 @@ export const DocEditor = (props: { id: string; doc: NonNullable<Awaited<ReturnTy
 		const r = await post(props.id, { op: "set-publish-state", state });
 		if (r.ok && r.status) {
 			setDocStatus(r.status);
+			statusSync.markSynced(r.status);
 			setPublishedAt(r.publishedAt ?? null);
 			setStatus(state === "published" ? "marked as posted" : "marked as unposted");
 		} else setStatus(r.error ?? "state update failed");
@@ -339,7 +367,7 @@ export const DocEditor = (props: { id: string; doc: NonNullable<Awaited<ReturnTy
 					<Show when={docStatus() === "final" && publishedAt()}>
 						<span class="doc-badge published">{kind() === "newsletter" ? "Sent" : "Posted"} {new Date(publishedAt()!).toLocaleString()} · marked unposted · </span>
 					</Show>
-					{status() || `v${verNum()}`}
+					{liveNote() || status() || `v${verNum()}`}
 				</span>
 				<div style={{ flex: 1 }} />
 				{/* genre scopes the voice rules this doc teaches/lints under — shown

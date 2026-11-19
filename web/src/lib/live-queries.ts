@@ -3,7 +3,7 @@
 // refresh). The pure reducer is exported for the test.
 import { onCleanup, onMount } from "solid-js";
 
-const POLL_MS = 5_000; // knob: poll cadence while the tab is visible
+const POLL_MS = 3_000; // knob: poll cadence while the tab is visible — open editors apply agent edits within ~this window
 
 export type ChangeEvent = { id: number; table: string; op: string };
 export type PollResult =

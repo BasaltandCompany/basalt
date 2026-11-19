@@ -3,6 +3,7 @@ import { createAsync, revalidate, useAction, useSearchParams } from "@solidjs/ro
 import { For, Show, createSignal, createEffect, createMemo, onMount, onCleanup, untrack } from "solid-js";
 import Layout from "~/components/Layout";
 import { VoiceLintPanel } from "~/components/VoiceLintPanel";
+import { createRemoteSync } from "~/lib/live-merge";
 import { LintedTextarea } from "~/components/LintedTextarea";
 import type { LintResult } from "~/lib/voice-lint";
 import {
@@ -174,6 +175,13 @@ export default function AdminEmail() {
 	const [draftVersions, setDraftVersions] = createSignal<Record<string, DraftVersionRow[]>>({});
 	const [draftDiff, setDraftDiff] = createSignal<{ id: string; parts: DraftDiffPart[] | null } | null>(null);
 	const draftSaveTimers: Record<string, ReturnType<typeof setTimeout>> = {};
+	// per-draft remote-sync handles (set by the overlay, consumed by the
+	// autosave PUT: markSynced makes saved fields clean so future agent edits
+	// flow through again)
+	const draftSyncMark: Record<string, ((field: string, v: string) => void) | undefined> = {};
+	// "agent edited X while you were editing" note in the draft overlay
+	const [agentNote, setAgentNote] = createSignal<string | null>(null);
+	let agentNoteTimer: ReturnType<typeof setTimeout> | undefined;
 	// docs-style autosave feedback + inline voice lint for the draft overlay
 	const [draftSaveState, setDraftSaveState] = createSignal<Record<string, string>>({});
 	const [draftLint, setDraftLint] = createSignal<Record<string, LintResult | null>>({});
@@ -455,6 +463,8 @@ export default function AdminEmail() {
 				body: JSON.stringify(payload),
 			});
 			if (res.ok) {
+				// saved fields are clean now — future agent edits apply live again
+				for (const [k, v] of Object.entries(payload)) draftSyncMark[outboxId]?.(k, v);
 				setDraftSaveState({ ...draftSaveState(), [outboxId]: `saved ${new Date().toLocaleTimeString()}` });
 				if (openDraftHistory() === outboxId) {
 					const r = await fetch(`/api/email/drafts/${outboxId}?versions=1`);
@@ -1192,8 +1202,34 @@ export default function AdminEmail() {
 			    (body CRDT-tracked → History shows what changed), send/schedule
 			    stay lint-gated */}
 			<Show when={openDraftRow()} keyed>
-				{(d) => (
-					<div
+				{(d) => {
+					// live agent-edit ingestion: agent edits via MCP land in inbox() on the
+					// /api/changes revalidate and apply here in place — without clobbering
+					// unsaved local edits (createRemoteSync keeps per-field sync state)
+					const liveDraft = () => inbox()?.drafts.find((x) => x.id === d.id);
+					const setMetaField = (field: "subject" | "to" | "cc" | "bcc" | "signature", v: string) =>
+						setEditMeta({ ...editMeta(), [d.id]: { ...editMeta()[d.id], [field]: v } });
+					const note = (msg: string) => {
+						clearTimeout(agentNoteTimer);
+						setAgentNote(msg);
+						agentNoteTimer = setTimeout(() => setAgentNote(null), 8000);
+					};
+					const applied = (field: string) => note(`agent just edited the ${field} — updated here`);
+					const kept = (field: string) => note(`agent just edited the ${field} — kept your unsaved changes (their version is in History)`);
+					const syncs = {
+						subject: createRemoteSync({ remote: () => liveDraft()?.subject ?? d.subject, local: () => editMeta()[d.id]?.subject ?? d.subject, setLocal: (v) => setMetaField("subject", v), onApplied: () => applied("subject"), onConflict: () => kept("subject") }),
+						to: createRemoteSync({ remote: () => liveDraft()?.toEmail ?? d.toEmail, local: () => editMeta()[d.id]?.to ?? d.toEmail, setLocal: (v) => setMetaField("to", v), onApplied: () => applied("to"), onConflict: () => kept("to") }),
+						cc: createRemoteSync({ remote: () => liveDraft()?.ccEmail ?? d.ccEmail ?? "", local: () => editMeta()[d.id]?.cc ?? d.ccEmail ?? "", setLocal: (v) => setMetaField("cc", v), onApplied: () => applied("cc"), onConflict: () => kept("cc") }),
+						bcc: createRemoteSync({ remote: () => liveDraft()?.bccEmail ?? d.bccEmail ?? "", local: () => editMeta()[d.id]?.bcc ?? d.bccEmail ?? "", setLocal: (v) => setMetaField("bcc", v), onApplied: () => applied("bcc"), onConflict: () => kept("bcc") }),
+						signature: createRemoteSync({ remote: () => liveDraft()?.signature ?? d.signature ?? "", local: () => editMeta()[d.id]?.signature ?? d.signature ?? "", setLocal: (v) => setMetaField("signature", v), onApplied: () => applied("footer"), onConflict: () => kept("footer") }),
+						body: createRemoteSync({ remote: () => liveDraft()?.body ?? d.body, local: () => editBody()[d.id] ?? d.body, setLocal: (v) => setEditBody({ ...editBody(), [d.id]: v }), onApplied: () => applied("body"), onConflict: () => kept("body") }),
+					};
+					draftSyncMark[d.id] = (field, v) => syncs[field as keyof typeof syncs]?.markSynced(v);
+					onCleanup(() => {
+						delete draftSyncMark[d.id];
+					});
+					return (
+						<div
 						class="card"
 						style={{ position: "fixed", bottom: "24px", right: "24px", width: "560px", "max-width": "90vw", "max-height": "80vh", "overflow-y": "auto", "z-index": 50 }}
 					>
@@ -1297,7 +1333,8 @@ export default function AdminEmail() {
 									History
 								</Button>
 								<div style={{ flex: 1 }} />
-								<Show when={draftSaveState()[d.id]}><span class="muted" style={{ "font-size": "12px" }}>{draftSaveState()[d.id]}</span></Show>
+									<Show when={agentNote()}><div class="muted" style={{ "font-size": "12px", color: "#a33", "flex-basis": "100%" }}>{agentNote()}</div></Show>
+									<Show when={draftSaveState()[d.id]}><span class="muted" style={{ "font-size": "12px" }}>{draftSaveState()[d.id]}</span></Show>
 								<Show when={lintBlockedDraft() === d.id} fallback={<Button size="sm" type="button"  onClick={() => sendDraft(d.id)}>Send</Button>}>
 									<Button variant="outline" size="sm" type="button"  style={{ "border-color": "#a33", color: "#a33" }} onClick={() => sendDraft(d.id, true)}>Send anyway (ignores voice lint)</Button>
 								</Show>
@@ -1360,7 +1397,8 @@ export default function AdminEmail() {
 							</Show>
 						</div>
 					</div>
-				)}
+				);
+				}}
 			</Show>
 
 			{/* compose/reply overlay */}
