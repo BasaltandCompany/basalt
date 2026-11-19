@@ -1,3 +1,4 @@
+import { funnelAuthed } from "~/lib/funnel-auth";
 // Tune a stage's gate on the fly — POST /api/funnels/:id/stages
 // Body: { key, params?: Record<string, number>, soft?: boolean }
 // params replace that stage's tuning numbers (min/max headcount, revenue band,
@@ -8,10 +9,9 @@ import type { APIEvent } from "@solidjs/start/server";
 import { eq } from "drizzle-orm";
 import { db } from "~/db";
 import { funnels, type FunnelStage } from "~/db/schema";
-import { funnelAuthed } from "~/lib/funnels";
 
 export const POST = async (event: APIEvent) => {
-	if (!(await funnelAuthed(event.request))) return Response.json({ error: "Unauthorized" }, { status: 401 });
+	if (!(await (event.request))) return Response.json({ error: "Unauthorized" }, { status: 401 });
 	const body = (await event.request.json().catch(() => ({}))) as {
 		key?: string;
 		params?: Record<string, number>;

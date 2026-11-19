@@ -3,6 +3,20 @@
 SolidStart + Nitro + Postgres (Drizzle) + Supabase auth. Deployed to fly as
 `madcactus-dashboard`.
 
+## Patched dependencies
+
+Three patches live in the root `patches/` (see root `package.json`):
+
+- `@solidjs/start@2.2.3` — the boundary check hard-errors when `server-only`
+  is merely VISITED in the client pass (shared query modules importing a
+  session helper reach it tree-shaken via the route manifest), so it warns
+  and neutralizes instead. Real client-bundle leaks are guarded by
+  `scripts/check-client-bundle.ts`. Drop this patch when upstream fixes the
+  false positive.
+- `nitro@…beta` — longer SSR cold-start wait on fresh installs.
+- `solid-js@1.9.17` — createDynamic hydration fix (still absent upstream in
+  1.9.x as of Nov 2026).
+
 ## Local development
 
 Auth runs against the local Supabase stack. One command from the repo root sets

@@ -5,14 +5,15 @@
 //   as prospects. Auto-writes the hq_state result (method=source) when the
 //   row carries a state field.
 import type { APIEvent } from "@solidjs/start/server";
-import { funnelAuthed, getRunStages, importRunItems, type ImportRow } from "~/lib/funnels";
+import { getRunStages, importRunItems, type ImportRow } from "~/lib/funnels";
+import { funnelAuthed } from "~/lib/funnel-auth";
 
 function json(body: unknown, status = 200) {
 	return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
 export const POST = async (event: APIEvent) => {
-	if (!(await funnelAuthed(event.request))) return json({ error: "Unauthorized" }, 401);
+	if (!(await (event.request))) return json({ error: "Unauthorized" }, 401);
 	const info = await getRunStages(event.params.id);
 	if (!info) return json({ error: "Run not found" }, 404);
 	if (info.run.status !== "open") return json({ error: "Run is closed — reopen by creating a new run" }, 400);

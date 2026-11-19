@@ -2,7 +2,6 @@
 	"name": "aspectrr-desktop",
 	"private": true,
 	"scripts": {
-		"fetch-bun": "bash scripts/fetch-bun.sh",
 		"dev": "tauri dev",
 		"build": "tauri build"
 	},

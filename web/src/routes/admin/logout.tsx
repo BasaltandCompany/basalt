@@ -1,6 +1,5 @@
-import { signOut } from "~/lib/session";
-
 export async function POST() {
+	const { signOut } = await import("~/lib/session");
 	await signOut();
 	return new Response(null, {
 		status: 302,

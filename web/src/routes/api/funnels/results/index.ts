@@ -2,14 +2,15 @@
 // POST /api/funnels/results { itemId, stage, verdict, evidenceUrl?, note?, method? }
 // Triggers promotion on all-stages-pass and un-approves the linked prospect on a fail.
 import type { APIEvent } from "@solidjs/start/server";
-import { funnelAuthed, recordStageVerdict } from "~/lib/funnels";
+import { recordStageVerdict } from "~/lib/funnels";
+import { funnelAuthed } from "~/lib/funnel-auth";
 
 function json(body: unknown, status = 200) {
 	return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
 export const POST = async (event: APIEvent) => {
-	if (!(await funnelAuthed(event.request))) return json({ error: "Unauthorized" }, 401);
+	if (!(await (event.request))) return json({ error: "Unauthorized" }, 401);
 	const body = (await event.request.json().catch(() => ({}))) as {
 		itemId?: string;
 		stage?: string;

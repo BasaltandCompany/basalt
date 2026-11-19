@@ -44,9 +44,12 @@ const ThreadMessages = (props: { messages: EmailMessage[]; openMsg: number; onOp
 							<iframe
 								sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
 								srcdoc={html()}
-								style={{ width: "100%", border: "0", display: "block", "min-height": "160px" }}
+								// dark reading: invert the email document (white→dark, black text→white);
+								// imgs get un-inverted on load so photos/logos keep true colors
+								style={{ width: "100%", border: "0", display: "block", "min-height": "160px", background: "#fff", filter: "invert(1) hue-rotate(180deg)" }}
 								onLoad={(e) => {
 									const doc = e.currentTarget.contentDocument;
+									doc?.querySelectorAll("img").forEach((img) => (img.style.filter = "invert(1) hue-rotate(180deg)"));
 									if (doc?.body) e.currentTarget.style.height = `${doc.body.scrollHeight}px`;
 								}}
 							/>

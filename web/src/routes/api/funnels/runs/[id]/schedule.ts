@@ -5,7 +5,8 @@ import type { APIEvent } from "@solidjs/start/server";
 import { eq } from "drizzle-orm";
 import { db } from "~/db";
 import { funnelSchedules } from "~/db/schema";
-import { funnelAuthed, getRunStages } from "~/lib/funnels";
+import { getRunStages } from "~/lib/funnels";
+import { funnelAuthed } from "~/lib/funnel-auth";
 
 function json(body: unknown, status = 200) {
 	return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -17,14 +18,14 @@ async function scheduleFor(funnelId: string) {
 }
 
 export const GET = async (event: APIEvent) => {
-	if (!(await funnelAuthed(event.request))) return json({ error: "Unauthorized" }, 401);
+	if (!(await (event.request))) return json({ error: "Unauthorized" }, 401);
 	const info = await getRunStages(event.params.id);
 	if (!info) return json({ error: "Run not found" }, 404);
 	return json({ schedule: await scheduleFor(info.run.funnelId) });
 };
 
 export const PUT = async (event: APIEvent) => {
-	if (!(await funnelAuthed(event.request))) return json({ error: "Unauthorized" }, 401);
+	if (!(await (event.request))) return json({ error: "Unauthorized" }, 401);
 	const info = await getRunStages(event.params.id);
 	if (!info) return json({ error: "Run not found" }, 404);
 	const body = (await event.request.json().catch(() => ({}))) as {

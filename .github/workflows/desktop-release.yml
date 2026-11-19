@@ -42,9 +42,6 @@ jobs:
       - working-directory: desktop
         run: bun install --frozen-lockfile
 
-      - name: fetch bun sidecar (gitignored, not in checkout)
-        run: bash desktop/scripts/fetch-bun.sh aarch64-apple-darwin
-
       - name: pick release tag
         id: tag
         run: |
@@ -69,7 +66,7 @@ jobs:
         with:
           projectPath: desktop
           tagName: ${{ steps.tag.outputs.tag }}
-          releaseName: aspectrr Admin ${{ steps.tag.outputs.tag }}
+          releaseName: Basalt Desktop ${{ steps.tag.outputs.tag }}
           releaseBody: |
             Built from commit ${{ github.sha }}.
 
