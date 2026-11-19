@@ -5,6 +5,7 @@
   "patchedDependencies": {
     "solid-js@1.9.17": "patches/solid-js@1.9.17.patch",
     "nitro@3.0.260610-beta": "patches/nitro@3.0.260610-beta.patch",
-    "@solidjs/start@2.2.3": "patches/@solidjs-start@2.2.3.patch"
+    "@solidjs/start@2.2.3": "patches/@solidjs-start@2.2.3.patch",
+    "server-only@0.0.1": "patches/server-only@0.0.1.patch"
   }
 }

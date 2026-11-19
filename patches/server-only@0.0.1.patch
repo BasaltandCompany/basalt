@@ -1,0 +1,19 @@
+diff --git a/index.js b/index.js
+index e480b5cf2285aae782298399c110d5a2bf816deb..765369522d768f2c0402b6baa9f7ac08ab5a1463 100644
+--- a/index.js
++++ b/index.js
+@@ -1,4 +1,10 @@
+-throw new Error(
+-  "This module cannot be imported from a Client Component module. " +
+-    "It should only be used from a Server Component."
+-);
++// server-only is a pure guard package: the real index.js throws unless the
++// runtime resolves it with the `react-server` condition. Start's vite plugin
++// neutralizes it at build time (patches/@solidjs-start patch → EMPTY_ID), but
++// nitro's dev-worker imports @solidjs/start/http raw at runtime, where no
++// condition is set — the throw killed server-function registration
++// ("invalid server function: <id>-getUserQuery") and left every admin page
++// rendering an empty shell: the "GitHub apps tab is completely black" bug.
++// This repo guards client/server leaks with scripts/check-client-bundle.ts,
++// so the guard is dead weight: make the default export a no-op, like empty.js.
++module.exports = {};
