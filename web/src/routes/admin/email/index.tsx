@@ -1,8 +1,9 @@
 import { Title } from "@solidjs/meta";
 import { createAsync, revalidate, useAction, useSearchParams } from "@solidjs/router";
-import { For, Show, createSignal, createEffect, createMemo, onMount, onCleanup } from "solid-js";
+import { For, Show, createSignal, createEffect, createMemo, onMount, onCleanup, untrack } from "solid-js";
 import Layout from "~/components/Layout";
 import { VoiceLintPanel } from "~/components/VoiceLintPanel";
+import { createRemoteSync } from "~/lib/live-merge";
 import { LintedTextarea } from "~/components/LintedTextarea";
 import type { LintResult } from "~/lib/voice-lint";
 import {
@@ -159,10 +160,14 @@ export default function AdminEmail() {
 	const [openDraft, setOpenDraft] = createSignal<string | null>(null);
 	// stable row identity for the editor overlay: a refetch rebuilds the drafts
 	// array, and a fresh object identity would remount the <Show keyed> editor —
-	// killing focus/caret mid-typing. ?? prev keeps the same row object across
-	// refetches; the effect below closes the editor when the row really goes
-	// away (sent/discarded).
-	const openDraftRow = createMemo<EmailOutbox | undefined>((prev) => inbox()?.drafts.find((x) => x.id === openDraft()) ?? prev);
+	// killing focus/caret mid-typing (the 5s /api/changes revalidate fires after
+	// every autosave PUT). Returning prev while the id is unchanged keeps the
+	// overlay mounted; a missing row (close/send/discard/schedule) drops it, so
+	// Close/Esc actually closes — the old `?? prev` kept the overlay alive forever.
+	const openDraftRow = createMemo<EmailOutbox | undefined>((prev) => {
+		const row = inbox()?.drafts.find((x) => x.id === openDraft());
+		return row && prev?.id === row.id ? prev : row;
+	});
 	createEffect(() => {
 		if (openDraft() && !inbox()?.drafts.find((x) => x.id === openDraft())) setOpenDraft(null);
 	});
@@ -170,6 +175,13 @@ export default function AdminEmail() {
 	const [draftVersions, setDraftVersions] = createSignal<Record<string, DraftVersionRow[]>>({});
 	const [draftDiff, setDraftDiff] = createSignal<{ id: string; parts: DraftDiffPart[] | null } | null>(null);
 	const draftSaveTimers: Record<string, ReturnType<typeof setTimeout>> = {};
+	// per-draft remote-sync handles (set by the overlay, consumed by the
+	// autosave PUT: markSynced makes saved fields clean so future agent edits
+	// flow through again)
+	const draftSyncMark: Record<string, ((field: string, v: string) => void) | undefined> = {};
+	// "agent edited X while you were editing" note in the draft overlay
+	const [agentNote, setAgentNote] = createSignal<string | null>(null);
+	let agentNoteTimer: ReturnType<typeof setTimeout> | undefined;
 	// docs-style autosave feedback + inline voice lint for the draft overlay
 	const [draftSaveState, setDraftSaveState] = createSignal<Record<string, string>>({});
 	const [draftLint, setDraftLint] = createSignal<Record<string, LintResult | null>>({});
@@ -190,11 +202,13 @@ export default function AdminEmail() {
 			}
 		}, 700);
 	};
-	// opening a draft lints its current body once (edits re-lint via editDraft)
+	// opening a draft lints its current body once (edits re-lint via editDraft).
+	// lintDraft is untracked: it reads lintStale() inside setLintStale — tracked,
+	// that self-write re-queues this effect forever (stack overflow on open).
 	createEffect(() => {
 		const id = openDraft();
 		if (!id || draftLint()[id] !== undefined) return;
-		lintDraft(id, editBody()[id] ?? inbox()?.drafts.find((d) => d.id === id)?.body ?? "");
+		untrack(() => lintDraft(id, editBody()[id] ?? inbox()?.drafts.find((d) => d.id === id)?.body ?? ""));
 	});
 
 	// Linear/Superhuman trick: the pane paints from an in-memory thread cache
@@ -449,6 +463,8 @@ export default function AdminEmail() {
 				body: JSON.stringify(payload),
 			});
 			if (res.ok) {
+				// saved fields are clean now — future agent edits apply live again
+				for (const [k, v] of Object.entries(payload)) draftSyncMark[outboxId]?.(k, v);
 				setDraftSaveState({ ...draftSaveState(), [outboxId]: `saved ${new Date().toLocaleTimeString()}` });
 				if (openDraftHistory() === outboxId) {
 					const r = await fetch(`/api/email/drafts/${outboxId}?versions=1`);
@@ -1186,8 +1202,34 @@ export default function AdminEmail() {
 			    (body CRDT-tracked → History shows what changed), send/schedule
 			    stay lint-gated */}
 			<Show when={openDraftRow()} keyed>
-				{(d) => (
-					<div
+				{(d) => {
+					// live agent-edit ingestion: agent edits via MCP land in inbox() on the
+					// /api/changes revalidate and apply here in place — without clobbering
+					// unsaved local edits (createRemoteSync keeps per-field sync state)
+					const liveDraft = () => inbox()?.drafts.find((x) => x.id === d.id);
+					const setMetaField = (field: "subject" | "to" | "cc" | "bcc" | "signature", v: string) =>
+						setEditMeta({ ...editMeta(), [d.id]: { ...editMeta()[d.id], [field]: v } });
+					const note = (msg: string) => {
+						clearTimeout(agentNoteTimer);
+						setAgentNote(msg);
+						agentNoteTimer = setTimeout(() => setAgentNote(null), 8000);
+					};
+					const applied = (field: string) => note(`agent just edited the ${field} — updated here`);
+					const kept = (field: string) => note(`agent just edited the ${field} — kept your unsaved changes (their version is in History)`);
+					const syncs = {
+						subject: createRemoteSync({ remote: () => liveDraft()?.subject ?? d.subject, local: () => editMeta()[d.id]?.subject ?? d.subject, setLocal: (v) => setMetaField("subject", v), onApplied: () => applied("subject"), onConflict: () => kept("subject") }),
+						to: createRemoteSync({ remote: () => liveDraft()?.toEmail ?? d.toEmail, local: () => editMeta()[d.id]?.to ?? d.toEmail, setLocal: (v) => setMetaField("to", v), onApplied: () => applied("to"), onConflict: () => kept("to") }),
+						cc: createRemoteSync({ remote: () => liveDraft()?.ccEmail ?? d.ccEmail ?? "", local: () => editMeta()[d.id]?.cc ?? d.ccEmail ?? "", setLocal: (v) => setMetaField("cc", v), onApplied: () => applied("cc"), onConflict: () => kept("cc") }),
+						bcc: createRemoteSync({ remote: () => liveDraft()?.bccEmail ?? d.bccEmail ?? "", local: () => editMeta()[d.id]?.bcc ?? d.bccEmail ?? "", setLocal: (v) => setMetaField("bcc", v), onApplied: () => applied("bcc"), onConflict: () => kept("bcc") }),
+						signature: createRemoteSync({ remote: () => liveDraft()?.signature ?? d.signature ?? "", local: () => editMeta()[d.id]?.signature ?? d.signature ?? "", setLocal: (v) => setMetaField("signature", v), onApplied: () => applied("footer"), onConflict: () => kept("footer") }),
+						body: createRemoteSync({ remote: () => liveDraft()?.body ?? d.body, local: () => editBody()[d.id] ?? d.body, setLocal: (v) => setEditBody({ ...editBody(), [d.id]: v }), onApplied: () => applied("body"), onConflict: () => kept("body") }),
+					};
+					draftSyncMark[d.id] = (field, v) => syncs[field as keyof typeof syncs]?.markSynced(v);
+					onCleanup(() => {
+						delete draftSyncMark[d.id];
+					});
+					return (
+						<div
 						class="card"
 						style={{ position: "fixed", bottom: "24px", right: "24px", width: "560px", "max-width": "90vw", "max-height": "80vh", "overflow-y": "auto", "z-index": 50 }}
 					>
@@ -1242,12 +1284,23 @@ export default function AdminEmail() {
 								rows={12}
 							/>
 							<VoiceLintPanel result={draftLint()[d.id] ?? null} stale={lintStale()[d.id]} />
-							{/* footer is appended at send time — preview the variant that will land */}
-							<Show when={(editMeta()[d.id]?.signature ?? d.signature ?? "") !== "none"}>
-								<pre class="muted" style={{ "font-size": "11px", "white-space": "pre-wrap", margin: "0 0 8px", "font-family": "inherit", color: "#8a8375" }}>{`— Footer added on send —\n${SIGNATURES[(editMeta()[d.id]?.signature || (d.campaignCompanyId ? "plain" : "full")) as "full" | "plain"].plain}`}</pre>
+							{/* footer is appended at send time — preview the EXACT variant that will land:
+							    full renders the branded HTML block (the plain-text version read like no footer at all) */}
+							<Show when={(editMeta()[d.id]?.signature ?? d.signature ?? "") !== "none"} fallback={<div class="muted" style={{ "font-size": "11px", margin: "0 0 8px", color: "#8a8375" }}>— No footer (None selected) —</div>}>
+								<Show
+									when={(editMeta()[d.id]?.signature || (d.campaignCompanyId ? "plain" : "full")) === "full"}
+									fallback={
+										<pre class="muted" style={{ "font-size": "11px", "white-space": "pre-wrap", margin: "0 0 8px", "font-family": "inherit", color: "#8a8375", border: "1px dashed rgba(0,0,0,0.15)", padding: "8px", "border-radius": "4px" }}>{`— Footer added on send (plain) —\n${SIGNATURES.plain.plain}`}</pre>
+									}
+								>
+									<div class="muted" style={{ "font-size": "11px", margin: "0 0 4px", color: "#8a8375" }}>— Footer added on send (full) —</div>
+									{/* SIGNATURES.full.html is our own static markup — safe for innerHTML */}
+									<div style={{ margin: "0 0 8px", border: "1px dashed rgba(0,0,0,0.15)", padding: "8px", "border-radius": "4px", background: "#faf9f6" }} innerHTML={SIGNATURES.full.html} />
+								</Show>
 							</Show>
 							<div style={{ display: "flex", gap: "6px", "flex-wrap": "wrap", "align-items": "center", margin: "8px 0" }}>
-								<For each={d.attachments ?? []}>
+								{/* attachments ride the live row — frozen d would hide uploads that land via revalidate */}
+								<For each={inbox()?.drafts.find((x) => x.id === d.id)?.attachments ?? []}>
 									{(a) => (
 										<span style={{ "font-size": "12px", padding: "2px 8px", border: "1px solid rgba(0,0,0,0.12)", "border-radius": "12px", display: "inline-flex", gap: "6px", "align-items": "center" }}>
 											{a.filename} ({(a.size / 1048576).toFixed(1)}MB)
@@ -1280,7 +1333,8 @@ export default function AdminEmail() {
 									History
 								</Button>
 								<div style={{ flex: 1 }} />
-								<Show when={draftSaveState()[d.id]}><span class="muted" style={{ "font-size": "12px" }}>{draftSaveState()[d.id]}</span></Show>
+									<Show when={agentNote()}><div class="muted" style={{ "font-size": "12px", color: "#a33", "flex-basis": "100%" }}>{agentNote()}</div></Show>
+									<Show when={draftSaveState()[d.id]}><span class="muted" style={{ "font-size": "12px" }}>{draftSaveState()[d.id]}</span></Show>
 								<Show when={lintBlockedDraft() === d.id} fallback={<Button size="sm" type="button"  onClick={() => sendDraft(d.id)}>Send</Button>}>
 									<Button variant="outline" size="sm" type="button"  style={{ "border-color": "#a33", color: "#a33" }} onClick={() => sendDraft(d.id, true)}>Send anyway (ignores voice lint)</Button>
 								</Show>
@@ -1343,7 +1397,8 @@ export default function AdminEmail() {
 							</Show>
 						</div>
 					</div>
-				)}
+				);
+				}}
 			</Show>
 
 			{/* compose/reply overlay */}
@@ -1389,7 +1444,9 @@ export default function AdminEmail() {
 							style={{ width: "100%", "margin-bottom": "8px", padding: "8px", border: "1px solid rgba(0,0,0,0.12)", "font-family": "inherit", "font-size": "14px", "line-height": "1.5", "box-sizing": "border-box", resize: "vertical", display: "block" }}
 						/>
 						{/* footer is appended at send time — preview it where it will land */}
-						<pre class="muted" style={{ "font-size": "11px", "white-space": "pre-wrap", margin: "0 0 8px", "font-family": "inherit", color: "#8a8375" }}>{`— Footer added on send —\n${SIGNATURES.full.plain}`}</pre>
+						<div class="muted" style={{ "font-size": "11px", margin: "0 0 4px", color: "#8a8375" }}>— Footer added on send —</div>
+						{/* SIGNATURES.full.html is our own static markup — safe for innerHTML */}
+						<div style={{ margin: "0 0 8px", border: "1px dashed rgba(0,0,0,0.15)", padding: "8px", "border-radius": "4px", background: "#faf9f6" }} innerHTML={SIGNATURES.full.html} />
 						<Show when={composeFiles().length}>
 							<div style={{ display: "flex", gap: "6px", "flex-wrap": "wrap", "margin-bottom": "8px" }}>
 								<For each={composeFiles()}>
