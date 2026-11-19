@@ -2,7 +2,8 @@
 // design reference). Two variants: `full` for regular 1:1 email, `plain` for
 // cold outreach. The logo is hosted (not a data URI) because Gmail and
 // Outlook strip data-URI images from received mail.
-const siteUrl = () => process.env.PUBLIC_SITE_URL?.replace(/\/$/, "") ?? "https://basalt.ac";
+const siteUrl = () =>
+	(typeof process !== "undefined" ? process.env.PUBLIC_SITE_URL?.replace(/\/$/, "") : undefined) ?? "https://basalt.ac";
 
 const DISCLAIMER =
 	"This email and any attachments are confidential and intended solely for the use of the individual or entity to whom they are addressed. If you received it in error, please notify the sender and delete your copy. Any views or opinions expressed are solely those of the author and do not necessarily represent those of Basalt & Company.";

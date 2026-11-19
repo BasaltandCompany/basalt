@@ -555,6 +555,20 @@ function mimeFilename(name: string): string {
 	return name.replace(/[\r\n\\"]/g, "").trim() || "attachment";
 }
 
+/**
+ * Plain-text reply quote appended at send time (the composer shows only the
+ * human's words): "On <date>, <name> <email> wrote:" + "> " per line.
+ */
+export function buildReplyQuote(msg: { date: Date | string; fromName?: string | null; fromEmail?: string | null; bodyText?: string | null }): string {
+	const who = `${msg.fromName ?? msg.fromEmail ?? "them"}${msg.fromName && msg.fromEmail && msg.fromName !== msg.fromEmail ? ` <${msg.fromEmail}>` : ""}`;
+	// manual formatting — bun/node without full ICU render toLocaleString differently
+	const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+	const d = new Date(msg.date);
+	const when = `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}, ${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, "0")} ${d.getHours() < 12 ? "AM" : "PM"}`;
+	const lines = (msg.bodyText ?? "").replace(/\r\n/g, "\n").split("\n").map((l) => (l.trim() ? `> ${l}` : ">"));
+	return `On ${when}, ${who} wrote:\n${lines.join("\n")}`;
+}
+
 // RFC 2045: base64 lines max 76 chars
 function wrap76(b64: string): string {
 	return (b64.match(/.{1,76}/g) ?? []).join("\r\n");

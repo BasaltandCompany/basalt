@@ -44,20 +44,20 @@ export const PUT = async (event: APIEvent) => {
 		if (version === null) return json({ error: "not found" }, 404);
 	}
 	if (body.signature !== undefined && !["", "full", "plain", "none"].includes(body.signature)) return json({ error: "invalid signature" }, 400);
-	const [row] = await db
-		.update(emailOutbox)
-		.set({
-			...(body.subject ? { subject: body.subject } : {}),
-			...(body.to ? { toEmail: body.to } : {}),
-			// empty string clears the field — unlike to/subject there is no
-			// "required" state to protect
-			...(body.cc !== undefined ? { ccEmail: body.cc || null } : {}),
-			...(body.bcc !== undefined ? { bccEmail: body.bcc || null } : {}),
-			// '' clears to auto (null): campaign → plain, else full
-			...(body.signature !== undefined ? { signature: body.signature || null } : {}),
-		})
-		.where(eq(emailOutbox.id, event.params.id))
-		.returning();
+	// drizzle throws "No values to set" on an empty set — a body-only autosave
+	// (the common case) has no meta fields, so skip the update entirely
+	const meta = {
+		...(body.subject ? { subject: body.subject } : {}),
+		...(body.to ? { toEmail: body.to } : {}),
+		// empty string clears the field — unlike to/subject there is no
+		// "required" state to protect
+		...(body.cc !== undefined ? { ccEmail: body.cc || null } : {}),
+		...(body.bcc !== undefined ? { bccEmail: body.bcc || null } : {}),
+		// '' clears to auto (null): campaign → plain, else full
+		...(body.signature !== undefined ? { signature: body.signature || null } : {}),
+	};
+	if (Object.keys(meta).length === 0) return json({ ok: true, version });
+	const [row] = await db.update(emailOutbox).set(meta).where(eq(emailOutbox.id, event.params.id)).returning();
 	return json(row ? { ...row, version } : { error: "not found" }, row ? 200 : 404);
 };
 
