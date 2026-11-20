@@ -6,6 +6,8 @@ import * as Tooltip from "@kobalte/core/tooltip";
 import * as ToastPrimitive from "@kobalte/core/toast";
 import { Root as SkeletonRoot } from "@kobalte/core/skeleton";
 import { Command } from "cmdk-solid";
+import { Button } from "@basaltac/ui2";
+import { Dialog as Ui2Dialog, DialogContent, DialogTrigger } from "@basaltac/ui2/dialog";
 
 const spikeStyle = { padding: "32px", "font-family": "system-ui, sans-serif", display: "grid", gap: "20px" } as const;
 
@@ -84,6 +86,18 @@ export default function KobalteSpike() {
 			</Command>
 
 			<p data-spike-ok="true">spike page rendered without SSR errors</p>
+
+			<Ui2Dialog>
+				<DialogTrigger
+					class="inline-flex items-center justify-center rounded-md border px-3 py-2 text-sm ring-offset-background"
+					data-ui2-trigger="true"
+				>
+					ui2 dialog via @basaltac/ui2
+				</DialogTrigger>
+				<DialogContent>
+					<p>ui2 wrapper works on Kobalte alpha</p>
+				</DialogContent>
+			</Ui2Dialog>
 		</div>
 	);
 }
