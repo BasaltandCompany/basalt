@@ -3,6 +3,7 @@ import { redirect } from "@solidjs/web";
 import { eq, and, gte, lte, desc, sql } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm";
 import { getCurrentUser, signIn } from "./session";
+import { supabaseAdmin, supabaseService } from "./supabase";
 import { db } from "~/db";
 import {
 	projects,
@@ -29,6 +30,65 @@ export const loginAction = formAction(async (formData: FormData) => {
 	if (result.error) return { error: result.error };
 	throw redirect("/admin");
 }, "login");
+
+// Password reset origin for Supabase recovery redirect_to (must be on the
+// dashboard's Redirect Allow-list or GoTrue falls back to the Site URL).
+const SITE_URL = process.env.PUBLIC_SITE_URL?.replace(/\/$/, "") ?? "https://basalt.ac";
+
+export const adminForgotPasswordAction = formAction(async (formData: FormData) => {
+	"use server";
+	const email = String(formData.get("email") || "").trim().toLowerCase();
+	// Always claim success — the response must not reveal whether the account exists.
+	try {
+		await supabaseAdmin().auth.resetPasswordForEmail(email, {
+			redirectTo: `${SITE_URL}/admin/reset-password`,
+		});
+	} catch {
+		// A timed-out send must not leak infra detail into the UI.
+	}
+	return { error: null };
+}, "admin-forgot-password");
+
+export const adminResetPasswordAction = formAction(async (formData: FormData) => {
+	"use server";
+	// Two recovery-token shapes: implicit-flow access_token (fragment) or
+	// PKCE token_hash (query param). No token = change-password while logged in.
+	const accessToken = String(formData.get("access_token") || "");
+	const tokenHash = String(formData.get("token_hash") || "");
+	const password = String(formData.get("password") || "");
+	if (password.length < 6) return { error: "Password must be at least 6 characters." };
+
+	let user: { id: string; email?: string } | null = null;
+	try {
+		if (accessToken) {
+			const { data, error } = await supabaseAdmin().auth.getUser(accessToken);
+			if (!error) user = data.user;
+		} else if (tokenHash) {
+			const { data, error } = await supabaseAdmin().auth.verifyOtp({
+				token_hash: tokenHash,
+				type: "recovery",
+			});
+			if (!error) user = data.user;
+		} else {
+			const current = await getCurrentUser();
+			if (current) user = { id: current.id, email: current.email };
+		}
+	} catch {
+		// Supabase timeout → treated as an invalid link below.
+	}
+	if (!user?.email)
+		return { error: "This reset link is invalid or has expired. Request a new one." };
+
+	const { error } = await supabaseService().auth.admin.updateUserById(user.id, { password });
+	if (error) return { error: `Could not update password: ${error.message}` };
+
+	// Fresh sign-in with the new password instead of reusing recovery-session
+	// tokens — password changes can revoke refresh tokens, and this refreshes
+	// the mc-* cookies either way.
+	const result = await signIn(user.email, password);
+	if (result.error) return { error: result.error };
+	throw redirect("/admin");
+}, "admin-reset-password");
 
 // ── Auth guard ────────────────────────────────────────────────────
 
