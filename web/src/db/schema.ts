@@ -1621,6 +1621,33 @@ export const secureShareItems = pgTable(
 );
 
 
+
+// ── Weekly security reports (delivered by the security-review skill) ─
+
+// One row per company per scan week. The GitHub Actions pipeline in
+// BasaltandCompany/security-review uploads report.html/report.pdf to the
+// private `security-reports` bucket and upserts these rows with the service
+// role. Portal clients read their own company's rows at /portal/security;
+// scoping is app-level (clientCompanyMembers) like every other portal table.
+export const securityReports = pgTable(
+	"security_reports",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		companyId: uuid("company_id")
+			.notNull()
+			.references(() => companies.id, { onDelete: "cascade" }),
+		// Monday of the report week (YYYY-MM-DD)
+		weekOf: date("week_of").notNull(),
+		title: text("title").notNull(),
+		verdict: text("verdict").notNull().default(""),
+		// { open, new, fixed, accepted, kev } counts for the portal card
+		summary: jsonb("summary").notNull().default({}),
+		htmlPath: text("html_path").notNull(),
+		pdfPath: text("pdf_path").notNull(),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(t) => [uniqueIndex("uq_security_reports_company_week").on(t.companyId, t.weekOf)],
+);
 // ── Inferred types (replaces hand-maintained interfaces) ───────────
 
 export type Company = typeof companies.$inferSelect;
@@ -1637,6 +1664,7 @@ export type Quote = typeof quotes.$inferSelect;
 export type QuoteItem = typeof quoteItems.$inferSelect;
 export type QuoteVersion = typeof quoteVersions.$inferSelect;
 export type QuoteSignature = typeof quoteSignatures.$inferSelect;
+export type SecurityReport = typeof securityReports.$inferSelect;
 
 // Type aliases for UI code (badge maps, selects, etc.)
 export type EngagementType = Project["engagementType"];
