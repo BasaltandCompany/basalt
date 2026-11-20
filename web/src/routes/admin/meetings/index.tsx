@@ -1,6 +1,7 @@
 import { Title } from "@solidjs/meta";
-import { A, createAsync, useAction } from "@solidjs/router";
-import { For, Show, Suspense } from "solid-js";
+import { createMemo } from "solid-js";
+import { useAction } from "@solidjs/router";
+import { For, Show, Loading } from "solid-js";
 import Layout from "~/components/Layout";
 import ConfirmButton from "~/components/ConfirmButton";
 import { getUserQuery } from "~/lib/queries";
@@ -12,8 +13,8 @@ import { Card } from "@basaltac/ui";
 
 /** Meeting drafts pushed by the Anarlog publisher — edit + publish at [id]. */
 export default function MeetingDrafts() {
-	const user = createAsync(() => getUserQuery(), { deferStream: true });
-	const drafts = createAsync(() => getMeetingDraftsQuery(), { deferStream: true });
+	const user = createMemo(() => getUserQuery(), { deferStream: true });
+	const drafts = createMemo(() => getMeetingDraftsQuery(), { deferStream: true });
 	const deleteDoc = useAction(deleteDocumentAction);
 
 	return (
@@ -28,7 +29,7 @@ export default function MeetingDrafts() {
 				</div>
 			</div>
 
-			<Suspense fallback={<p class="muted">Loading…</p>}>
+			<Loading fallback={<p class="muted">Loading…</p>}>
 				<Show
 					when={drafts()?.length}
 					fallback={<p class="muted">No pending meeting drafts.</p>}
@@ -38,9 +39,9 @@ export default function MeetingDrafts() {
 							{(d) => (
 								<Card style={{ padding: "16px", display: "flex", "align-items": "center", gap: "12px" }}>
 									<div style={{ flex: "1" }}>
-										<A href={`/admin/meetings/${d.id}`} style={{ "font-weight": "600" }}>
+										<a href={`/admin/meetings/${d.id}`} style={{ "font-weight": "600" }}>
 											{d.title}
-										</A>
+										</a>
 										<div class="muted" style={{ "font-size": "12px" }}>
 											{new Date(d.createdAt).toLocaleString()}
 											<Show when={d.hasAudio}> · audio</Show>
@@ -61,7 +62,7 @@ export default function MeetingDrafts() {
 						</For>
 					</div>
 				</Show>
-			</Suspense>
+			</Loading>
 		</Layout>
 	);
 }

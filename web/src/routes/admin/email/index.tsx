@@ -1,6 +1,7 @@
 import { Title } from "@solidjs/meta";
-import { createAsync, revalidate, useAction, useSearchParams } from "@solidjs/router";
-import { For, Show, createSignal, createEffect, createMemo, onMount, onCleanup, untrack } from "solid-js";
+import { createMemo, For, Show, createSignal, createEffect, onSettled, onCleanup, untrack } from "solid-js";
+import { revalidate, useSearchParams, useAction } from "@solidjs/router";
+
 import Layout from "~/components/Layout";
 import { VoiceLintPanel } from "~/components/VoiceLintPanel";
 import { createRemoteSync } from "~/lib/live-merge";
@@ -13,7 +14,7 @@ import {
 } from "~/lib/email-queries";
 import type { EmailThread, EmailMessage, EmailOutbox } from "~/db/schema";
 import { SIGNATURES } from "~/lib/email-signature";
-import { Button } from "@basaltac/ui";
+import { Button, buttonVariants } from "@basaltac/ui";
 
 type DraftVersionRow = { id: string; version: number; author: string; createdAt: string; updatedAt: string };
 type DraftDiffPart = { added?: boolean; removed?: boolean; value: string };
@@ -73,14 +74,14 @@ const ThreadMessages = (props: { messages: EmailMessage[]; openMsg: number; onOp
 );
 
 export default function AdminEmail() {
-	const status = createAsync(() => getEmailStatusQuery(), { deferStream: true });
+	const status = createMemo(() => getEmailStatusQuery(), { deferStream: true });
 	const [searchParams, setSearchParams] = useSearchParams();
 	// folder lives in the URL so a search keeps the tab it was typed in
 	const folder = (): "inbox" | "drafts" | "outbox" | "sent" =>
 		searchParams.folder === "drafts" || searchParams.folder === "outbox" || searchParams.folder === "sent" ? searchParams.folder : "inbox";
 	const setFolder = (f: "inbox" | "drafts" | "outbox" | "sent") => setSearchParams({ folder: f === "inbox" ? undefined : f });
 	const activeQ = () => (typeof searchParams.q === "string" && searchParams.q ? searchParams.q : undefined);
-	const inbox = createAsync(() => getInboxQuery({ q: activeQ() }), { deferStream: true });
+	const inbox = createMemo(() => getInboxQuery({ q: activeQ() }), { deferStream: true });
 	const sync = useAction(syncEmailAction);
 
 	const [q, setQ] = createSignal(String(searchParams.q ?? ""));
@@ -168,9 +169,12 @@ export default function AdminEmail() {
 		const row = inbox()?.drafts.find((x) => x.id === openDraft());
 		return row && prev?.id === row.id ? prev : row;
 	});
-	createEffect(() => {
-		if (openDraft() && !inbox()?.drafts.find((x) => x.id === openDraft())) setOpenDraft(null);
-	});
+	createEffect(
+		() => [openDraft(), inbox()?.drafts] as const,
+		([id, drafts]) => {
+			if (id && !drafts?.find((x) => x.id === id)) setOpenDraft(null);
+		},
+	);
 	const [openDraftHistory, setOpenDraftHistory] = createSignal<string | null>(null);
 	const [draftVersions, setDraftVersions] = createSignal<Record<string, DraftVersionRow[]>>({});
 	const [draftDiff, setDraftDiff] = createSignal<{ id: string; parts: DraftDiffPart[] | null } | null>(null);
@@ -205,11 +209,14 @@ export default function AdminEmail() {
 	// opening a draft lints its current body once (edits re-lint via editDraft).
 	// lintDraft is untracked: it reads lintStale() inside setLintStale — tracked,
 	// that self-write re-queues this effect forever (stack overflow on open).
-	createEffect(() => {
-		const id = openDraft();
-		if (!id || draftLint()[id] !== undefined) return;
-		untrack(() => lintDraft(id, editBody()[id] ?? inbox()?.drafts.find((d) => d.id === id)?.body ?? ""));
-	});
+	createEffect(
+		() => ({ id: openDraft(), lint: draftLint()[openDraft() ?? ""], body: editBody()[openDraft() ?? ""] }),
+		(v) => {
+			const id = v.id;
+			if (!id || v.lint !== undefined) return;
+			untrack(() => lintDraft(id, v.body ?? inbox()?.drafts.find((d) => d.id === id)?.body ?? ""));
+		},
+	);
 
 	// Linear/Superhuman trick: the pane paints from an in-memory thread cache
 	// and neighbors are prefetched after each move — j/k almost always hits
@@ -649,7 +656,8 @@ export default function AdminEmail() {
 
 	// ── hotkeys ──
 	let searchEl: HTMLInputElement | undefined;
-	onMount(() => {
+	onSettled(() => {
+		if (typeof window === "undefined") return; // onSettled runs on the server too
 		const handler = async (e: KeyboardEvent) => {
 			const target = e.target as HTMLElement;
 			const typing = ["INPUT", "TEXTAREA"].includes(target.tagName) || target.isContentEditable;
@@ -827,18 +835,21 @@ export default function AdminEmail() {
 		onCleanup(() => window.removeEventListener("keydown", handler));
 	});
 
-	createEffect(() => {
-		// OAuth callback lands here with ?connected=1 — strip it so a later
-		// manual ?connected doesn't retrigger
-		if (searchParams.connected) window.location.replace("/admin/email");
-	});
+	createEffect(
+		() => searchParams.connected,
+		(connected) => {
+			// OAuth callback lands here with ?connected=1 — strip it so a later
+			// manual ?connected does not retrigger
+			if (connected) window.location.replace("/admin/email");
+		},
+	);
 
 	// getInboxQuery syncs in the background (fire-and-forget) so this page must
 	// poll until the rows land — otherwise a fresh connect renders an empty inbox
 	// that stays empty until the next manual action. Also polls email-status:
 	// the background sync writes lastSyncAt only when it finishes, so "never"
 	// has to keep revalidating until the timestamp lands.
-	onMount(() => {
+	onSettled(() => {
 		let ticks = 0;
 		const timer = setInterval(() => {
 			const snap = inbox();
@@ -857,11 +868,14 @@ export default function AdminEmail() {
 		onCleanup(() => clearInterval(timer));
 	});
 
-	createEffect(() => {
-		// j/k inside theater repaints the overlay in place — restart every
-		// thread change at the top so the read always starts at the newest
-		if (theater() && selected()) document.querySelector<HTMLElement>("[data-theater-scroll]")?.scrollTo({ top: 0 });
-	});
+	createEffect(
+		() => [theater(), selected()] as const,
+		([theaterOpen, sel]) => {
+			// j/k inside theater repaints the overlay in place — restart every
+			// thread change at the top so the read always starts at the newest
+			if (theaterOpen && sel) document.querySelector<HTMLElement>("[data-theater-scroll]")?.scrollTo({ top: 0 });
+		},
+	);
 
 	return (
 		<Layout>
@@ -876,9 +890,14 @@ export default function AdminEmail() {
 				<div style={{ flex: 1 }} />
 				<Show when={sendStatus()}><span class="muted" style={{ "font-size": "13px" }}>{sendStatus()}</span></Show>
 				<Show when={!status()} fallback={<Button variant="outline" size="sm" type="button"  onClick={() => sync()}>Sync</Button>}>
-					<Button as="a" variant="outline" size="sm" aria-busy={connecting()} href="/api/email/oauth" onClick={() => setConnecting(true)}>
-						{connecting() ? "Connecting…" : "Connect Gmail"}
-					</Button>
+				<a
+					class={buttonVariants({ variant: "outline", size: "sm" })}
+					aria-busy={connecting() ? "true" : "false"}
+					href="/api/email/oauth"
+					onClick={() => setConnecting(true)}
+				>
+					{connecting() ? "Connecting…" : "Connect Gmail"}
+				</a>
 				</Show>
 			</div>
 			<p class="page-subtitle">
@@ -897,16 +916,16 @@ export default function AdminEmail() {
 			{/* folder tabs */}
 			<div style={{ display: "flex", gap: "12px", "align-items": "center" }}>
 				<div class="folder-tabs" style={{ "margin-bottom": 0 }}>
-					<button type="button" classList={{ active: folder() === "inbox" }} onClick={() => setFolder("inbox")}>
+					<button type="button" class={{ active: folder() === "inbox" }} onClick={() => setFolder("inbox")}>
 						Inbox<Show when={visibleThreads().length}> · {visibleThreads().length}</Show>
 					</button>
-					<button type="button" classList={{ active: folder() === "drafts" }} onClick={() => setFolder("drafts")}>
+					<button type="button" class={{ active: folder() === "drafts" }} onClick={() => setFolder("drafts")}>
 						Drafts<Show when={inbox()?.drafts?.length}> · {inbox()!.drafts.length}</Show>
 					</button>
-					<button type="button" classList={{ active: folder() === "outbox" }} onClick={() => setFolder("outbox")}>
+					<button type="button" class={{ active: folder() === "outbox" }} onClick={() => setFolder("outbox")}>
 						Outbox<Show when={inbox()?.outbox?.length}> · {inbox()!.outbox.length}</Show>
 					</button>
-					<button type="button" classList={{ active: folder() === "sent" }} onClick={() => setFolder("sent")}>
+					<button type="button" class={{ active: folder() === "sent" }} onClick={() => setFolder("sent")}>
 						Sent
 					</button>
 				</div>
@@ -1063,7 +1082,7 @@ export default function AdminEmail() {
 										transition: "background 120ms",
 									}}
 									onClick={() => loadThread(t, i())}
-									onpointerover={() => prefetch(t)}
+									onPointerOver={() => prefetch(t)}
 								>
 									<div style={{ display: "flex", gap: "10px", "align-items": "baseline" }}>
 										<Show when={isUnread(t)}><span style={{ color: "var(--foreground)" }}>●</span></Show>
@@ -1241,7 +1260,7 @@ export default function AdminEmail() {
 									onInput={(e) => editDraft(d.id, { to: e.currentTarget.value })}
 									style={{ flex: 1, padding: "8px", border: "1px solid rgba(0,0,0,0.12)" }}
 								/>
-								<Button variant="outline" size="sm" type="button"  classList={{ active: showCcBcc() }} onClick={() => setShowCcBcc(!showCcBcc())}>Cc Bcc</Button>
+								<Button variant="outline" size="sm" type="button"  class={{ active: showCcBcc() }} onClick={() => setShowCcBcc(!showCcBcc())}>Cc Bcc</Button>
 							</div>
 							<Show when={showCcBcc() || editMeta()[d.id]?.cc || editMeta()[d.id]?.bcc || d.ccEmail || d.bccEmail}>
 								<input
@@ -1329,7 +1348,7 @@ export default function AdminEmail() {
 								</label>
 							</div>
 							<div style={{ display: "flex", gap: "8px", "align-items": "center", "flex-wrap": "wrap" }}>
-								<Button variant="outline" size="sm" type="button"  classList={{ active: openDraftHistory() === d.id }} onClick={() => void toggleDraftHistory(d.id)}>
+								<Button variant="outline" size="sm" type="button"  class={{ active: openDraftHistory() === d.id }} onClick={() => void toggleDraftHistory(d.id)}>
 									History
 								</Button>
 								<div style={{ flex: 1 }} />
@@ -1374,7 +1393,7 @@ export default function AdminEmail() {
 											{(v) => (
 												<button type="button" class="doc-history-row" onClick={() => void showDraftDiff(d.id, v.version)}>
 													<span class="doc-history-ver">v{v.version}</span>
-													<span class="doc-history-author" classList={{ agent: v.author === "agent" }}>{v.author}</span>
+													<span class={["doc-history-author", { agent: v.author === "agent" }]}>{v.author}</span>
 													<span class="muted">{new Date(v.updatedAt).toLocaleString()}</span>
 												</button>
 											)}
@@ -1412,7 +1431,7 @@ export default function AdminEmail() {
 								onInput={(e) => setCompose({ ...compose()!, to: e.currentTarget.value })}
 								style={{ flex: 1, padding: "8px", border: "1px solid rgba(0,0,0,0.12)" }}
 							/>
-							<Button variant="outline" size="sm" type="button"  classList={{ active: showCcBcc() }} onClick={() => setShowCcBcc(!showCcBcc())}>Cc Bcc</Button>
+							<Button variant="outline" size="sm" type="button"  class={{ active: showCcBcc() }} onClick={() => setShowCcBcc(!showCcBcc())}>Cc Bcc</Button>
 						</div>
 						<Show when={showCcBcc() || compose()!.cc || compose()!.bcc}>
 							<input

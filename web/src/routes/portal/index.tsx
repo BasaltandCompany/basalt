@@ -1,5 +1,5 @@
 import { Title } from "@solidjs/meta";
-import { A, createAsync } from "@solidjs/router";
+import { createMemo } from "solid-js";
 import { For, Show } from "solid-js";
 import PortalLayout from "~/components/PortalLayout";
 import {
@@ -20,11 +20,11 @@ const statusBadge: Record<DeliverableStatus, string> = {
 };
 
 export default function PortalHome() {
-	const user = createAsync(() => getClientUserQuery(), { deferStream: true });
-	const data = createAsync(() => getClientDashboardQuery(), {
+	const user = createMemo(() => getClientUserQuery(), { deferStream: true });
+	const data = createMemo(() => getClientDashboardQuery(), {
 		deferStream: true,
 	});
-	const value = createAsync(() => getClientValueQuery(), { deferStream: true });
+	const value = createMemo(() => getClientValueQuery(), { deferStream: true });
 
 	return (
 		<PortalLayout user={user()}>
@@ -48,12 +48,12 @@ export default function PortalHome() {
 								<div class="label">Open Invoices</div>
 								<div class="value">{d().invoiceCount}</div>
 							</div>
-							<A href="/portal/value" style={{ "text-decoration": "none" }}>
+							<a href="/portal/value" style={{ "text-decoration": "none" }}>
 								<div class="stat-card">
 									<div class="label">Saved to date</div>
 									<div class="value">{usd(value()?.savedToDate ?? 0)}</div>
 								</div>
-							</A>
+							</a>
 						</div>
 
 						{/* ── Projects list ────────────────────────── */}

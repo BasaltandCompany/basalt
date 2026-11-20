@@ -1,6 +1,7 @@
 import { Title } from "@solidjs/meta";
+
+import { Show, createSignal, onSettled } from "solid-js";
 import { useAction } from "@solidjs/router";
-import { Show, createSignal, onMount } from "solid-js";
 import {
 	clientLoginAction,
 	setInvitePasswordAction,
@@ -22,7 +23,8 @@ export default function ClientLogin() {
 	// implicit-flow token only exists in the fragment, so the server never sees
 	// it. Capture it here, then strip the URL so a refresh returns to the plain
 	// sign-in form (re-click the email link to re-enter setup).
-	onMount(() => {
+	onSettled(() => {
+		if (typeof window === "undefined") return; // onSettled runs on the server too
 		const hash = new URLSearchParams(window.location.hash.slice(1));
 		const query = new URLSearchParams(window.location.search);
 		if (hash.get("type") === "invite" && hash.get("access_token"))

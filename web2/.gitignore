@@ -1,7 +1,0 @@
-node_modules/
-dist/
-.output/
-solid-env.d.ts
-file-routes.d.ts
-.env
-.env.local

@@ -3,7 +3,8 @@
 // building → delivered/declined), and the shipped-work linking to its outreach
 // prospect row.
 import { Title } from "@solidjs/meta";
-import { createAsync, useAction } from "@solidjs/router";
+import { createMemo } from "solid-js";
+import { useAction } from "@solidjs/router";
 import { For, Show } from "solid-js";
 import Layout from "~/components/Layout";
 import { getBrainRequestsQuery, setBrainRequestStatusAction, linkBrainRequestToProspectAction } from "~/lib/admin-queries";
@@ -13,7 +14,7 @@ import SelectField from "~/components/select-field";
 const STATUSES = ["new", "building", "delivered", "declined"] as const;
 
 export default function BrainRequests() {
-	const requests = createAsync(() => getBrainRequestsQuery(), { deferStream: true });
+	const requests = createMemo(() => getBrainRequestsQuery(), { deferStream: true });
 	const setStatus = useAction(setBrainRequestStatusAction);
 	const linkProspect = useAction(linkBrainRequestToProspectAction);
 

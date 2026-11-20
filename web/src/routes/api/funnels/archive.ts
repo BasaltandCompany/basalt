@@ -3,7 +3,7 @@ import { funnelAuthed } from "~/lib/funnel-auth";
 // enriched rawData (Prospeo rosters, ImportYeti scrapes) is too expensive to
 // lose; archiving greys a funnel out and drops it from the New-run dropdown.
 // POST /api/funnels/archive {funnelId, archived: true|false} → { funnel }
-import type { APIEvent } from "@solidjs/start/server";
+import type { APIEvent } from "filesystem-routing/api";
 import { eq } from "drizzle-orm";
 import { db } from "~/db";
 import { funnels } from "~/db/schema";

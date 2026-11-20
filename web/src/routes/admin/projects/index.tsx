@@ -1,6 +1,7 @@
 import { Title } from "@solidjs/meta";
-import { A, createAsync, useAction } from "@solidjs/router";
-import { For, Show, Suspense, createSignal, createMemo } from "solid-js";
+import { createMemo, For, Show, Loading, createSignal } from "solid-js";
+import { useAction } from "@solidjs/router";
+
 import CreateDialog from "~/components/CreateDialog";
 import Layout from "~/components/Layout";
 import {
@@ -19,9 +20,9 @@ const statusBadge: Record<string, string> = {
 };
 
 export default function Projects() {
-	const user = createAsync(() => getUserQuery(), { deferStream: true });
-	const projects = createAsync(() => getProjectsQuery(), { deferStream: true });
-	const companies = createAsync(() => getCompaniesForSelectQuery(), {
+	const user = createMemo(() => getUserQuery(), { deferStream: true });
+	const projects = createMemo(() => getProjectsQuery(), { deferStream: true });
+	const companies = createMemo(() => getCompaniesForSelectQuery(), {
 		deferStream: true,
 	});
 	const createProject = useAction(createProjectAction);
@@ -111,7 +112,7 @@ export default function Projects() {
 				</CreateDialog>
 			</div>
 
-			<Suspense fallback={<p class="muted">Loading…</p>}>
+			<Loading fallback={<p class="muted">Loading…</p>}>
 				<Show when={projects()} fallback={<p class="muted">Loading…</p>}>
 					{(list) => (
 						<Show when={list().length > 0} fallback={
@@ -133,7 +134,7 @@ export default function Projects() {
 										{(p) => (
 											<TableRow>
 												<TableCell>
-													<A href={`/admin/projects/${p.id}`}>{p.name}</A>
+													<a href={`/admin/projects/${p.id}`}>{p.name}</a>
 												</TableCell>
 												<TableCell class="muted">{p.companyName}</TableCell>
 												<TableCell style={{ "text-transform": "capitalize" }}>{p.engagementType}</TableCell>
@@ -152,7 +153,7 @@ export default function Projects() {
 						</Show>
 					)}
 				</Show>
-			</Suspense>
+			</Loading>
 		</Layout>
 	);
 }

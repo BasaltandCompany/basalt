@@ -2,7 +2,7 @@
 // GET    /api/secure-shares/:id → { share, items } — metadata only, never ciphertext
 // PATCH  /api/secure-shares/:id {status: "open" | "closed"}
 // DELETE /api/secure-shares/:id → delete share (items cascade) + best-effort storage cleanup
-import type { APIEvent } from "@solidjs/start/server";
+import type { APIEvent } from "filesystem-routing/api";
 import { asc, eq } from "drizzle-orm";
 import { db } from "~/db";
 import { projects, secureShareItems, secureShares } from "~/db/schema";
@@ -16,7 +16,7 @@ function json(body: unknown, status = 200) {
 
 export async function GET(event: APIEvent) {
 	if ((await getAuthedClient()) === null) return json({ error: "Unauthorized" }, 401);
-	const id = event.params.id ?? "";
+	const id = event.params!.id ?? "";
 	const [share] = await db
 		.select({
 			id: secureShares.id,
@@ -50,7 +50,7 @@ export async function GET(event: APIEvent) {
 
 export async function PATCH(event: APIEvent) {
 	if ((await getAuthedClient()) === null) return json({ error: "Unauthorized" }, 401);
-	const id = event.params.id ?? "";
+	const id = event.params!.id ?? "";
 	const body = (await event.request.json().catch(() => ({}))) as { status?: string };
 	if (body.status !== "open" && body.status !== "closed") return json({ error: "status must be open or closed" }, 400);
 	await db.update(secureShares).set({ status: body.status }).where(eq(secureShares.id, id));
@@ -59,7 +59,7 @@ export async function PATCH(event: APIEvent) {
 
 export async function DELETE(event: APIEvent) {
 	if ((await getAuthedClient()) === null) return json({ error: "Unauthorized" }, 401);
-	const id = event.params.id ?? "";
+	const id = event.params!.id ?? "";
 	const paths = (
 		await db.select({ storagePath: secureShareItems.storagePath }).from(secureShareItems).where(eq(secureShareItems.shareId, id))
 	)

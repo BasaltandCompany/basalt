@@ -1,5 +1,6 @@
-import type { ValidComponent } from "solid-js"
-import { splitProps } from "solid-js"
+import type { ClassValue } from "clsx"
+import type { ValidComponent } from "@solidjs/web"
+import { splitProps } from "../../solid2-compat"
 
 import type { PolymorphicProps } from "@kobalte/core/polymorphic"
 import * as TabsPrimitive from "@kobalte/core/tabs"
@@ -9,7 +10,7 @@ import { cn } from "../../lib/utils"
 const Tabs = TabsPrimitive.Root
 
 type TabsListProps<T extends ValidComponent = "div"> = TabsPrimitive.TabsListProps<T> & {
-  class?: string | undefined
+  class?: ClassValue | undefined
 }
 
 const TabsList = <T extends ValidComponent = "div">(
@@ -28,7 +29,7 @@ const TabsList = <T extends ValidComponent = "div">(
 }
 
 type TabsTriggerProps<T extends ValidComponent = "button"> = TabsPrimitive.TabsTriggerProps<T> & {
-  class?: string | undefined
+  class?: ClassValue | undefined
 }
 
 const TabsTrigger = <T extends ValidComponent = "button">(
@@ -47,7 +48,7 @@ const TabsTrigger = <T extends ValidComponent = "button">(
 }
 
 type TabsContentProps<T extends ValidComponent = "div"> = TabsPrimitive.TabsContentProps<T> & {
-  class?: string | undefined
+  class?: ClassValue | undefined
 }
 
 const TabsContent = <T extends ValidComponent = "div">(
@@ -66,7 +67,7 @@ const TabsContent = <T extends ValidComponent = "div">(
 }
 
 type TabsIndicatorProps<T extends ValidComponent = "div"> = TabsPrimitive.TabsIndicatorProps<T> & {
-  class?: string | undefined
+  class?: ClassValue | undefined
 }
 
 const TabsIndicator = <T extends ValidComponent = "div">(

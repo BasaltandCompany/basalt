@@ -1,5 +1,6 @@
-import type { Component, ComponentProps, ParentProps, VoidProps } from "solid-js"
-import { splitProps } from "solid-js"
+import type { Component, ParentProps, VoidProps } from "solid-js";
+import type { ComponentProps } from "@solidjs/web"
+import { splitProps } from "../../solid2-compat"
 
 import type { DialogRootProps } from "@kobalte/core/dialog"
 import * as CommandPrimitive from "cmdk-solid"

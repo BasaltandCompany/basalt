@@ -22,27 +22,27 @@ export function createRemoteSync<T>(opts: {
 }) {
 	// baseline = first defined remote value; before that arrives (SSR/hydration
 	// timing) nothing applies — the component's own seed covers it
-	const [synced, setSynced] = createSignal<T | undefined>(untrack(() => opts.remote()));
-	createEffect(() => {
-		const remote = opts.remote();
-		if (remote === undefined) return;
-		const s = synced();
-		if (s === undefined) {
-			setSynced(() => remote);
-			return;
-		}
-		if (opts.local() === s) {
-			if (remote !== s) {
-				untrack(() => {
-					opts.setLocal(remote);
-					setSynced(() => remote);
-					opts.onApplied?.(remote);
-				});
+	const [synced, setSynced] = createSignal<T | undefined>(untrack(() => opts.remote()) as Exclude<T | undefined, Function>);
+	createEffect(
+		() => ({ remote: opts.remote(), local: opts.local(), s: synced() }),
+		(v) => {
+			// Solid 2: writes live in the untracked effect phase; the compute above only tracks.
+			if (v.remote === undefined) return;
+			if (v.s === undefined) {
+				setSynced(() => v.remote);
+				return;
 			}
-		} else if (remote !== s) {
-			untrack(() => opts.onConflict?.(remote));
-		}
-	});
+			if (v.local === v.s) {
+				if (v.remote !== v.s) {
+					opts.setLocal(v.remote);
+					setSynced(() => v.remote);
+					opts.onApplied?.(v.remote);
+				}
+			} else if (v.remote !== v.s) {
+				opts.onConflict?.(v.remote);
+			}
+		},
+	);
 	return {
 		markSynced: (v: T) => setSynced(() => v),
 	};

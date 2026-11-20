@@ -1,5 +1,5 @@
 import { Title } from "@solidjs/meta";
-import { A, createAsync } from "@solidjs/router";
+import { createMemo } from "solid-js";
 import { For, Show } from "solid-js";
 import PortalLayout from "~/components/PortalLayout";
 import { getClientQuotesQuery, getClientUserQuery } from "~/lib/client-queries";
@@ -13,8 +13,8 @@ const statusBadge: Record<string, string> = {
 };
 
 export default function PortalQuotes() {
-	const user = createAsync(() => getClientUserQuery(), { deferStream: true });
-	const quotes = createAsync(() => getClientQuotesQuery(), { deferStream: true });
+	const user = createMemo(() => getClientUserQuery(), { deferStream: true });
+	const quotes = createMemo(() => getClientQuotesQuery(), { deferStream: true });
 
 	return (
 		<PortalLayout user={user()}>
@@ -41,7 +41,7 @@ export default function PortalQuotes() {
 										{(q) => (
 											<TableRow>
 												<TableCell>
-													<A href={`/portal/quotes/${q.id}`}>{q.title}</A>
+													<a href={`/portal/quotes/${q.id}`}>{q.title}</a>
 												</TableCell>
 												<TableCell class="mono" style={{ "font-weight": "500" }}>
 													${Math.round(q.totals.total).toLocaleString("en-US")}
@@ -52,7 +52,7 @@ export default function PortalQuotes() {
 												<TableCell class="muted">{q.updatedAt.toLocaleDateString()}</TableCell>
 												<TableCell>
 													<Show when={q.status === "sent"}>
-														<A href={`/portal/quotes/${q.id}`}>Review & sign →</A>
+														<a href={`/portal/quotes/${q.id}`}>Review & sign →</a>
 													</Show>
 												</TableCell>
 											</TableRow>

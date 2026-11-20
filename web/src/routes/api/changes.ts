@@ -1,7 +1,7 @@
 // Live admin feed — GET /api/changes?since=<id> → { events: [{id, table, op}], last }.
 // `last` is the cursor the client sends next time (== since when nothing changed).
 // Session-guarded; rows come from the basalt_notify_change() trigger (lib/live-server.ts).
-import type { APIEvent } from "@solidjs/start/server";
+import type { APIEvent } from "filesystem-routing/api";
 import { asc, gt } from "drizzle-orm";
 import { db } from "~/db";
 import { changeEvents } from "~/db/schema";

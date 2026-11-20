@@ -1,6 +1,6 @@
 // /writing — everything published, one index. The Dispatch archive plus the
 // anonymized public-university case study. Same issues API as /newsletter.
-import { createAsync } from "@solidjs/router"
+import { createMemo } from "solid-js"
 import { For, Show } from "solid-js"
 import { Page } from "@/components/site"
 import { DASHBOARD } from "@/lib/dashboard"
@@ -8,7 +8,7 @@ import { DASHBOARD } from "@/lib/dashboard"
 type Issue = { id: string; issueNumber: number; title: string; publishedAt: string | null }
 
 export default function Writing() {
-  const issues = createAsync(async () => {
+  const issues = createMemo(async () => {
     const res = await fetch(`${DASHBOARD}/api/newsletter-issues`)
     if (!res.ok) return []
     const data = (await res.json()) as { issues: Issue[] }

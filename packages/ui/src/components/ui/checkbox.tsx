@@ -1,5 +1,7 @@
-import type { ValidComponent } from "solid-js"
-import { Match, splitProps, Switch } from "solid-js"
+import type { ClassValue } from "clsx"
+import type { ValidComponent } from "@solidjs/web"
+import { Match, Switch } from "solid-js";
+import { splitProps } from "../../solid2-compat"
 
 import * as CheckboxPrimitive from "@kobalte/core/checkbox"
 import type { PolymorphicProps } from "@kobalte/core/polymorphic"
@@ -7,7 +9,7 @@ import type { PolymorphicProps } from "@kobalte/core/polymorphic"
 import { cn } from "../../lib/utils"
 
 type CheckboxRootProps<T extends ValidComponent = "div"> =
-  CheckboxPrimitive.CheckboxRootProps<T> & { class?: string | undefined }
+  CheckboxPrimitive.CheckboxRootProps<T> & { class?: ClassValue | undefined }
 
 const Checkbox = <T extends ValidComponent = "div">(
   props: PolymorphicProps<T, CheckboxRootProps<T>>

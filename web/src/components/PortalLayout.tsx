@@ -1,5 +1,6 @@
-import { A } from "@solidjs/router";
+
 import { For, ParentComponent, Show, createEffect } from "solid-js";
+import { useLocation } from "@solidjs/router";
 import Toaster from "~/components/Toaster";
 import Brand from "~/components/Brand";
 
@@ -13,11 +14,14 @@ const links = [
 ];
 
 const PortalLayout: ParentComponent<{ user?: { id?: string; name?: string; email?: string } | null }> = (props) => {
+	const loc = useLocation();
 	// Identify user in PostHog once loaded
-	createEffect(() => {
-		const u = props.user;
-		if (u?.id) (window as any).posthog?.identify?.(u.id, { email: u.email });
-	});
+	createEffect(
+		() => props.user,
+		(u) => {
+			if (u?.id) (window as any).posthog?.identify?.(u.id, { email: u.email });
+		},
+	);
 
 	function handleLogoutForm(e: Event) {
 		(window as any).posthog?.reset?.();
@@ -33,14 +37,12 @@ const PortalLayout: ParentComponent<{ user?: { id?: string; name?: string; email
 				<nav class="sidebar-nav">
 					<For each={links}>
 						{(link) => (
-							<A
-								href={link.href}
-								end={link.href === "/portal"}
-								class="nav-link"
-								activeClass="active"
+							<a
+							href={link.href}
+							class={["nav-link", { active: link.href === "/portal" ? loc.pathname === "/portal" : loc.pathname.startsWith(link.href) }]}
 							>
 								{link.label}
-							</A>
+							</a>
 						)}
 					</For>
 				</nav>

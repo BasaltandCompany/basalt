@@ -1,6 +1,6 @@
 import { Title } from "@solidjs/meta";
-import { A, createAsync } from "@solidjs/router";
-import { For, Show, createSignal, onMount } from "solid-js";
+import { createMemo } from "solid-js";
+import { For, Show, createSignal, onSettled } from "solid-js";
 import Layout from "~/components/Layout"
 import { humanizeAiSignalNote } from "~/lib/ai-signal";
 import { toast } from "~/lib/toast";
@@ -43,7 +43,7 @@ function WebsiteChip(props: { item: Item }) {
 // Redo clears a stage (re-queues the item); a fail on a promoted prospect
 // un-approves it via the API.
 export default function AdminFunnelRun(props: { params: { id: string } }) {
-	createAsync(() => getUserQuery(), { deferStream: true });
+	createMemo(() => getUserQuery(), { deferStream: true });
 	const [run, setRun] = createSignal<Run | null>(null);
 	const [stages, setStages] = createSignal<Stage[]>([]);
 	const [items, setItems] = createSignal<Item[]>([]);
@@ -140,7 +140,7 @@ export default function AdminFunnelRun(props: { params: { id: string } }) {
 		setResults(body.results);
 		setSummary(body.summary);
 	}
-	onMount(() => {
+	onSettled(() => {
 		void refresh();
 		void loadSchedule();
 	});
@@ -251,7 +251,7 @@ export default function AdminFunnelRun(props: { params: { id: string } }) {
 	return (
 		<Layout>
 			<Title>Funnel run</Title>
-			<p class="muted" style={{ margin: "0" }}><A href="/admin/funnels">← Funnels</A></p>
+			<p class="muted" style={{ margin: "0" }}><a href="/admin/funnels">← Funnels</a></p>
 			<Show when={!editing()} fallback={
 				<form class="form-row" onSubmit={saveEdit} style={{ "margin-bottom": "8px" }}>
 					<input name="note" value={run()?.note ?? ""} placeholder="run title" style={{ "max-width": "320px" }} />

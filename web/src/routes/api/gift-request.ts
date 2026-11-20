@@ -2,7 +2,7 @@
 // row (answers verbatim in jsonb + extracted queryable columns), and alerts
 // Collin, who builds and sends the AI game plan manually. Spam defense: per-IP
 // rate limit + honeypot field, no captcha dependency.
-import type { APIEvent } from "@solidjs/start/server";
+import type { APIEvent } from "filesystem-routing/api";
 import { db } from "~/db";
 import { brainRequests } from "~/db/schema";
 import { alertEmail } from "~/lib/publish";

@@ -1,6 +1,7 @@
 import { Title } from "@solidjs/meta";
-import { createAsync, useAction } from "@solidjs/router";
-import { For, Show, Suspense, createSignal } from "solid-js";
+import { createMemo } from "solid-js";
+import { useAction } from "@solidjs/router";
+import { For, Show, Loading, createSignal } from "solid-js";
 import CreateDialog, { type CreateResult } from "~/components/CreateDialog";
 import ConfirmButton from "~/components/ConfirmButton";
 import Layout from "~/components/Layout";
@@ -18,8 +19,8 @@ type AppCreatedResult = { clientId?: string; clientSecret?: string | null; error
  *  2.1 server (authorization code + PKCE). The hosted consent page lives at
  *  /oauth/consent; source of truth is Supabase Auth, not our Postgres. */
 export default function AdminOAuth() {
-	const user = createAsync(() => getUserQuery(), { deferStream: true });
-	const apps = createAsync(() => getOAuthAppsQuery(), { deferStream: true });
+	const user = createMemo(() => getUserQuery(), { deferStream: true });
+	const apps = createMemo(() => getOAuthAppsQuery(), { deferStream: true });
 	const createApp = useAction(createOAuthAppAction);
 	const deleteApp = useAction(deleteOAuthAppAction);
 
@@ -71,7 +72,7 @@ export default function AdminOAuth() {
 				</CreateDialog>
 			</div>
 
-			<Suspense fallback={<p class="muted">Loading…</p>}>
+			<Loading fallback={<p class="muted">Loading…</p>}>
 				<Show
 					when={apps()?.length}
 					fallback={<p class="muted">No OAuth apps registered yet.</p>}
@@ -101,7 +102,7 @@ export default function AdminOAuth() {
 						</For>
 					</div>
 				</Show>
-			</Suspense>
+			</Loading>
 		</Layout>
 	);
 }

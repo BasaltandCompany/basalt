@@ -1,9 +1,0 @@
-node_modules
-dist
-.output
-.astro
-.git
-.env
-.env.production
-*.log
-.DS_Store

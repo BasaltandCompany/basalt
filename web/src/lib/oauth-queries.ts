@@ -1,5 +1,5 @@
-import { query, action, revalidate } from "@solidjs/router";
-import { setCookie } from "@solidjs/start/http";
+import { query, formAction, revalidate } from "@solidjs/router";
+import { setCookie } from "~/lib/http";
 import { getAuthedClient, COOKIE_OPTS } from "./session";
 import { supabaseAdmin, supabaseService } from "./supabase";
 import { requireAdmin } from "./admin-queries";
@@ -56,7 +56,7 @@ export const getConsentQuery = query(async (authorizationId: string): Promise<Co
 
 /** Password sign-in for the consent page. Sets the Supabase token cookies but
  *  never mc_owner — OAuth visitors aren't the owner's browser. */
-export const oauthLoginAction = action(async (formData: FormData) => {
+export const oauthLoginAction = formAction(async (formData: FormData) => {
 	"use server";
 	const email = String(formData.get("email") || "")
 		.trim()
@@ -95,12 +95,12 @@ async function consentDecision(authorizationId: string, decision: "approve" | "d
 	return { redirectUrl: data.redirect_url };
 }
 
-export const approveConsentAction = action(async (formData: FormData) => {
+export const approveConsentAction = formAction(async (formData: FormData) => {
 	"use server";
 	return consentDecision(String(formData.get("authorization_id") || ""), "approve");
 }, "oauth-approve");
 
-export const denyConsentAction = action(async (formData: FormData) => {
+export const denyConsentAction = formAction(async (formData: FormData) => {
 	"use server";
 	return consentDecision(String(formData.get("authorization_id") || ""), "deny");
 }, "oauth-deny");
@@ -131,7 +131,7 @@ export const getOAuthAppsQuery = query(async (): Promise<OAuthApp[]> => {
 	}));
 }, "admin-oauth-apps");
 
-export const createOAuthAppAction = action(async (formData: FormData) => {
+export const createOAuthAppAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const name = String(formData.get("name") || "").trim();
@@ -160,7 +160,7 @@ export const createOAuthAppAction = action(async (formData: FormData) => {
 	return { clientId: data.client_id, clientSecret: data.client_secret ?? null };
 }, "create-oauth-app");
 
-export const deleteOAuthAppAction = action(async (formData: FormData) => {
+export const deleteOAuthAppAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const clientId = String(formData.get("client_id") || "");

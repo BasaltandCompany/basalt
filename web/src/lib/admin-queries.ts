@@ -1,4 +1,5 @@
-import { query, action, redirect, revalidate } from "@solidjs/router";
+import { query, formAction, revalidate } from "@solidjs/router";
+import { redirect } from "@solidjs/web";
 import { eq, and, desc, asc, inArray, isNull, isNotNull, ilike, gt, gte, lte, notInArray, sql } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm";
 import { dateOrNull } from "./queries";
@@ -76,7 +77,7 @@ export const getCompaniesQuery = query(async () => {
 	return db.select().from(companies).orderBy(desc(companies.createdAt));
 }, "admin-companies");
 
-export const createCompanyAction = action(async (formData: FormData) => {
+export const createCompanyAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	await db.insert(companies).values({
@@ -87,7 +88,7 @@ export const createCompanyAction = action(async (formData: FormData) => {
 
 /** Pseudonyms the meeting publisher matches against Anarlog titles.
  *  Input: comma-separated; stored as a JSON array of strings. */
-export const updateCompanyAliasesAction = action(async (formData: FormData) => {
+export const updateCompanyAliasesAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id"));
@@ -125,7 +126,7 @@ export const getCompanyMembersQuery = query(async (companyId: string) => {
 		.where(eq(clientCompanyMembers.companyId, companyId));
 }, "admin-company-members");
 
-export const createMemberAction = action(async (formData: FormData) => {
+export const createMemberAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const companyId = String(formData.get("company_id"));
@@ -153,7 +154,7 @@ export const createMemberAction = action(async (formData: FormData) => {
 	return { success: `Member created. Invite sent to ${email}.` };
 }, "createMember");
 
-export const linkMemberAction = action(async (formData: FormData) => {
+export const linkMemberAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const memberId = String(formData.get("member_id"));
@@ -169,7 +170,7 @@ export const linkMemberAction = action(async (formData: FormData) => {
 // every company link + API key. Deliberately NOT an "unlink from one company" —
 // if a member belongs to multiple companies, removing them here removes them
 // everywhere. Re-create via "Add Member" if that's ever wrong.
-export const removeMemberAction = action(async (formData: FormData) => {
+export const removeMemberAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const memberId = String(formData.get("member_id"));
@@ -200,7 +201,7 @@ function inviteRedirect(): string | null {
 	return site ? `${site.replace(/\/$/, "")}/portal/login` : null;
 }
 
-export const resendInviteAction = action(async (formData: FormData) => {
+export const resendInviteAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id"));
@@ -234,7 +235,7 @@ export const getSignedInEmailsQuery = query(async () => {
 		.map((u) => u.email!);
 }, "admin-signed-in-emails");
 
-export const toggleMemberActiveAction = action(async (formData: FormData) => {
+export const toggleMemberActiveAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id"));
@@ -281,7 +282,7 @@ export const getDocumentsQuery = query(async (projectId: string) => {
 		.orderBy(desc(documents.createdAt));
 }, "admin-documents");
 
-export const createDocumentLinkAction = action(async (formData: FormData) => {
+export const createDocumentLinkAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	await db.insert(documents).values({
@@ -297,7 +298,7 @@ export const createDocumentLinkAction = action(async (formData: FormData) => {
 	throw redirect(ref ? String(ref) : "/admin/companies");
 }, "createDocumentLink");
 
-export const deleteDocumentAction = action(async (formData: FormData) => {
+export const deleteDocumentAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id"));
@@ -328,7 +329,7 @@ export const getInvoicesQuery = query(async (projectId: string) => {
 		.orderBy(desc(invoices.createdAt));
 }, "admin-invoices");
 
-export const createInvoiceAction = action(async (formData: FormData) => {
+export const createInvoiceAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	await db.insert(invoices).values({
@@ -349,7 +350,7 @@ export const createInvoiceAction = action(async (formData: FormData) => {
 	throw redirect(ref ? String(ref) : "/admin/companies");
 }, "createInvoice");
 
-export const deleteInvoiceAction = action(async (formData: FormData) => {
+export const deleteInvoiceAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id"));
@@ -378,7 +379,7 @@ export const getCompanyToolsQuery = query(async (companyId: string) => {
 		.orderBy(desc(tools.createdAt));
 }, "admin-company-tools");
 
-export const createToolAction = action(async (formData: FormData) => {
+export const createToolAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	await db.insert(tools).values({
@@ -392,7 +393,7 @@ export const createToolAction = action(async (formData: FormData) => {
 	throw redirect(String(formData.get("_referer") || "/admin/companies"));
 }, "createTool");
 
-export const updateToolAction = action(async (formData: FormData) => {
+export const updateToolAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	await db
@@ -408,7 +409,7 @@ export const updateToolAction = action(async (formData: FormData) => {
 	throw redirect(String(formData.get("_referer") || "/admin/companies"));
 }, "updateTool");
 
-export const deleteToolAction = action(async (formData: FormData) => {
+export const deleteToolAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	await db.delete(tools).where(eq(tools.id, String(formData.get("id"))));
@@ -505,7 +506,7 @@ export const getDeliverablesQuery = query(async (projectId: string) => {
 	}));
 }, "admin-deliverables");
 
-export const createDeliverableAction = action(async (formData: FormData) => {
+export const createDeliverableAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const projectId = String(formData.get("project_id"));
@@ -526,7 +527,7 @@ export const createDeliverableAction = action(async (formData: FormData) => {
 	return { success: "Deliverable created." };
 }, "createDeliverable");
 
-export const updateDeliverableStatusAction = action(
+export const updateDeliverableStatusAction = formAction(
 	async (formData: FormData) => {
 		"use server";
 		await requireAdmin();
@@ -542,7 +543,7 @@ export const updateDeliverableStatusAction = action(
 	"updateDeliverableStatus",
 );
 
-export const addDeliverableUpdateAction = action(async (formData: FormData) => {
+export const addDeliverableUpdateAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const deliverableId = String(formData.get("deliverable_id"));
@@ -557,7 +558,7 @@ export const addDeliverableUpdateAction = action(async (formData: FormData) => {
 	throw redirect(ref ? String(ref) : "/admin/projects");
 }, "addDeliverableUpdate");
 
-export const deleteDeliverableAction = action(async (formData: FormData) => {
+export const deleteDeliverableAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id"));
@@ -621,7 +622,7 @@ export const getMeetingDraftQuery = query(async (id: string) => {
 }, "admin-meeting-draft");
 
 /** Persist in-editor changes (title, block text) without publishing. */
-export const saveMeetingDraftAction = action(async (formData: FormData) => {
+export const saveMeetingDraftAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id"));
@@ -655,7 +656,7 @@ function mergeKeptRanges(blocks: TranscriptBlock[]): Array<[number, number]> {
 
 /** Publish a meeting draft: cut audio to the kept ranges, rewrite content,
  *  assign the project, flip visibility to client. */
-export const publishMeetingAction = action(async (formData: FormData) => {
+export const publishMeetingAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id"));
@@ -783,7 +784,7 @@ export const getAdminApiKeysQuery = query(async () => {
 		.orderBy(desc(apiKeys.createdAt));
 }, "admin-api-keys");
 
-export const createAdminApiKeyAction = action(async (formData: FormData) => {
+export const createAdminApiKeyAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const label = String(formData.get("label") || "Default");
@@ -802,7 +803,7 @@ export const createAdminApiKeyAction = action(async (formData: FormData) => {
 	return { key: rawKey }; // shown once — only the hash is stored
 }, "createAdminApiKey");
 
-export const revokeAdminApiKeyAction = action(async (formData: FormData) => {
+export const revokeAdminApiKeyAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id"));
@@ -900,7 +901,7 @@ export const getOutreachQuery = query(async () => {
 	return { all, due, campaigns: campaignList };
 }, "admin-outreach");
 
-export const createOutreachAction = action(async (formData: FormData) => {
+export const createOutreachAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const company = String(formData.get("company") || "").trim();
@@ -944,7 +945,7 @@ const STAGE_NEXT_DAYS: Partial<Record<OutreachStage, number>> = {
 	meeting: 1,
 };
 
-export const setOutreachStageAction = action(async (formData: FormData) => {
+export const setOutreachStageAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id"));
@@ -968,7 +969,7 @@ export const setOutreachStageAction = action(async (formData: FormData) => {
 // ICP qualification — researched by Collin (or the sourcing automation), never
 // asked of the lead. icpApproved=yes is the gate that lets the connect
 // automation send an invite.
-export const setOutreachIcpAction = action(async (formData: FormData) => {
+export const setOutreachIcpAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id"));
@@ -1010,7 +1011,7 @@ export const getDueOutreachCountQuery = query(async () => {
 }, "due-outreach-count");
 
 // Brain URL + activity key for an existing prospect (formerly a Fly env secret).
-export const setOutreachBrainAction = action(async (formData: FormData) => {
+export const setOutreachBrainAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id"));
@@ -1043,7 +1044,7 @@ export const getVideosQuery = query(async () => {
 // Video link + description for a prospect, on the videos table. Empty
 // video_url removes the video ("empty clears, absent leaves unchanged" via
 // has(): card + videos-page forms always submit both fields).
-export const setOutreachVideoAction = action(async (formData: FormData) => {
+export const setOutreachVideoAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id"));
@@ -1059,7 +1060,7 @@ export const setOutreachVideoAction = action(async (formData: FormData) => {
 	return { success: "Video saved." };
 }, "setOutreachVideo");
 
-export const setOutreachContactAction = action(async (formData: FormData) => {
+export const setOutreachContactAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id"));
@@ -1076,7 +1077,7 @@ export const setOutreachContactAction = action(async (formData: FormData) => {
 	return { success: "Contact saved." };
 }, "setOutreachContact");
 
-export const setOutreachNextActionAction = action(async (formData: FormData) => {
+export const setOutreachNextActionAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id"));
@@ -1132,7 +1133,7 @@ export type CampaignTemplatesResult = { success: string } | { error: string };
  *  live LintedTextarea panel shows violations while editing. The MCP
  *  set_campaign_templates tool keeps its hard lint gate; agents write
  *  through a different path. */
-export const setCampaignTemplatesAction = action(async (formData: FormData): Promise<CampaignTemplatesResult> => {
+export const setCampaignTemplatesAction = formAction(async (formData: FormData): Promise<CampaignTemplatesResult> => {
 	"use server";
 	await requireAdmin();
 	const campaignId = String(formData.get("campaign_id") || "");
@@ -1153,7 +1154,7 @@ export const setCampaignTemplatesAction = action(async (formData: FormData): Pro
 	return { success: `Templates saved — ${touches.length} touch${touches.length === 1 ? "" : "es"}.` };
 }, "setCampaignTemplates");
 
-export const createCampaignAction = action(async (formData: FormData) => {
+export const createCampaignAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const name = String(formData.get("name") || "").trim();
@@ -1164,7 +1165,7 @@ export const createCampaignAction = action(async (formData: FormData) => {
 	return { success: `Campaign "${name}" created.` };
 }, "createCampaign");
 
-export const updateCampaignAction = action(async (formData: FormData) => {
+export const updateCampaignAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id") || "");
@@ -1177,7 +1178,7 @@ export const updateCampaignAction = action(async (formData: FormData) => {
 	return { success: "Saved." };
 }, "updateCampaign");
 
-export const deleteCampaignAction = action(async (formData: FormData) => {
+export const deleteCampaignAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id"));
@@ -1187,7 +1188,7 @@ export const deleteCampaignAction = action(async (formData: FormData) => {
 	return { success: "Campaign deleted. Prospects keep their board stages." };
 }, "deleteCampaign");
 
-export const addCampaignCompanyAction = action(async (formData: FormData) => {
+export const addCampaignCompanyAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const campaignId = String(formData.get("campaign_id"));
@@ -1209,7 +1210,7 @@ export const addCampaignCompanyAction = action(async (formData: FormData) => {
 	return { success: `${companyName} added.` };
 }, "addCampaignCompany");
 
-export const updateCampaignCompanyAction = action(async (formData: FormData) => {
+export const updateCampaignCompanyAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id"));
@@ -1228,7 +1229,7 @@ export const updateCampaignCompanyAction = action(async (formData: FormData) => 
 	return { success: "Saved." };
 }, "updateCampaignCompany");
 
-export const deleteCampaignCompanyAction = action(async (formData: FormData) => {
+export const deleteCampaignCompanyAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	await db.delete(campaignCompanies).where(eq(campaignCompanies.id, String(formData.get("id"))));
@@ -1236,7 +1237,7 @@ export const deleteCampaignCompanyAction = action(async (formData: FormData) => 
 	return { success: "Removed." };
 }, "deleteCampaignCompany");
 
-export const setProspectCampaignAction = action(async (formData: FormData) => {
+export const setProspectCampaignAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id"));
@@ -1382,7 +1383,7 @@ export const getProspectEmailCardQuery = query(async (prospectId: string) => {
 // Wipes the brain's activity_events rows via POST /activity/reset (gated by
 // the same x-activity-key as GET /activity). Fails soft — an old brain
 // without the route surfaces "brain rejected the reset".
-export const resetBrainActivityAction = action(async (formData: FormData) => {
+export const resetBrainActivityAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id"));
@@ -1426,7 +1427,7 @@ export const getBrainRequestsQuery = query(async () => {
 	}));
 }, "brain-requests");
 
-export const setBrainRequestStatusAction = action(async (formData: FormData) => {
+export const setBrainRequestStatusAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id") || "");
@@ -1439,7 +1440,7 @@ export const setBrainRequestStatusAction = action(async (formData: FormData) => 
 
 // Ship the brain → it becomes outreach pipeline entry. Links (or creates) the
 // matching prospect row and marks the request delivered.
-export const linkBrainRequestToProspectAction = action(async (formData: FormData) => {
+export const linkBrainRequestToProspectAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id") || "");
@@ -1543,7 +1544,7 @@ export const getQuoteQuery = query(async (id: string) => {
 	};
 }, "admin-quote");
 
-export const createQuoteAction = action(async (formData: FormData) => {
+export const createQuoteAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const companyId = String(formData.get("company_id") || "");
@@ -1564,7 +1565,7 @@ export const createQuoteAction = action(async (formData: FormData) => {
 	throw redirect(`/admin/quotes/${row.id}`);
 }, "createQuote");
 
-export const updateQuoteMetaAction = action(async (formData: FormData) => {
+export const updateQuoteMetaAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id"));
@@ -1615,7 +1616,7 @@ export const updateQuoteMetaAction = action(async (formData: FormData) => {
 
 // Attach a quote to a project = link + contract dates + deliverables in one go.
 // Required line items become deliverables, idempotent by title (safe to re-run).
-export const importQuoteToProjectAction = action(async (formData: FormData) => {
+export const importQuoteToProjectAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const quoteId = String(formData.get("quote_id") || "");
@@ -1662,7 +1663,7 @@ export const importQuoteToProjectAction = action(async (formData: FormData) => {
 	return { success: fresh.length ? `Attached — imported ${fresh.length} deliverable(s).` : "Attached." };
 }, "importQuoteToProject");
 
-export const upsertQuoteItemAction = action(async (formData: FormData) => {
+export const upsertQuoteItemAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const quoteId = String(formData.get("quote_id"));
@@ -1683,7 +1684,7 @@ export const upsertQuoteItemAction = action(async (formData: FormData) => {
 	return { success: "Line item saved." };
 }, "upsertQuoteItem");
 
-export const deleteQuoteItemAction = action(async (formData: FormData) => {
+export const deleteQuoteItemAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const quoteId = String(formData.get("quote_id"));
@@ -1696,7 +1697,7 @@ const QUOTE_STATUSES: QuoteStatus[] = ["draft", "sent", "accepted", "rejected"];
 
 // Human-only transitions (agents are drafts-only via MCP). Every transition
 // snapshots the items — "what changed between sends".
-export const setQuoteStatusAction = action(async (formData: FormData) => {
+export const setQuoteStatusAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id"));
@@ -1765,7 +1766,7 @@ const uniqueEmailError = (e: unknown) =>
 			? e.message
 			: "Something went wrong.";
 
-export const createPersonAction = action(async (formData: FormData) => {
+export const createPersonAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const name = String(formData.get("name") || "").trim();
@@ -1784,7 +1785,7 @@ export const createPersonAction = action(async (formData: FormData) => {
 	}
 }, "create-person");
 
-export const addPersonEmailAction = action(async (formData: FormData) => {
+export const addPersonEmailAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const memberId = String(formData.get("member_id"));
@@ -1799,7 +1800,7 @@ export const addPersonEmailAction = action(async (formData: FormData) => {
 	}
 }, "add-person-email");
 
-export const removePersonEmailAction = action(async (formData: FormData) => {
+export const removePersonEmailAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id"));
@@ -1809,7 +1810,7 @@ export const removePersonEmailAction = action(async (formData: FormData) => {
 	return { success: "Address removed." };
 }, "remove-person-email");
 
-export const linkPersonCompanyAction = action(async (formData: FormData) => {
+export const linkPersonCompanyAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const memberId = String(formData.get("member_id"));
@@ -1819,7 +1820,7 @@ export const linkPersonCompanyAction = action(async (formData: FormData) => {
 	return { success: "Company linked." };
 }, "link-person-company");
 
-export const unlinkPersonCompanyAction = action(async (formData: FormData) => {
+export const unlinkPersonCompanyAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const memberId = String(formData.get("member_id"));
@@ -1928,7 +1929,7 @@ export const getGithubLinkPreviewQuery = query(
 	"github-link-preview",
 );
 
-export const linkGithubIdentityAction = action(async (formData: FormData) => {
+export const linkGithubIdentityAction = formAction(async (formData: FormData) => {
 	"use server";
 	const supabase = await getAuthedClient();
 	if (!supabase) throw redirect("/admin/login");
@@ -1947,7 +1948,7 @@ export const linkGithubIdentityAction = action(async (formData: FormData) => {
 	throw redirect("/admin/github");
 }, "link-github-identity");
 
-export const unlinkGithubIdentityAction = action(async (formData: FormData) => {
+export const unlinkGithubIdentityAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const githubId = Number(formData.get("github_id"));

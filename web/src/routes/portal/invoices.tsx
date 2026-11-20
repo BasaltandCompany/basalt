@@ -1,5 +1,5 @@
 import { Title } from "@solidjs/meta";
-import { createAsync } from "@solidjs/router";
+import { createMemo } from "solid-js";
 import { For, Show } from "solid-js";
 import PortalLayout from "~/components/PortalLayout";
 import {
@@ -17,8 +17,8 @@ const statusBadge: Record<InvoiceStatus, string> = {
 };
 
 export default function PortalInvoices() {
-	const user = createAsync(() => getClientUserQuery(), { deferStream: true });
-	const invoices = createAsync(() => getClientInvoicesQuery(), {
+	const user = createMemo(() => getClientUserQuery(), { deferStream: true });
+	const invoices = createMemo(() => getClientInvoicesQuery(), {
 		deferStream: true,
 	});
 

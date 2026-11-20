@@ -1,6 +1,7 @@
 import { Title } from "@solidjs/meta";
-import { A, createAsync, useAction } from "@solidjs/router";
-import { For, Show, Suspense, createSignal } from "solid-js";
+import { createMemo } from "solid-js";
+import { useAction } from "@solidjs/router";
+import { For, Show, Loading, createSignal } from "solid-js";
 import CreateDialog from "~/components/CreateDialog";
 import Layout from "~/components/Layout";
 import {
@@ -16,12 +17,12 @@ import { getUserQuery } from "~/lib/queries";
 import { Button, Card, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@basaltac/ui";
 
 export default function Companies() {
-	const user = createAsync(() => getUserQuery(), { deferStream: true });
-	const companies = createAsync(() => getCompaniesQuery(), {
+	const user = createMemo(() => getUserQuery(), { deferStream: true });
+	const companies = createMemo(() => getCompaniesQuery(), {
 		deferStream: true,
 	});
-	const members = createAsync(() => getMembersQuery(), { deferStream: true });
-	const signedInEmails = createAsync(() => getSignedInEmailsQuery(), {
+	const members = createMemo(() => getMembersQuery(), { deferStream: true });
+	const signedInEmails = createMemo(() => getSignedInEmailsQuery(), {
 		deferStream: true,
 	});
 	// Resend only while the invite is pending (member never signed in).
@@ -79,7 +80,7 @@ export default function Companies() {
 				</CreateDialog>
 			</div>
 
-			<Suspense fallback={<p class="muted">Loading…</p>}>
+			<Loading fallback={<p class="muted">Loading…</p>}>
 				<Show when={companies()} fallback={<p class="muted">Loading…</p>}>
 					{(list) => (
 						<Show when={list().length > 0} fallback={
@@ -99,7 +100,7 @@ export default function Companies() {
 										{(c) => (
 											<TableRow>
 												<TableCell>
-													<A href={`/admin/companies/${c.id}`}>{c.name}</A>
+													<a href={`/admin/companies/${c.id}`}>{c.name}</a>
 												</TableCell>
 												<TableCell class="muted">
 													{(members() ?? []).filter((m) =>
@@ -119,7 +120,7 @@ export default function Companies() {
 						</Show>
 					)}
 				</Show>
-			</Suspense>
+			</Loading>
 
 			{/* ── Members section ─────────────────────────────────── */}
 			<div style={{ "margin-top": "48px" }}>
@@ -130,7 +131,7 @@ export default function Companies() {
 				<Show when={success()}>
 					<p style={{ color: "#16a34a", "font-size": "13px", "margin-top": "8px" }}>{success()}</p>
 				</Show>
-				<Suspense fallback={<p class="muted">Loading…</p>}>
+				<Loading fallback={<p class="muted">Loading…</p>}>
 					<Show when={members()} fallback={<p class="muted">Loading…</p>}>
 						{(list) => (
 							<Show when={list().length > 0} fallback={
@@ -176,7 +177,7 @@ export default function Companies() {
 							</Show>
 						)}
 					</Show>
-				</Suspense>
+				</Loading>
 			</div>
 
 		</Layout>

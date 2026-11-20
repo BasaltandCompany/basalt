@@ -58,10 +58,10 @@ export function LinkedInPreview(props: { markdown: string; title: string; firstC
 					<Show when={text().length > 210}>
 						<span
 							style={{ color: "#0a66c2", cursor: "pointer" }}
-							onClick={() => setExpanded((v) => !v)}
+							onClick={() => { setExpanded((v) => !v); }}
 							role="button"
-							tabIndex={0}
-							onKeyDown={(e) => e.key === "Enter" && setExpanded((v) => !v)}
+							tabindex={0}
+							onKeyDown={(e) => { if (e.key === "Enter") setExpanded((v) => !v); }}
 						>
 							{expanded() ? " see less" : " see more"}
 						</span>

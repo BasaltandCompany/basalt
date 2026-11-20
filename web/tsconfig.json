@@ -1,20 +1,22 @@
 {
-  "compilerOptions": {
-    "target": "ESNext",
-    "module": "preserve",
-    "allowSyntheticDefaultImports": true,
-    "esModuleInterop": true,
-    "jsx": "preserve",
-    "jsxImportSource": "solid-js",
-    "allowJs": true,
-    "strict": true,
-    "noEmit": true,
-    "skipLibCheck": true,
-    "types": ["vite/client", "bun"],
-    "isolatedModules": true,
-    "paths": {
-      "~/*": ["./src/*"],
-      "@/*": ["./src/*"]
-    }
-  }
+	"compilerOptions": {
+		"jsx": "preserve",
+		"jsxImportSource": "@solidjs/web",
+		"allowSyntheticDefaultImports": true,
+		"esModuleInterop": true,
+		"isolatedModules": true,
+		"allowJs": true,
+		"module": "preserve",
+		"noEmit": true,
+		"strict": true,
+		"skipLibCheck": true,
+		"types": ["vite/client", "bun", "node"],
+		"paths": {
+			"~/*": ["./src/*"],
+			"@/*": ["./src/*"],
+			"@basaltac/ui": ["../packages/ui/src/index.ts"],
+			"@basaltac/ui/*": ["../packages/ui/src/components/ui/*.tsx"]
+		}
+	},
+	"include": ["src", "vite.config.ts", "file-routes.d.ts", "../packages/ui/src"]
 }

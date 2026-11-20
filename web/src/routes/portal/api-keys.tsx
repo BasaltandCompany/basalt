@@ -1,5 +1,6 @@
 import { Title } from "@solidjs/meta";
-import { createAsync, revalidate, useAction } from "@solidjs/router";
+import { createMemo } from "solid-js";
+import { revalidate, useAction } from "@solidjs/router";
 import { For, Show, createSignal } from "solid-js";
 import CreateDialog, { type CreateResult } from "~/components/CreateDialog";
 import PortalLayout from "~/components/PortalLayout";
@@ -13,8 +14,8 @@ import {
 import { Button, Card } from "@basaltac/ui";
 
 export default function PortalApiKeys() {
-	const user = createAsync(() => getClientUserQuery(), { deferStream: true });
-	const keys = createAsync(() => getClientApiKeysQuery(), {
+	const user = createMemo(() => getClientUserQuery(), { deferStream: true });
+	const keys = createMemo(() => getClientApiKeysQuery(), {
 		deferStream: true,
 	});
 	const createKey = useAction(createApiKeyAction);

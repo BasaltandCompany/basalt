@@ -1,4 +1,4 @@
-import type { APIEvent } from "@solidjs/start/server";
+import type { APIEvent } from "filesystem-routing/api";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { applyInstallation, applyPullRequest, type InstallationPayload, type PullRequestPayload } from "~/lib/github-prs";
 

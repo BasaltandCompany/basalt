@@ -1,6 +1,6 @@
 import { Title } from "@solidjs/meta";
-import { createAsync } from "@solidjs/router";
-import { For, Show, createSignal, createResource } from "solid-js";
+import { createMemo, For, Show, createSignal } from "solid-js";
+
 import PortalLayout from "~/components/PortalLayout";
 import {
 	getClientDocumentsQuery,
@@ -17,13 +17,14 @@ const typeLabel: Record<DocumentType, string> = {
 };
 
 export default function PortalDocuments() {
-	const user = createAsync(() => getClientUserQuery(), { deferStream: true });
-	const docs = createAsync(() => getClientDocumentsQuery(), {
+	const user = createMemo(() => getClientUserQuery(), { deferStream: true });
+	const docs = createMemo(() => getClientDocumentsQuery(), {
 		deferStream: true,
 	});
 
 	const [searchQuery, setSearchQuery] = createSignal("");
-	const [searchResults] = createResource(searchQuery, async (q) => {
+	const searchResults = createMemo(async () => {
+		const q = searchQuery();
 		if (q.trim().length < 2) return null;
 		const hits = await searchDocumentsQuery(q);
 		return hits.length > 0 ? hits : null;

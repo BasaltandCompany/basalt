@@ -1,13 +1,13 @@
 // Public single-issue render for the Basalt marketing site — the exact
 // published render the dashboard's /newsletter/[id] serves as HTML.
-import type { APIEvent } from "@solidjs/start/server";
+import type { APIEvent } from "filesystem-routing/api";
 import { getPublishedDispatch } from "~/lib/dispatch";
 import { newsletterSubject, renderIssueBody } from "~/lib/publish-core";
 import { renderMentionsInMarkdown } from "~/lib/mention-render-server";
 import { UUID_RE } from "~/lib/uuid";
 
 export async function GET(event: APIEvent) {
-	const id = event.params.id ?? "";
+	const id = event.params!.id ?? "";
 	if (!UUID_RE.test(id)) {
 		return new Response(JSON.stringify({ error: "Not found" }), {
 			status: 404,

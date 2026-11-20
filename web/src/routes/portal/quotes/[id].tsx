@@ -1,5 +1,6 @@
 import { Title } from "@solidjs/meta";
-import { useParams, createAsync, useAction } from "@solidjs/router";
+import { useParams, useAction } from "@solidjs/router";
+import { createMemo } from "solid-js";
 import { For, Show, createSignal } from "solid-js";
 import PortalLayout from "~/components/PortalLayout";
 import { getClientQuoteQuery, getClientUserQuery, signQuoteAction } from "~/lib/client-queries";
@@ -7,8 +8,8 @@ import { Button, Card } from "@basaltac/ui";
 
 export default function PortalQuoteDetail() {
 	const params = useParams();
-	const user = createAsync(() => getClientUserQuery(), { deferStream: true });
-	const quote = createAsync(() => getClientQuoteQuery(params.id ?? ""), { deferStream: true });
+	const user = createMemo(() => getClientUserQuery(), { deferStream: true });
+	const quote = createMemo(() => getClientQuoteQuery(params.id ?? ""), { deferStream: true });
 	const sign = useAction(signQuoteAction);
 	const [busy, setBusy] = createSignal(false);
 	const [error, setError] = createSignal("");
@@ -47,7 +48,7 @@ export default function PortalQuoteDetail() {
 										name="signer_name"
 										placeholder={`Full legal name (e.g. ${q().memberName})`}
 										required
-										minLength={3}
+										minlength={3}
 										style={{ flex: "1", "min-width": "220px" }}
 									/>
 									<Button type="submit" disabled={busy()}>{busy() ? "Signing…" : "Sign to accept"}</Button>

@@ -1,4 +1,5 @@
-import { query, action, redirect, revalidate } from "@solidjs/router";
+import { query, formAction, revalidate } from "@solidjs/router";
+import { redirect } from "@solidjs/web";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm";
 import { getClient, clientSignIn, setClientSessionCookie } from "./client-session";
@@ -340,7 +341,7 @@ export const getClientApiKeysQuery = query(async () => {
 
 // ── Client portal actions ──────────────────────────────────────────
 
-export const clientLoginAction = action(async (formData: FormData) => {
+export const clientLoginAction = formAction(async (formData: FormData) => {
 	"use server";
 	const email = String(formData.get("email"));
 	const password = String(formData.get("password"));
@@ -353,7 +354,7 @@ export const clientLoginAction = action(async (formData: FormData) => {
 // click and sets the member's first password. Two proof shapes are accepted:
 // an implicit-flow access_token (fragment; what admin-API invites produce with
 // the default email template) or a token_hash (query param; custom templates).
-export const setInvitePasswordAction = action(async (formData: FormData) => {
+export const setInvitePasswordAction = formAction(async (formData: FormData) => {
 	"use server";
 	const accessToken = String(formData.get("access_token") || "");
 	const tokenHash = String(formData.get("token_hash") || "");
@@ -394,7 +395,7 @@ export const setInvitePasswordAction = action(async (formData: FormData) => {
 	throw redirect("/portal");
 }, "set-invite-password");
 
-export const createApiKeyAction = action(async (formData: FormData) => {
+export const createApiKeyAction = formAction(async (formData: FormData) => {
 	"use server";
 	const member = await getClient();
 	if (!member) throw redirect("/portal/login");
@@ -413,7 +414,7 @@ export const createApiKeyAction = action(async (formData: FormData) => {
 	return { key: rawKey };
 }, "createApiKey");
 
-export const revokeApiKeyAction = action(async (formData: FormData) => {
+export const revokeApiKeyAction = formAction(async (formData: FormData) => {
 	"use server";
 	const member = await getClient();
 	if (!member) throw redirect("/portal/login");
@@ -506,7 +507,7 @@ export const getClientQuoteQuery = query(async (id: string) => {
 
 // Click-to-sign (ESIGN-valid): typed legal name + portal identity + timestamp.
 // Flips sent → accepted and syncs the project's fixed price to the total.
-export const signQuoteAction = action(async (formData: FormData) => {
+export const signQuoteAction = formAction(async (formData: FormData) => {
 	"use server";
 	const member = await getClient();
 	if (!member) throw redirect("/portal/login");

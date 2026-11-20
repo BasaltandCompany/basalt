@@ -5,7 +5,7 @@
 // No auth on purpose — this IS the link prospects click.
 import { Title } from "@solidjs/meta";
 import { useParams } from "@solidjs/router";
-import { createResource, Show } from "solid-js";
+import { createMemo, Show } from "solid-js";
 import { getTeaser } from "~/lib/teaser";
 import { markdownToHtml } from "~/lib/publish-core";
 import { renderMentionsInMarkdown } from "~/lib/mention-render-server";
@@ -13,9 +13,9 @@ import Layout from "~/components/Layout";
 
 export default function TeaserPage() {
 	const params = useParams();
-	const [teaser] = createResource(() => getTeaser(params.id ?? ""));
+	const teaser = createMemo(() => getTeaser(params.id ?? ""));
 	// mentions render as live chips (label from the registry at request time)
-	const [body] = createResource(() => (teaser() ? renderMentionsInMarkdown(teaser()!.markdown).then(markdownToHtml) : ""));
+	const body = createMemo(() => (teaser() ? renderMentionsInMarkdown(teaser()!.markdown).then(markdownToHtml) : ""));
 	return (
 		<Show when={teaser()} fallback={<p class="muted">Not found.</p>}>
 			{(t) => (

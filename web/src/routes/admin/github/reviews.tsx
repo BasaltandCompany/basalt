@@ -1,6 +1,6 @@
 import { Title } from "@solidjs/meta";
-import { A, createAsync } from "@solidjs/router";
-import { For, Show, Suspense } from "solid-js";
+import { createMemo } from "solid-js";
+import { For, Show, Loading } from "solid-js";
 import Layout from "~/components/Layout";
 import { getUserQuery } from "~/lib/queries";
 import { getReviewerReviewsQuery } from "~/lib/admin-queries";
@@ -11,8 +11,8 @@ import { Card } from "@basaltac/ui";
  *  reviewer service's own /admin. Written into reviewer_reviews by the
  *  service; linked to pull_request rows via entity_links. */
 export default function AdminGithubReviews() {
-	const user = createAsync(() => getUserQuery(), { deferStream: true });
-	const reviews = createAsync(() => getReviewerReviewsQuery(), { deferStream: true });
+	const user = createMemo(() => getUserQuery(), { deferStream: true });
+	const reviews = createMemo(() => getReviewerReviewsQuery(), { deferStream: true });
 
 	return (
 		<Layout user={user()}>
@@ -25,7 +25,7 @@ export default function AdminGithubReviews() {
 				</p>
 			</div>
 
-			<Suspense fallback={<p class="muted">Loading…</p>}>
+			<Loading fallback={<p class="muted">Loading…</p>}>
 				<Show
 					when={reviews()?.length}
 					fallback={
@@ -68,10 +68,10 @@ export default function AdminGithubReviews() {
 						</For>
 					</div>
 				</Show>
-			</Suspense>
+			</Loading>
 			<p class="muted" style={{ "margin-top": "32px", "font-size": "13px" }}>
 				Need to approve an install, change caps, or re-run a review? That's the
-				reviewer service's admin (basalt-reviewer), not this page. <A href="/admin/github">Back to GitHub App</A>
+				reviewer service's admin (basalt-reviewer), not this page. <a href="/admin/github">Back to GitHub App</a>
 			</p>
 		</Layout>
 	);

@@ -1,4 +1,4 @@
-import type { APIEvent } from "@solidjs/start/server";
+import type { APIEvent } from "filesystem-routing/api";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { getAuthedClient } from "~/lib/session";
 import { getClient } from "~/lib/client-session";
@@ -17,7 +17,7 @@ export const GET = async (event: APIEvent) => {
 		.from(quotes)
 		.innerJoin(companies, eq(companies.id, quotes.companyId))
 		.innerJoin(docs, eq(docs.id, quotes.bodyDocId))
-		.where(eq(quotes.id, event.params.id))
+		.where(eq(quotes.id, event.params!.id))
 		.limit(1);
 	if (!row) return new Response("Not found", { status: 404 });
 

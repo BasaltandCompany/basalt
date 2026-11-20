@@ -1,7 +1,7 @@
 // Funnels API — session (UI) or mc_ key (scripts/agents) guarded.
 // GET  /api/funnels                → { funnels, runs }
 // POST /api/funnels {funnelId, source?, note?} → { run }
-import type { APIEvent } from "@solidjs/start/server";
+import type { APIEvent } from "filesystem-routing/api";
 import { desc, eq, count } from "drizzle-orm";
 import { db } from "~/db";
 import { funnelItems, funnelRuns, funnels } from "~/db/schema";

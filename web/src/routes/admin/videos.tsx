@@ -1,6 +1,7 @@
 import { Title } from "@solidjs/meta";
-import { createAsync, useAction } from "@solidjs/router";
-import { For, Show, Suspense, createSignal } from "solid-js";
+import { createMemo } from "solid-js";
+import { useAction } from "@solidjs/router";
+import { For, Show, Loading, createSignal } from "solid-js";
 import CreateDialog from "~/components/CreateDialog";
 import Layout from "~/components/Layout";
 import { getUserQuery } from "~/lib/queries";
@@ -68,9 +69,9 @@ async function compressTo50MB(file: File, onProgress: (pct: number) => void): Pr
 }
 
 export default function AdminVideos() {
-	const user = createAsync(() => getUserQuery(), { deferStream: true });
-	const outreach = createAsync(() => getOutreachQuery(), { deferStream: true });
-	const videoRows = createAsync(() => getVideosQuery(), { deferStream: true });
+	const user = createMemo(() => getUserQuery(), { deferStream: true });
+	const outreach = createMemo(() => getOutreachQuery(), { deferStream: true });
+	const videoRows = createMemo(() => getVideosQuery(), { deferStream: true });
 	const saveVideo = useAction(setOutreachVideoAction);
 	// Progress text renders inside the submit button while it's truthy.
 	const [busy, setBusy] = createSignal("");
@@ -172,7 +173,7 @@ export default function AdminVideos() {
 				</CreateDialog>
 			</div>
 
-			<Suspense fallback={<p class="muted">Loading…</p>}>
+			<Loading fallback={<p class="muted">Loading…</p>}>
 			<Show
 				when={(videoRows()?.length ?? 0) > 0}
 				fallback={<p class="muted">No videos yet — link one above or add a Video URL on a prospect's card.</p>}
@@ -209,7 +210,7 @@ export default function AdminVideos() {
 					</For>
 				</div>
 			</Show>
-		</Suspense>
+		</Loading>
 		</Layout>
 	);
 }

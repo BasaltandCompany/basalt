@@ -1,4 +1,4 @@
-import type { APIEvent } from "@solidjs/start/server";
+import type { APIEvent } from "filesystem-routing/api";
 import { getAuthedClient } from "~/lib/session";
 import { attachBytes, removeOutboxAttachment } from "~/lib/email-outbox";
 
@@ -21,7 +21,7 @@ export const POST = async (event: APIEvent) => {
 	if (file.size > MAX_FILE_BYTES) {
 		return json({ error: `${file.name}: ${(file.size / 1048576).toFixed(1)}MB exceeds the 20MB per-file cap` }, 400);
 	}
-	const res = await attachBytes(event.params.id, [
+	const res = await attachBytes(event.params!.id, [
 		{ bytes: await file.arrayBuffer(), filename: file.name, mimeType: file.type },
 	]);
 	return res.ok ? json({ attachments: res.attachments }) : json({ error: res.error }, 400);
@@ -31,6 +31,6 @@ export const DELETE = async (event: APIEvent) => {
 	if (!(await getAuthedClient())) return json({ error: "Unauthorized" }, 401);
 	const path = new URL(event.request.url).searchParams.get("path");
 	if (!path) return json({ error: "path required" }, 400);
-	const ok = await removeOutboxAttachment(event.params.id, path);
+	const ok = await removeOutboxAttachment(event.params!.id, path);
 	return json({ ok }, ok ? 200 : 404);
 };

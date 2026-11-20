@@ -1,7 +1,7 @@
 // Public guest upload endpoint for secure share drops. Strictly upload-only:
 // guests can never list or read a drop back. Unknown/closed/expired token →
 // 404 with the same generic message (no token enumeration).
-import type { APIEvent } from "@solidjs/start/server";
+import type { APIEvent } from "filesystem-routing/api";
 import { count, eq } from "drizzle-orm";
 import { db } from "~/db";
 import { secureShareItems, secureShares, type SecureShare } from "~/db/schema";
@@ -29,7 +29,7 @@ async function getOpenShare(token: string): Promise<SecureShare | null> {
 }
 
 export async function POST(event: APIEvent) {
-	const share = await getOpenShare(event.params.token ?? "");
+	const share = await getOpenShare(event.params!.token ?? "");
 	if (!share) return json({ error: "This link is no longer accepting uploads." }, 404);
 
 	const form = await event.request.formData();

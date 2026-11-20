@@ -1,5 +1,6 @@
-import { createAsync, useAction } from "@solidjs/router";
-import { For, Show, Suspense, createSignal } from "solid-js";
+import { createMemo } from "solid-js";
+import { useAction } from "@solidjs/router";
+import { For, Show, Loading, createSignal } from "solid-js";
 import ConfirmButton from "~/components/ConfirmButton";
 import {
 	getDocumentsQuery,
@@ -17,7 +18,7 @@ export default function ProjectDocuments(props: {
 	projectId: string;
 	referer: string;
 }) {
-	const docs = createAsync(() => getDocumentsQuery(props.projectId), {
+	const docs = createMemo(() => getDocumentsQuery(props.projectId), {
 		deferStream: true,
 	});
 	const addDocLink = useAction(createDocumentLinkAction);
@@ -228,7 +229,7 @@ export default function ProjectDocuments(props: {
 			</Show>
 
 			{/* ── Document list ── */}
-			<Suspense
+			<Loading
 				fallback={
 					<p class="muted" style={{ "font-size": "12px" }}>
 						Loading…
@@ -315,7 +316,7 @@ export default function ProjectDocuments(props: {
 						</Show>
 					)}
 				</Show>
-			</Suspense>
+			</Loading>
 		</div>
 	);
 }

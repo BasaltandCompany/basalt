@@ -1,5 +1,5 @@
 // Brain admin — queries + actions for the /admin/brain page.
-import { query, action } from "@solidjs/router";
+import { query, formAction } from "@solidjs/router";
 import { desc, eq, sql } from "drizzle-orm";
 import { db, raw } from "~/db";
 import {
@@ -94,7 +94,7 @@ export const getBrainPagesQuery = query(async () => {
 }, "brain-pages");
 
 /** Fire the full brain cycle server-side (session-authed admin). */
-export const runBrainCycleAction = action(async (formData: FormData) => {
+export const runBrainCycleAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const { runCycle } = await import("~/lib/brain/distill");
@@ -106,7 +106,7 @@ export const runBrainCycleAction = action(async (formData: FormData) => {
 }, "brain-run-cycle");
 
 /** Close an open loop manually (false positive / handled elsewhere). */
-export const closeLoopAction = action(async (formData: FormData) => {
+export const closeLoopAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const { brainOpenLoops } = await import("~/db/schema");

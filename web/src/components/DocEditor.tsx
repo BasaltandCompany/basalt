@@ -1,5 +1,6 @@
-import { For, Show, createSignal, onMount, onCleanup } from "solid-js";
-import { useNavigate, createAsync } from "@solidjs/router";
+import { createMemo, For, Show, createSignal, onSettled, onCleanup } from "solid-js";
+
+import { useNavigate } from "@solidjs/router";
 import LexicalDocEditor from "~/components/LexicalDocEditor";
 import ConfirmButton from "~/components/ConfirmButton";
 import { LinkedInPreview, NewsletterEmailPreview, NewsletterWebPreview, type PreviewMode } from "~/components/DocPreviews";
@@ -48,7 +49,7 @@ export const DocEditor = (props: { id: string; doc: NonNullable<Awaited<ReturnTy
 	const kind = () => doc().kind ?? null;
 	// per-doc reality checks (opens/clicks/requests or linked links) — footer
 	// section below the editor column
-	const stats = createAsync(() => getDocStatsQuery(props.id));
+	const stats = createMemo(() => getDocStatsQuery(props.id));
 	const newsletterStats = () => {
 		const s = stats();
 		return s?.kind === "newsletter" ? s : undefined;
@@ -205,7 +206,8 @@ export const DocEditor = (props: { id: string; doc: NonNullable<Awaited<ReturnTy
 		// planted during re-layout); unfocused changes settle in 200ms
 		layoutTimer = setTimeout(runLayout, editing() ? 150 : 200);
 	};
-	onMount(() => {
+	onSettled(() => {
+		if (typeof window === "undefined") return; // onSettled runs on the server too
 		const onResize = () => scheduleLayout();
 		window.addEventListener("resize", onResize);
 		// fonts can shift metrics after first paint
@@ -214,7 +216,7 @@ export const DocEditor = (props: { id: string; doc: NonNullable<Awaited<ReturnTy
 	});
 
 	// seed once when the doc resource resolves
-	onMount(() => {
+	onSettled(() => {
 		const stop = setInterval(() => {
 			const d = doc();
 			if (d) {
@@ -391,19 +393,19 @@ export const DocEditor = (props: { id: string; doc: NonNullable<Awaited<ReturnTy
 					<option value="casual" />
 				</datalist>
 				<Show when={kind() === "post"}>
-					<Button variant="outline" size="sm" type="button"  classList={{ active: preview() === "linkedin" }} onClick={() => setPreview(preview() === "linkedin" ? null : "linkedin")}>
+					<Button variant="outline" size="sm" type="button"  class={{ active: preview() === "linkedin" }} onClick={() => setPreview(preview() === "linkedin" ? null : "linkedin")}>
 						Preview
 					</Button>
 				</Show>
 				<Show when={kind() === "newsletter"}>
-					<Button variant="outline" size="sm" type="button"  classList={{ active: preview() === "email" }} onClick={() => setPreview(preview() === "email" ? null : "email")}>
+					<Button variant="outline" size="sm" type="button"  class={{ active: preview() === "email" }} onClick={() => setPreview(preview() === "email" ? null : "email")}>
 						Email
 					</Button>
-					<Button variant="outline" size="sm" type="button"  classList={{ active: preview() === "web" }} onClick={() => setPreview(preview() === "web" ? null : "web")}>
+					<Button variant="outline" size="sm" type="button"  class={{ active: preview() === "web" }} onClick={() => setPreview(preview() === "web" ? null : "web")}>
 						Web
 					</Button>
 				</Show>
-				<Button variant="outline" size="sm" type="button"  classList={{ active: showHistory() }} onClick={toggleHistory}>
+				<Button variant="outline" size="sm" type="button"  class={{ active: showHistory() }} onClick={toggleHistory}>
 					History
 				</Button>
 				<Show when={docStatus() !== "publishing"}>
@@ -701,12 +703,11 @@ export const DocEditor = (props: { id: string; doc: NonNullable<Awaited<ReturnTy
 								{(v) => (
 									<button
 										type="button"
-										class="doc-history-row"
-										classList={{ active: sel() === v.version }}
+										class={["doc-history-row", { active: sel() === v.version }]}
 										onClick={() => void openVersion(v.version)}
 									>
 										<span class="doc-history-ver">v{v.version}</span>
-										<span class="doc-history-author" classList={{ agent: v.author === "agent" }}>
+										<span class={["doc-history-author", { agent: v.author === "agent" }]}>
 											{v.author}
 										</span>
 										<span class="muted">{new Date(v.updatedAt).toLocaleString()}</span>

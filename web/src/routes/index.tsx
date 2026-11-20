@@ -1,4 +1,4 @@
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js"
+import { createSignal, For, onCleanup, onSettled, Show } from "solid-js"
 import { Logo } from "@/brand/logo"
 import { Button } from "@basaltac/ui"
 import { initHeroVideo } from "@/routes/site-state"
@@ -83,7 +83,8 @@ export function Site(props: { heroVideo: string | null }) {
   const [index, setIndex] = createSignal(0)
   const last = () => index() === MESSAGES.length - 1
 
-  onMount(() => {
+  onSettled(() => {
+    if (typeof window === "undefined") return; // onSettled runs on the server too
     const onScroll = () =>
       setIndex(
         Math.max(
@@ -96,7 +97,8 @@ export function Site(props: { heroVideo: string | null }) {
       )
     onScroll()
     window.addEventListener("scroll", onScroll, { passive: true })
-    onCleanup(() => window.removeEventListener("scroll", onScroll))
+    // solid 2: onCleanup is forbidden inside onSettled — return the cleanup
+    return () => window.removeEventListener("scroll", onScroll)
   })
 
   const step = () =>
@@ -259,6 +261,6 @@ export default function Home() {
   // localStorage read must stay client-side — render-time access throws SSR.
   // The lava-glow fallback renders server-side; the video pops in after mount.
   const [heroVideo, setHeroVideo] = createSignal<string | null>(null)
-  onMount(() => setHeroVideo(initHeroVideo()))
+  onSettled(() => { setHeroVideo(initHeroVideo()); })
   return <Site heroVideo={heroVideo()} />
 }

@@ -1,6 +1,8 @@
 import { Title } from "@solidjs/meta";
-import { useParams, createAsync, useAction } from "@solidjs/router";
-import { For, Show, createSignal, type JSX } from "solid-js";
+import { useParams, useAction } from "@solidjs/router";
+import { createMemo, For, Show, createSignal } from "solid-js";
+import type { JSX } from "@solidjs/web";
+
 import Layout from "~/components/Layout";
 import SelectField from "~/components/select-field";
 import { toast } from "~/lib/toast";
@@ -120,9 +122,9 @@ function ItemRows(props: {
 
 export default function AdminQuoteDetail() {
 	const params = useParams();
-	const user = createAsync(() => getUserQuery(), { deferStream: true });
-	const quote = createAsync(() => getQuoteQuery(params.id ?? ""), { deferStream: true });
-	const projects = createAsync(() => getProjectsForSelectQuery(), { deferStream: true });
+	const user = createMemo(() => getUserQuery(), { deferStream: true });
+	const quote = createMemo(() => getQuoteQuery(params.id ?? ""), { deferStream: true });
+	const projects = createMemo(() => getProjectsForSelectQuery(), { deferStream: true });
 	const setStatus = useAction(setQuoteStatusAction);
 	const saveMeta = useAction(updateQuoteMetaAction);
 

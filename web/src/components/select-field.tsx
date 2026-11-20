@@ -2,7 +2,8 @@
 // Form selects: pass `name` and read the value from FormData as before —
 // the HiddenSelect bridges it. Filter selects: pass value + onChange.
 // required forwards to the hidden native select so empty submits still block.
-import { createMemo, Show, type JSX } from "solid-js"
+import { createMemo, Show } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import {
   Select,
   SelectContent,

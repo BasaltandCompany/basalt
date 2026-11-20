@@ -1,12 +1,7 @@
 import { Title } from "@solidjs/meta";
-import {
-	A,
-	createAsync,
-	useAction,
-	useNavigate,
-	useParams,
-} from "@solidjs/router";
-import { For, Show, Suspense, createEffect, createSignal, on } from "solid-js";
+import { createMemo } from "solid-js";
+import { useNavigate, useParams, useAction } from "@solidjs/router";
+import { For, Show, Loading, createEffect, createSignal } from "solid-js";
 import Layout from "~/components/Layout";
 import Waveform from "~/components/Waveform";
 import { getUserQuery } from "~/lib/queries";
@@ -36,11 +31,11 @@ export default function MeetingEditor() {
 	const params = useParams();
 	const docId = () => params.id ?? "";
 	const navigate = useNavigate();
-	const user = createAsync(() => getUserQuery(), { deferStream: true });
-	const draft = createAsync(() => getMeetingDraftQuery(docId()), {
+	const user = createMemo(() => getUserQuery(), { deferStream: true });
+	const draft = createMemo(() => getMeetingDraftQuery(docId()), {
 		deferStream: true,
 	});
-	const projects = createAsync(() => getProjectsForSelectQuery(), {
+	const projects = createMemo(() => getProjectsForSelectQuery(), {
 		deferStream: true,
 	});
 	const saveDraft = useAction(saveMeetingDraftAction);
@@ -55,7 +50,7 @@ export default function MeetingEditor() {
 	const [audioEl, setAudioEl] = createSignal<HTMLAudioElement>();
 	// Server query, not a fetch to /api/waveform — a relative fetch() throws
 	// ERR_INVALID_URL during SSR and 500s the page. Re-runs when draft() lands.
-	const wave = createAsync(async () => {
+	const wave = createMemo(async () => {
 		const path = draft()?.audioPath;
 		return path ? getWaveformQuery(path) : null;
 	}, { deferStream: true });
@@ -82,7 +77,11 @@ export default function MeetingEditor() {
 		setLoaded(true);
 	};
 	hydrate(draft());
-	createEffect(on(draft, hydrate));
+	// Solid 2: on() is gone — compute tracks the draft, effect applies it.
+	createEffect(
+		() => draft(),
+		(v) => hydrate(v),
+	);
 
 	function updateBlock(i: number, patch: Partial<EditableBlock>) {
 		setBlocks((bs) => bs.map((b, j) => (j === i ? { ...b, ...patch } : b)));
@@ -153,14 +152,14 @@ export default function MeetingEditor() {
 				<div>
 					<h1 class="page-title">Edit Meeting</h1>
 					<p class="page-subtitle" style={{ "margin-bottom": "0" }}>
-						<A href="/admin/meetings">
+						<a href="/admin/meetings">
 							← Meetings
-						</A>
+						</a>
 					</p>
 				</div>
 			</div>
 
-			<Suspense fallback={<p class="muted">Loading…</p>}>
+			<Loading fallback={<p class="muted">Loading…</p>}>
 				<Show when={loaded()}>
 					<Card style={{ padding: "16px", "margin-bottom": "16px", display: "flex", "flex-direction": "column", gap: "12px" }}>
 						<div class="form-group" style={{ "margin-bottom": "0" }}>
@@ -261,7 +260,7 @@ export default function MeetingEditor() {
 						</Button>
 					</Card>
 				</Show>
-			</Suspense>
+			</Loading>
 		</Layout>
 	);
 }

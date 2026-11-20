@@ -5,7 +5,7 @@ import { funnelAuthed } from "~/lib/funnel-auth";
 // perEmp, maxHits); soft=true makes the stage signal-only: verdicts are
 // recorded but never block later stages or promotion. Code still owns
 // label/gate/method (ensureFreightFunnel merges those back on sync).
-import type { APIEvent } from "@solidjs/start/server";
+import type { APIEvent } from "filesystem-routing/api";
 import { eq } from "drizzle-orm";
 import { db } from "~/db";
 import { funnels, type FunnelStage } from "~/db/schema";
@@ -21,7 +21,7 @@ export const POST = async (event: APIEvent) => {
 	if (body.params && Object.values(body.params).some((v) => typeof v !== "number" || !Number.isFinite(v))) {
 		return Response.json({ error: "params must be finite numbers" }, { status: 400 });
 	}
-	const [f] = await db.select().from(funnels).where(eq(funnels.id, event.params.id)).limit(1);
+	const [f] = await db.select().from(funnels).where(eq(funnels.id, event.params!.id)).limit(1);
 	if (!f) return Response.json({ error: "Funnel not found" }, { status: 404 });
 	let hit = false;
 	const stages: FunnelStage[] = (f.stages ?? []).map((s) => {

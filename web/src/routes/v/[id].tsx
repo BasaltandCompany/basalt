@@ -1,6 +1,6 @@
 import { Title } from "@solidjs/meta";
 import { useParams, useSearchParams } from "@solidjs/router";
-import { createResource, Match, Show, Switch, createSignal, onCleanup } from "solid-js";
+import { createMemo, Match, Show, Switch, createSignal, onCleanup } from "solid-js";
 import "plyr/dist/plyr.css";
 import { getTrackedVideo } from "~/lib/watch-video";
 
@@ -22,7 +22,7 @@ function playableUrl(url: string): string | null {
 export default function WatchVideo() {
 	const params = useParams();
 	const [searchParams] = useSearchParams();
-	const [video] = createResource(() => getTrackedVideo(params.id ?? ""));
+	const video = createMemo(() => getTrackedVideo(params.id ?? ""));
 	const [copied, setCopied] = createSignal(false);
 	// plyr's types are CJS (export =); type the two things we use structurally.
 	type PlyrInstance = { destroy(): void };

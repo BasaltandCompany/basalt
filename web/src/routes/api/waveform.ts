@@ -1,5 +1,5 @@
-import type { APIEvent } from "@solidjs/start/server";
-import { getCookie } from "@solidjs/start/http";
+import type { APIEvent } from "filesystem-routing/api";
+import { getCookie } from "~/lib/http";
 import { supabaseAdmin } from "~/lib/supabase";
 import { computeWaveform } from "~/lib/waveform";
 

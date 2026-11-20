@@ -1,6 +1,8 @@
 import { Title } from "@solidjs/meta";
-import { A, createAsync, useAction, useParams, revalidate } from "@solidjs/router";
-import { For, Show, Suspense, createSignal, type JSX } from "solid-js";
+import { useParams, revalidate, useAction } from "@solidjs/router";
+import { createMemo, For, Show, Loading, createSignal } from "solid-js";
+import type { JSX } from "@solidjs/web";
+
 import ConfirmButton from "~/components/ConfirmButton";
 import CreateDialog from "~/components/CreateDialog";
 import Layout from "~/components/Layout";
@@ -20,11 +22,11 @@ import { Button, Card } from "@basaltac/ui";
 const fmtDate = (d: Date | string) => new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 
 export default function PersonProfile() {
-	const user = createAsync(() => getUserQuery(), { deferStream: true });
+	const user = createMemo(() => getUserQuery(), { deferStream: true });
 	const params = useParams();
 	const memberId = () => params.id!;
-	const person = createAsync(() => getPersonQuery(memberId()), { deferStream: true });
-	const companies = createAsync(() => getCompaniesQuery(), { deferStream: true });
+	const person = createMemo(() => getPersonQuery(memberId()), { deferStream: true });
+	const companies = createMemo(() => getCompaniesQuery(), { deferStream: true });
 
 	const addEmail = useAction(addPersonEmailAction);
 	const removeEmail = useAction(removePersonEmailAction);
@@ -48,9 +50,9 @@ export default function PersonProfile() {
 	return (
 		<Layout user={user()}>
 			<Title>Person — Basalt</Title>
-			<A href="/admin/contacts" class="muted" style={{ "font-size": "13px", "margin-bottom": "8px", display: "inline-block" }}>
+			<a href="/admin/contacts" class="muted" style={{ "font-size": "13px", "margin-bottom": "8px", display: "inline-block" }}>
 				All People
-			</A>
+			</a>
 
 			<Show when={person()} fallback={<p class="muted">Loading…</p>}>
 				{(p) => (
@@ -62,9 +64,9 @@ export default function PersonProfile() {
 							</span>
 							<Show when={p().brain}>
 								{(b) => (
-									<A href="/admin/brain" class="muted" style={{ "font-size": "13px" }}>
+									<a href="/admin/brain" class="muted" style={{ "font-size": "13px" }}>
 										Brain page: {b().slug}
-									</A>
+									</a>
 								)}
 							</Show>
 						</div>
@@ -133,7 +135,7 @@ export default function PersonProfile() {
 										<For each={p().companies}>
 											{(c) => (
 												<div style={{ display: "flex", "align-items": "center", gap: "8px", "margin-bottom": "4px", "font-size": "14px" }}>
-													<A href={`/admin/companies/${c.id}`}>{c.name}</A>
+													<a href={`/admin/companies/${c.id}`}>{c.name}</a>
 													<ConfirmButton
 														label="Unlink"
 														confirmText="Unlink this company?"
@@ -186,9 +188,9 @@ export default function PersonProfile() {
 												<span style={{ "font-size": "14px", "font-weight": "500" }}>{pr.company}</span>
 												<span class="badge badge-active">{stageLabel(pr.stage)}</span>
 									<Show when={pr.companyId}>
-										<A href={`/admin/companies/${pr.companyId}`} class="muted" style={{ "font-size": "12px" }}>
+										<a href={`/admin/companies/${pr.companyId}`} class="muted" style={{ "font-size": "12px" }}>
 											client org: {pr.companyName}
-										</A>
+										</a>
 									</Show>
 												<Show when={pr.brainUrl}>
 													<a href={pr.brainUrl!} target="_blank" rel="noopener noreferrer" class="muted" style={{ "font-size": "12px" }}>brain</a>
@@ -239,7 +241,7 @@ export default function PersonProfile() {
 									{(proj) => (
 										<Card style={{ padding: "14px 20px", "margin-bottom": "8px" }}>
 											<div style={{ display: "flex", "align-items": "center", gap: "10px" }}>
-												<A href={`/admin/projects/${proj.id}`} style={{ "font-size": "14px", "font-weight": "500" }}>{proj.name}</A>
+												<a href={`/admin/projects/${proj.id}`} style={{ "font-size": "14px", "font-weight": "500" }}>{proj.name}</a>
 												<span class="badge badge-active">{proj.status}</span>
 												<span class="muted" style={{ "font-size": "12px" }}>{proj.engagementType}</span>
 											</div>
@@ -254,7 +256,7 @@ export default function PersonProfile() {
 								<For each={p().quotes}>
 									{(q) => (
 										<Card style={{ padding: "12px 20px", "margin-bottom": "6px" }}>
-											<A href={`/admin/quotes/${q.id}`} style={{ "font-size": "14px" }}>{q.title}</A>
+											<a href={`/admin/quotes/${q.id}`} style={{ "font-size": "14px" }}>{q.title}</a>
 											<span class="badge badge-active" style={{ "margin-left": "10px" }}>{q.status}</span>
 											<span class="muted" style={{ "font-size": "12px", "margin-left": "10px" }}>updated {fmtDate(q.updatedAt)}</span>
 										</Card>
@@ -309,7 +311,7 @@ export default function PersonProfile() {
 									{(card) => (
 										<Card style={{ padding: "12px 20px", "margin-bottom": "6px" }}>
 											<Show when={card.adminUrl} fallback={<span style={{ "font-size": "14px" }}>{card.title}</span>}>
-												<A href={card.adminUrl!} style={{ "font-size": "14px" }}>{card.title}</A>
+												<a href={card.adminUrl!} style={{ "font-size": "14px" }}>{card.title}</a>
 											</Show>
 											<span class="badge badge-active" style={{ "margin-left": "10px" }}>linked</span>
 										</Card>
@@ -327,7 +329,7 @@ export default function PersonProfile() {
 											<span class="muted">{l.direction === "out" ? "→" : "←"}</span>
 											<span class="badge badge-active">{l.card.kind}</span>
 											<Show when={l.card.adminUrl} fallback={<span>{l.card.title}</span>}>
-												<A href={l.card.adminUrl!}>{l.card.title}</A>
+												<a href={l.card.adminUrl!}>{l.card.title}</a>
 											</Show>
 											<Show when={l.card.deleted}>
 												<span class="muted">(deleted)</span>

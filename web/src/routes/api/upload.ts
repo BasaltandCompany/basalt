@@ -1,4 +1,4 @@
-import type { APIEvent } from "@solidjs/start/server";
+import type { APIEvent } from "filesystem-routing/api";
 import { supabaseService } from "~/lib/supabase";
 import { getAuthedClient } from "~/lib/session";
 import { db } from "~/db";

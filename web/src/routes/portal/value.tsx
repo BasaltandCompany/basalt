@@ -1,5 +1,5 @@
 import { Title } from "@solidjs/meta";
-import { createAsync } from "@solidjs/router";
+import { createMemo } from "solid-js";
 import { For, Show } from "solid-js";
 import PortalLayout from "~/components/PortalLayout";
 import { getClientUserQuery, getClientValueQuery } from "~/lib/client-queries";
@@ -42,8 +42,8 @@ function SavingsChart(props: { series: { label: string; saved: number }[] }) {
 }
 
 export default function PortalValue() {
-	const user = createAsync(() => getClientUserQuery(), { deferStream: true });
-	const data = createAsync(() => getClientValueQuery(), { deferStream: true });
+	const user = createMemo(() => getClientUserQuery(), { deferStream: true });
+	const data = createMemo(() => getClientValueQuery(), { deferStream: true });
 
 	return (
 		<PortalLayout user={user()}>

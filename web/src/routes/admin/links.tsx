@@ -1,6 +1,6 @@
 import { Title } from "@solidjs/meta";
-import { createAsync } from "@solidjs/router";
-import { For, Show, createSignal, onMount } from "solid-js";
+import { createMemo } from "solid-js";
+import { For, Show, createSignal, onSettled } from "solid-js";
 import ConfirmButton from "~/components/ConfirmButton";
 import CreateDialog from "~/components/CreateDialog";
 import Layout from "~/components/Layout";
@@ -17,7 +17,7 @@ const docHref = (id: string, kind: string | null) =>
 // Short links — clean /l/<slug> URLs for LinkedIn first comments etc.; the
 // UTMs (and click counts) live behind the redirect, not in the visible link.
 export default function AdminLinks() {
-	const user = createAsync(() => getUserQuery(), { deferStream: true });
+	const user = createMemo(() => getUserQuery(), { deferStream: true });
 	const [links, setLinks] = createSignal<Link[]>([]);
 	const [docOptions, setDocOptions] = createSignal<Doc[]>([]);
 
@@ -29,7 +29,8 @@ export default function AdminLinks() {
 			setDocOptions(body.docs);
 		}
 	}
-	onMount(() => {
+	onSettled(() => {
+		if (typeof window === "undefined") return; // onSettled runs on the server too
 		void refresh();
 		// last-used builder values — next post only needs a new campaign. The
 		// form lives inside the create dialog now; find it via its dest field.

@@ -1,6 +1,7 @@
 import { Title } from "@solidjs/meta";
-import { useAction, createAsync, revalidate } from "@solidjs/router";
-import { For, Show, Suspense, createSignal } from "solid-js";
+import { revalidate, useAction } from "@solidjs/router";
+import { createMemo } from "solid-js";
+import { For, Show, Loading, createSignal } from "solid-js";
 import Layout from "~/components/Layout";
 import {
 	getBrainStatsQuery,
@@ -20,10 +21,10 @@ const kindColor: Record<string, string> = {
 };
 
 export default function AdminBrain() {
-	const stats = createAsync(() => getBrainStatsQuery(), { deferStream: true });
-	const loops = createAsync(() => getOpenLoopsQuery(), { deferStream: true });
-	const facts = createAsync(() => getRecentFactsQuery(), { deferStream: true });
-	const pages = createAsync(() => getBrainPagesQuery(), { deferStream: true });
+	const stats = createMemo(() => getBrainStatsQuery(), { deferStream: true });
+	const loops = createMemo(() => getOpenLoopsQuery(), { deferStream: true });
+	const facts = createMemo(() => getRecentFactsQuery(), { deferStream: true });
+	const pages = createMemo(() => getBrainPagesQuery(), { deferStream: true });
 
 	const runCycle = useAction(runBrainCycleAction);
 	const closeLoop = useAction(closeLoopAction);
@@ -73,7 +74,7 @@ export default function AdminBrain() {
 			</div>
 			<p class="page-subtitle">Distilled knowledge — pages, facts, conclusions, open loops</p>
 
-			<Suspense fallback={<div class="muted">Loading…</div>}>
+			<Loading fallback={<div class="muted">Loading…</div>}>
 				<div style={{ display: "flex", gap: "12px", "margin-bottom": "20px" }}>
 					{statCard("Pages", () => stats()?.pages)}
 					{statCard("Facts", () => stats()?.facts)}
@@ -149,7 +150,7 @@ export default function AdminBrain() {
 						</For>
 					</Card>
 				</div>
-			</Suspense>
+			</Loading>
 		</Layout>
 	);
 }

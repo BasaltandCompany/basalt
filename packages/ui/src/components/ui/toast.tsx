@@ -1,6 +1,8 @@
-import { For, type ValidComponent } from "solid-js"
-import { splitProps } from "solid-js"
-import { Portal } from "solid-js/web"
+import type { ClassValue } from "clsx"
+import { For } from "solid-js";
+import type { ValidComponent } from "@solidjs/web"
+import { splitProps } from "../../solid2-compat"
+import { Portal } from "@solidjs/web"
 
 import type { PolymorphicProps } from "@kobalte/core/polymorphic"
 import * as ToastPrimitive from "@kobalte/core/toast"
@@ -57,7 +59,7 @@ function Toaster() {
 }
 
 type ToastRootProps<T extends ValidComponent = "li"> = ToastPrimitive.ToastRootProps<T> &
-  VariantProps<typeof toastVariants> & { class?: string | undefined }
+  VariantProps<typeof toastVariants> & { class?: ClassValue | undefined }
 
 const Toast = <T extends ValidComponent = "li">(props: PolymorphicProps<T, ToastRootProps<T>>) => {
   const [local, others] = splitProps(props as ToastRootProps, ["class", "variant"])
@@ -70,7 +72,7 @@ const Toast = <T extends ValidComponent = "li">(props: PolymorphicProps<T, Toast
 }
 
 type ToastCloseButtonProps<T extends ValidComponent = "button"> =
-  ToastPrimitive.ToastCloseButtonProps<T> & { class?: string | undefined }
+  ToastPrimitive.ToastCloseButtonProps<T> & { class?: ClassValue | undefined }
 
 const ToastClose = <T extends ValidComponent = "button">(
   props: PolymorphicProps<T, ToastCloseButtonProps<T>>
@@ -102,7 +104,7 @@ const ToastClose = <T extends ValidComponent = "button">(
 }
 
 type ToastTitleProps<T extends ValidComponent = "div"> = ToastPrimitive.ToastTitleProps<T> & {
-  class?: string | undefined
+  class?: ClassValue | undefined
 }
 
 const ToastTitle = <T extends ValidComponent = "div">(
@@ -113,7 +115,7 @@ const ToastTitle = <T extends ValidComponent = "div">(
 }
 
 type ToastDescriptionProps<T extends ValidComponent = "div"> =
-  ToastPrimitive.ToastDescriptionProps<T> & { class?: string | undefined }
+  ToastPrimitive.ToastDescriptionProps<T> & { class?: ClassValue | undefined }
 
 const ToastDescription = <T extends ValidComponent = "div">(
   props: PolymorphicProps<T, ToastDescriptionProps<T>>
