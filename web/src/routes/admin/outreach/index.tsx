@@ -1,6 +1,6 @@
 import { Title } from "@solidjs/meta";
-import { createMemo, For, Show, Loading, createSignal } from "solid-js";
-import { useNavigate, useAction } from "@solidjs/router";
+import { createMemo, For, Show, Loading, createSignal, createEffect } from "solid-js";
+import { useNavigate, useAction, revalidate } from "@solidjs/router";
 
 import CreateDialog from "~/components/CreateDialog";
 import Layout from "~/components/Layout";
@@ -23,7 +23,11 @@ import {
 	type BrainDigestItem,
 } from "~/lib/admin-queries";
 import { OUTREACH_STAGES, stageLabel, type OutreachProspect, type OutreachStage, type Video } from "~/db/schema";
-import type { ProspectEmailStatus } from "~/lib/admin-queries";
+import { STAGE_NEXT_DAYS, type ProspectEmailStatus } from "~/lib/admin-queries";
+import { ingestKind } from "~/lib/sync/sync-client";
+import { transact } from "~/lib/sync/transactions";
+import { poolRow, poolRows, poolSeeded } from "~/lib/sync/pool";
+import type { PoolRow } from "~/lib/sync/merge";
 import { fmtDate, fmtDur, videoSummary } from "~/lib/video-summary";
 import { Button } from "@basaltac/ui";
 import SelectField from "~/components/select-field";
@@ -459,16 +463,17 @@ function BoardCard(props: {
 	}
 
 	// advance button: one click to the next stage WITH its next-action preset
+	// (a tx now: stage + computed nextActionAt move together, optimistically)
 	async function advance() {
 		const a = ADVANCE[p().stage as OutreachStage];
 		if (!a) return;
-		setError("");
-		const fd = new FormData();
-		fd.set("id", p().id);
-		fd.set("stage", a.next);
-		fd.set("preset_next", "1");
-		const r = (await setStage(fd)) as { error?: string };
-		if (r.error) setError(r.error);
+		const days = STAGE_NEXT_DAYS[a.next];
+		await transact({
+			kind: "prospect",
+			rowId: p().id,
+			patch: days ? { stage: a.next, nextActionAt: new Date(Date.now() + days * 86_400_000) } : { stage: a.next },
+			label: "Stage change",
+		});
 	}
 
 	// candidate review: the fit gate the connect automation checks
@@ -733,40 +738,35 @@ function Board() {
 	const setStage = useAction(setOutreachStageAction);
 	const [hoverStage, setHoverStage] = createSignal<string | undefined>();
 	const [error, setError] = createSignal("");
-	// ponytail: optimistic stage override stays in place after a successful
-	// drop (the refetched query matches it anyway); only cleared on error.
-	const [overrides, setOverrides] = createSignal<Record<string, string>>({});
+	// drag-to-stage is a transaction now — the pool applies it instantly and the
+	// engine reverts + toasts on failure; the old overrides signal is gone.
+	createEffect(
+		() => outreach()?.all,
+		(all) => {
+			if (!all) return;
+			ingestKind("prospect", all as unknown as PoolRow[], {
+				reconcile: true,
+				refetch: () => void revalidate("admin-outreach"),
+			});
+		},
+	);
 
 	const dueIds = createMemo(() => new Set((outreach()?.due ?? []).map((p) => p.id)));
 
 	const columns = createMemo(() => {
-		const all = outreach()?.all ?? [];
+		const all = poolSeeded("prospect") ? poolRows<OutreachProspect>("prospect") : outreach()?.all ?? [];
 		return OUTREACH_STAGES.map((stage) => {
-			const cards = all
-				.filter((p) => (overrides()[p.id] ?? p.stage) === stage)
-				.sort((a, b) => sortCards(a, b, dueIds()));
+			const cards = all.filter((p) => p.stage === stage).sort((a, b) => sortCards(a, b, dueIds()));
 			return { stage, cards };
 		});
 	});
 
 	async function handleDrop(stage: OutreachStage, id: string) {
-		setError("");
 		setHoverStage(undefined);
-		const p = outreach()?.all.find((x) => x.id === id);
+		const p = poolRow<OutreachProspect>("prospect", id) ?? outreach()?.all.find((x) => x.id === id);
 		if (!p || p.stage === stage) return;
-		setOverrides((o) => ({ ...o, [id]: stage }));
-		const fd = new FormData();
-		fd.set("id", id);
-		fd.set("stage", stage);
-		const res = (await setStage(fd)) as { error?: string };
-		if (res.error) {
-			setOverrides((o) => {
-				const n = { ...o };
-				delete n[id];
-				return n;
-			});
-			setError(res.error);
-		}
+		await transact({ kind: "prospect", rowId: id, patch: { stage }, label: "Stage change" });
+		setError("");
 	}
 
 	// overdue = due before today started (red tint in the Today queue)

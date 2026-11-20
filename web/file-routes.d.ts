@@ -625,10 +625,23 @@ declare module "virtual:file-routes" {
       $$route?: undefined;
     },
     {
+      path: "/api/sync";
+      page: false;
+      $GET: FileRouteLazyRef<Pick<typeof import("./src/routes/api/sync"), Extract<"GET", keyof typeof import("./src/routes/api/sync")>>>;
+      $HEAD: FileRouteLazyRef<Pick<typeof import("./src/routes/api/sync"), Extract<"GET", keyof typeof import("./src/routes/api/sync")>>>;
+      $$route?: undefined;
+    },
+    {
       path: "/api/track/open/:docId";
       page: false;
       $GET: FileRouteLazyRef<Pick<typeof import("./src/routes/api/track/open/[docId]"), Extract<"GET", keyof typeof import("./src/routes/api/track/open/[docId]")>>>;
       $HEAD: FileRouteLazyRef<Pick<typeof import("./src/routes/api/track/open/[docId]"), Extract<"GET", keyof typeof import("./src/routes/api/track/open/[docId]")>>>;
+      $$route?: undefined;
+    },
+    {
+      path: "/api/tx";
+      page: false;
+      $POST: FileRouteLazyRef<Pick<typeof import("./src/routes/api/tx"), Extract<"POST", keyof typeof import("./src/routes/api/tx")>>>;
       $$route?: undefined;
     },
     {

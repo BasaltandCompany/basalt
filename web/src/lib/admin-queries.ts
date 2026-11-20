@@ -941,7 +941,7 @@ export const createOutreachAction = formAction(async (formData: FormData) => {
 // next-action interval implied by each stage ADVANCE (plan: invite→+3d,
 // follow-up→+4d, reply→+1d). Manual date edits always win — presets only
 // apply when the advance button sends preset_next=1.
-const STAGE_NEXT_DAYS: Partial<Record<OutreachStage, number>> = {
+export const STAGE_NEXT_DAYS: Partial<Record<OutreachStage, number>> = {
 	sent: 3,
 	watching: 4,
 	replied: 1,

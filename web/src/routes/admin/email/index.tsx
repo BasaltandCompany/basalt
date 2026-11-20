@@ -14,6 +14,10 @@ import {
 } from "~/lib/email-queries";
 import type { EmailThread, EmailMessage, EmailOutbox } from "~/db/schema";
 import { SIGNATURES } from "~/lib/email-signature";
+import { ingestKind } from "~/lib/sync/sync-client";
+import { transact } from "~/lib/sync/transactions";
+import { poolRow, poolRows, poolSeeded } from "~/lib/sync/pool";
+import type { PoolRow } from "~/lib/sync/merge";
 import { Button, buttonVariants } from "@basaltac/ui";
 
 type DraftVersionRow = { id: string; version: number; author: string; createdAt: string; updatedAt: string };
@@ -90,6 +94,20 @@ export default function AdminEmail() {
 	}, { deferStream: true });
 	const sync = useAction(syncEmailAction);
 
+	createEffect(
+		() => ({ data: inbox(), q: activeQ() }),
+		(v) => {
+			// seed/merge inbox threads into the sync pool (search results are a
+			// subset — no reconcile then, or the corpus would shrink to the matches)
+			const data = v.data;
+			if (!data?.connected) return;
+			ingestKind("email-thread", data.threads as unknown as PoolRow[], {
+				reconcile: !v.q,
+				refetch: () => void revalidate("email-inbox"),
+			});
+		},
+	);
+
 	const [q, setQ] = createSignal(String(searchParams.q ?? ""));
 	const [selected, setSelected] = createSignal<ThreadFull | null>(null);
 	// newest-first display: the current message is index 0 and expanded; this is
@@ -98,12 +116,16 @@ export default function AdminEmail() {
 	// theater mode — fullscreen focused read of the selected thread
 	const [theater, setTheater] = createSignal(false);
 	const [selIdx, setSelIdx] = createSignal(0);
-	// optimistic triage state — ops mutate these instead of refetching the
-	// whole list; the next sync (≤10min or the Sync button) reconciles
-	const [hiddenIds, setHiddenIds] = createSignal<Set<string>>(new Set());
-	const [readOverride, setReadOverride] = createSignal<Record<string, boolean>>({});
-	const visibleThreads = () => (inbox()?.threads ?? []).filter((t) => !hiddenIds().has(t.id));
-	const isUnread = (t: EmailThread) => readOverride()[t.id] ?? t.unread;
+	// triage state lives in the sync pool (web/src/lib/sync) — interactions
+	// write the pool instantly and revert on failure; the old hand-rolled
+	// hiddenIds/readOverride signals are gone (one source of truth).
+	const poolThread = (id: string) => poolRow<EmailThread>("email-thread", id);
+	const visibleThreads = (): EmailThread[] => {
+		if (!activeQ() && poolSeeded("email-thread")) return poolRows<EmailThread>("email-thread").filter((t) => !t.archived);
+		// search mode renders the server's matches, minus rows optimistically archived
+		return (inbox()?.threads ?? []).filter((t) => poolThread(t.id)?.archived !== true);
+	};
+	const isUnread = (t: EmailThread) => poolThread(t.id)?.unread ?? t.unread;
 	// display order = newest first — the current message on top, the rest of
 	// the thread underneath (data order untouched: r/f still read .at(-1))
 	const shownMessages = () => [...(selected()?.messages ?? [])].reverse();
@@ -277,12 +299,23 @@ export default function AdminEmail() {
 		};
 		const markRead = (ac?: AbortController) => {
 			if (!isUnread(t)) return;
-			setReadOverride({ ...readOverride(), [t.id]: false }); // dim the dot now
-			void fetch(`/api/email/threads/${t.id}`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ op: "read" }),
-				signal: ac?.signal,
+			void transact({
+				kind: "email-thread",
+				rowId: t.id,
+				patch: { unread: false },
+				label: "Email read",
+				// fast j/k aborts the fetch — the Gmail op may still have landed,
+				// so swallow AbortError as ok and let the poll reconcile the truth
+				commit: () =>
+					fetch(`/api/email/threads/${t.id}`, {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({ op: "read" }),
+						signal: ac?.signal,
+					}).catch((e) => {
+						if ((e as Error).name === "AbortError") return new Response("{}", { status: 200 });
+						throw e;
+					}),
 			});
 		};
 		const hit = threadCache.get(t.id);
@@ -312,21 +345,32 @@ export default function AdminEmail() {
 		setTimeout(() => setSendStatus(""), ms);
 	};
 
+	// triage: optimistic pool write via transact, commit = the Gmail-mirroring
+	// endpoint. spam/delete drop the local rows server-side (gmail.ts
+	// removeLocalThread) → pool delete op; archive/unarchive/read/unread are
+	// value updates. Failure reverts the pool + toasts (engine).
+	const TRIAGE_PATCH: Record<string, Record<string, unknown>> = {
+		archive: { archived: true },
+		unarchive: { archived: false },
+		read: { unread: false },
+		unread: { unread: true },
+	};
 	const threadOp = async (id: string, op: string): Promise<boolean> => {
-		const res = await fetch(`/api/email/threads/${id}`, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ op }),
+		const hidesRow = op === "archive" || op === "spam" || op === "delete";
+		const outcome = await transact({
+			kind: "email-thread",
+			rowId: id,
+			...(op === "spam" || op === "delete" ? { op: "delete" as const } : { patch: TRIAGE_PATCH[op] }),
+			label: `Email ${op}`,
+			commit: () =>
+				fetch(`/api/email/threads/${id}`, {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ op }),
+				}),
 		});
-		if (!res.ok) {
-			// surface server errors — silent no-ops looked like "delete is broken"
-			const r = (await res.json().catch(() => ({}))) as { error?: string };
-			flash(`failed: ${r.error ?? `HTTP ${res.status}`}`);
-			return false;
-		}
-		const removing = op === "archive" || op === "spam" || op === "delete";
-		if (removing) {
-			setHiddenIds(new Set([...hiddenIds(), id]));
+		if (outcome === "failed") return false;
+		if (hidesRow) {
 			// triage flow: keep the reading pane open on the next thread down —
 			// the row that just slid into the removed row's slot
 			const rest = visibleThreads().filter((t) => t.id !== id);
@@ -336,42 +380,35 @@ export default function AdminEmail() {
 				await loadThread(next, nextIdx);
 				return true;
 			}
-		} else if (op === "unread") {
-			setReadOverride({ ...readOverride(), [id]: true });
-		} else if (op === "unarchive") {
-			const next = new Set(hiddenIds());
-			next.delete(id); // brings the row back into the inbox list
-			setHiddenIds(next);
 		}
 		setSelected(null);
 		return true;
 	};
 
-	// bulk apply over the visual selection: one fetch per thread, one revalidate
-	// at the end (per-op revalidates would reload the cursor N times)
+	// bulk apply over the visual selection: one tx per thread (the queue
+	// batches them), optimistic rows update instantly; failures toast individually
 	const bulkOp = async (ids: string[], op: string) => {
 		if (!ids.length) return;
-		let ok = 0;
-		let lastErr = "";
-		for (const id of ids) {
-			const res = await fetch(`/api/email/threads/${id}`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ op }),
-			});
-			if (res.ok) ok++;
-			else lastErr = ((await res.json().catch(() => ({}))) as { error?: string }).error ?? `HTTP ${res.status}`;
-		}
-		if (op === "archive" || op === "spam" || op === "delete") {
-			setHiddenIds(new Set([...hiddenIds(), ...ids]));
-		} else if (op === "unread") {
-			const overrides = { ...readOverride() };
-			for (const id of ids) overrides[id] = true;
-			setReadOverride(overrides);
-		}
+		const outcomes = await Promise.all(
+			ids.map((id) =>
+				transact({
+					kind: "email-thread",
+					rowId: id,
+					...(op === "spam" || op === "delete" ? { op: "delete" as const } : { patch: op === "unread" ? { unread: true } : { archived: true } }),
+					label: `Email ${op}`,
+					commit: () =>
+						fetch(`/api/email/threads/${id}`, {
+							method: "POST",
+							headers: { "Content-Type": "application/json" },
+							body: JSON.stringify({ op }),
+						}),
+				}),
+			),
+		);
+		const ok = outcomes.filter((o) => o === "synced").length;
 		setVisMode(false);
 		setSelected(null);
-		flash(lastErr ? `${op}: ${ok}/${ids.length} ok — last error: ${lastErr}` : `${op}: ${ok} threads`, 8000);
+		flash(`${op}: ${ok} threads`, 8000);
 	};
 
 	// draft id currently blocked by the voice send gate — its Send button

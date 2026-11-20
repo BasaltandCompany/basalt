@@ -1,6 +1,6 @@
 import { Title } from "@solidjs/meta";
-import { createMemo } from "solid-js";
-import { useNavigate, useParams, useAction } from "@solidjs/router";
+import { createMemo, createEffect } from "solid-js";
+import { useNavigate, useParams, useAction, revalidate } from "@solidjs/router";
 import { For, Show, Loading, createSignal } from "solid-js";
 import CreateDialog from "~/components/CreateDialog";
 import Layout from "~/components/Layout";
@@ -17,6 +17,10 @@ import { createDeliverableAction, getDeliverablesQuery, deleteDeliverableAction,
 import { updateProjectAction } from "~/lib/queries";
 import type { DeliverableStatus, ProjectStatus, QuoteStatus, Project } from "~/db/schema";
 import { money } from "~/lib/quotes";
+import { ingestKind } from "~/lib/sync/sync-client";
+import { transact } from "~/lib/sync/transactions";
+import { poolRow } from "~/lib/sync/pool";
+import type { PoolRow } from "~/lib/sync/merge";
 import { Button, Card, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@basaltac/ui";
 import SelectField from "~/components/select-field";
 
@@ -60,6 +64,17 @@ export default function ProjectDetail() {
 	const deleteDeliverable = useAction(deleteDeliverableAction);
 	const createDeliverable = useAction(createDeliverableAction);
 	const updateProject = useAction(updateProjectAction);
+	// sync pool: the project row feeds the pool so the index list updates
+	// instantly on edits, and status/name/date edits go through the tx engine
+	createEffect(
+		() => project(),
+		(row) => {
+			if (!row) return;
+			ingestKind("project", [row as unknown as PoolRow], {
+				refetch: () => void revalidate("project"),
+			});
+		},
+	);
 	const updateQuoteMeta = useAction(updateQuoteMetaAction);
 	const importQuote = useAction(importQuoteToProjectAction);
 	const statusForms: Record<string, HTMLFormElement> = {};
@@ -98,10 +113,7 @@ export default function ProjectDetail() {
 		if (!status || status === current || statusSaving()) return;
 		setStatusSaving(true);
 		try {
-			const fd = new FormData();
-			fd.set("id", id);
-			fd.set("status", status);
-			await updateProject(fd);
+			await transact({ kind: "project", rowId: id, patch: { status }, label: "Project status" });
 		} finally {
 			setStatusSaving(false);
 		}
@@ -164,10 +176,30 @@ export default function ProjectDetail() {
 										title="Edit Project"
 										submitLabel="Save Changes"
 										successMessage="Saved."
-										onSubmit={async (fd) => {
-											fd.set("id", p().id);
-											return updateProject(fd) as Promise<{ error?: string; success?: string } | undefined>;
-										}}
+						onSubmit={async (fd) => {
+							fd.set("id", p().id);
+							// transactional fields ride the tx engine (optimistic, one tx);
+							// company/engagement-type changes keep the action (FK + enum wiring)
+							const row = poolRow<Project>("project", p().id) ?? p();
+							const patch: Record<string, unknown> = {};
+							const setIf = (fdKey: string, col: string, coerce: (v: string) => unknown) => {
+								if (!fd.has(fdKey)) return;
+								const v = String(fd.get(fdKey) ?? "");
+								patch[col] = coerce(v);
+							};
+							setIf("name", "name", (v) => v);
+							setIf("hourly_rate", "hourlyRate", Number);
+							setIf("fixed_price", "fixedPrice", (v) => (v === "" ? null : Number(v)));
+							setIf("monthly_cap_hours", "monthlyCapHours", (v) => (v === "" ? null : Number(v)));
+							setIf("start_date", "startDate", (v) => v || null);
+							setIf("end_date", "endDate", (v) => v || null);
+							setIf("notes", "notes", (v) => v || null);
+							if (fd.get("company_id") !== row.companyId || fd.get("engagement_type") !== row.engagementType) {
+								return updateProject(fd) as Promise<{ error?: string; success?: string } | undefined>;
+							}
+							await transact({ kind: "project", rowId: p().id, patch, label: "Project update" });
+							return { success: "Saved." };
+						}}
 									>
 										<EditProjectForm p={p()} companies={companies() ?? []} />
 									</CreateDialog>
