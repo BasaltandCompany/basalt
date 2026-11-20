@@ -50,6 +50,13 @@ pub fn run() {
         .initialization_script(
           "(function(){var s=document.createElement('style');s.textContent='html,body{overscroll-behavior:none!important}';(document.head||document.documentElement).appendChild(s)})();",
         )
+        // Consume Escape in the page so macOS never sees it: a prevented keydown
+        // is marked handled by WKWebView and stops at the responder chain instead
+        // of reaching AppKit's toggle-fullscreen. Capture phase, preventDefault
+        // only — page handlers still run, so dialogs/overlays keep closing on Esc.
+        .initialization_script(
+          "(function(){document.addEventListener('keydown',function(e){if(e.key==='Escape')e.preventDefault();},true)})();",
+        )
         .on_navigation(move |nav| {
           let keep = nav.host_str() == Some(ALLOWED_HOST) || nav.scheme() == "about";
           if !keep {

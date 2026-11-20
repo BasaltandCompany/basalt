@@ -16,6 +16,7 @@ export const LintedTextarea = (props: {
 	rows?: number;
 	placeholder?: string;
 	ariaLabel?: string;
+	embedded?: boolean; // sit flush inside an outer bordered container (email composer: body + footer on one surface)
 }) => {
 	let ta: HTMLTextAreaElement | undefined;
 	let mirror: HTMLDivElement | undefined;
@@ -51,7 +52,7 @@ export const LintedTextarea = (props: {
 		width: "100%",
 	};
 	return (
-		<div style={{ position: "relative", "margin-bottom": "8px" }}>
+		<div style={{ position: "relative", "margin-bottom": props.embedded ? 0 : "8px" }}>
 			<div
 				ref={mirror}
 				aria-hidden="true"
@@ -85,7 +86,7 @@ export const LintedTextarea = (props: {
 				value={props.value}
 				onInput={(e) => props.onInput(e.currentTarget.value)}
 				onScroll={onScroll}
-				style={{ ...shared, position: "relative", "z-index": 1, background: "transparent", border: "1px solid rgba(0,0,0,0.12)", resize: "none", display: "block" }}
+				style={{ ...shared, position: "relative", "z-index": 1, background: "transparent", border: props.embedded ? "none" : "1px solid rgba(0,0,0,0.12)", resize: "none", display: "block" }}
 			/>
 		</div>
 	);

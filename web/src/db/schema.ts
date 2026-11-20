@@ -1344,6 +1344,10 @@ export const emailOutbox = pgTable(
 		// outbound signature choice: 'full' | 'plain' | 'none'; NULL = auto
 		// (campaign draft → plain, otherwise full). Resolved at send time.
 		signature: text("signature"),
+		// per-draft footer override the human saw/edited in the composer; NULL or
+		// empty = the branded variant for `signature`. Sent verbatim (plain part =
+		// text, html part = escaped text).
+		signatureText: text("signature_text"),
 		// outbound attachments: bytes in portal-docs storage under
 		// email-attachments/<draftId>/, metadata only here so list queries stay light
 		attachments: jsonb("attachments").$type<OutboxAttachment[]>().notNull().default([]),

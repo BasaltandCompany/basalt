@@ -227,6 +227,7 @@ export async function sendOutboxInner(
 			subject: row.subject,
 			body: sendBody,
 			signature: sig,
+			signatureText: row.signatureText,
 			inReplyToGmailId,
 			attachments: mimeAttachments.length ? mimeAttachments : undefined,
 		});
@@ -319,6 +320,7 @@ export async function createEmailDraft(input: {
 	campaignCompanyId?: string;
 	campaignStep?: number;
 	signature?: "full" | "plain" | "none";
+	signatureText?: string;
 	// absolute local file paths — the agent and server share the host
 	attachments?: string[];
 }): Promise<{ outboxId: string; attachmentError?: string }> {
@@ -336,6 +338,7 @@ export async function createEmailDraft(input: {
 			campaignCompanyId: input.campaignCompanyId,
 			campaignStep: input.campaignStep,
 			...(input.signature ? { signature: input.signature } : {}),
+			...(input.signatureText ? { signatureText: input.signatureText } : {}),
 		})
 		.returning();
 	// v1 of the draft's tracked history = the agent's original body
@@ -370,6 +373,7 @@ export async function updateEmailDraft(input: {
 	campaignCompanyId?: string;
 	campaignStep?: number;
 	signature?: "full" | "plain" | "none";
+	signatureText?: string;
 	attachments?: string[];
 }): Promise<{ outboxId: string; updated: true; version: number | null; attachmentError?: string } | { error: string }> {
 	"use server";
@@ -385,6 +389,7 @@ export async function updateEmailDraft(input: {
 			...(input.bcc !== undefined ? { bccEmail: input.bcc } : {}),
 			...(input.campaignCompanyId !== undefined ? { campaignCompanyId: input.campaignCompanyId, campaignStep: input.campaignStep } : {}),
 			...(input.signature ? { signature: input.signature } : {}),
+			...(input.signatureText !== undefined ? { signatureText: input.signatureText || null } : {}),
 		})
 		.where(eq(emailOutbox.id, input.outboxId));
 	const version = await saveDraftBody(input.outboxId, input.body, "agent");

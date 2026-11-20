@@ -1465,6 +1465,19 @@ textarea.doc-title { resize: none; overflow: hidden; display: block; height: aut
 	padding: 0;
 }
 
+/* inline footer preview in the email composer: SIGNATURES.full.html carries
+   explicit light-theme colors (#111111 text, #d8d2c4 rule) — adapt them to
+   the composer's dark surface so the footer reads as part of the email
+   instead of a stranded white card. Layout/logo untouched. */
+.email-footer-preview div,
+.email-footer-preview a {
+	color: #b5ad9c !important;
+}
+.email-footer-preview hr {
+	border: none !important;
+	border-top: 1px solid rgba(255, 255, 255, 0.14) !important;
+}
+
 /* voice-lint underline overlay (LexicalDocEditor) — marks are positioned
    over measured DOM ranges; no text inside, so a wavy border-bottom stands in
    for text-decoration */
