@@ -35,6 +35,7 @@ export const POST = async (event: APIEvent) => {
 			bccEmail: body.bcc || null,
 			subject: body.subject || "(no subject)",
 			body: body.body,
+			...(body.signatureText ? { signatureText: body.signatureText } : {}),
 			threadId: body.threadId ?? null,
 		})
 		.returning();

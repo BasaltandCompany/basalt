@@ -524,30 +524,51 @@ export async function performUnsubscribe(account: EmailAccount, info: UnsubInfo)
 
 export type MimeAttachment = { filename: string; mimeType: string; base64: string };
 
-// the body's own MIME section — its Content-Type line onward (everything that
-// sits inside the enclosing multipart/mixed when attachments are present)
-function bodySection(body: string, signature?: "full" | "plain"): string {
-	if (!signature) {
-		return ['Content-Type: text/plain; charset="UTF-8"', "Content-Transfer-Encoding: 8bit", "", body].join("\r\n");
-	}
-	// signature present → multipart/alternative: plain body + signature text,
-	// and an HTML part with the branded signature block.
-	const sig = SIGNATURES[signature];
+// the alternative CONTENT — from the first `--_basalt_sig` boundary onward.
+// Its enclosing Content-Type header is added by the caller: the top-level
+// entity when there are no attachments, the part header inside
+// multipart/mixed otherwise. Emitted exactly once either way — a duplicated
+// header here becomes body preamble, which strict clients (Spark) mis-parse
+// into a blank footer.
+function alternativeContent(body: string, footer: { plain: string; html: string }): string {
 	return [
-		'Content-Type: multipart/alternative; boundary="_basalt_sig"',
-		"",
 		"--_basalt_sig",
 		'Content-Type: text/plain; charset="UTF-8"',
 		"Content-Transfer-Encoding: 8bit",
 		"",
-		`${body}\n\n${sig.plain}`,
+		`${body}\n\n${footer.plain}`,
 		"--_basalt_sig",
 		'Content-Type: text/html; charset="UTF-8"',
 		"Content-Transfer-Encoding: 8bit",
 		"",
-		`<html><body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111111;line-height:1.5;margin:0;padding:24px;">${escapeBodyHtml(body)}${sig.html}</body></html>`,
+		`<html><body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111111;line-height:1.5;margin:0;padding:24px;">${escapeBodyHtml(body)}${footer.html}</body></html>`,
 		"--_basalt_sig--",
 	].join("\r\n");
+}
+
+// Effective footer for a send: a per-draft override (what the human saw and
+// possibly edited in the composer) wins; NULL/empty = the branded variant.
+export function resolveFooter(signature?: "full" | "plain", signatureText?: string | null): { plain: string; html: string } | undefined {
+	if (!signature) return undefined;
+	const override = signatureText?.trim();
+	if (override) {
+		return {
+			plain: override,
+			html: `<div style="margin-top:24px;font-family:Arial,Helvetica,sans-serif;">${escapeBodyHtml(override)}</div>`,
+		};
+	}
+	return SIGNATURES[signature];
+}
+
+// the body's own MIME section — its Content-Type line onward (everything that
+// sits inside the enclosing multipart/mixed when attachments are present)
+function bodySection(body: string, footer?: { plain: string; html: string }): string {
+	if (!footer) {
+		return ['Content-Type: text/plain; charset="UTF-8"', "Content-Transfer-Encoding: 8bit", "", body].join("\r\n");
+	}
+	// footer present → multipart/alternative: plain body + footer text, and an
+	// HTML part with the branded (or overridden) footer block.
+	return ['Content-Type: multipart/alternative; boundary="_basalt_sig"', "", alternativeContent(body, footer)].join("\r\n");
 }
 
 // RFC 2045: quoted-string header param — drop chars that break the quoting
@@ -574,7 +595,7 @@ function wrap76(b64: string): string {
 	return (b64.match(/.{1,76}/g) ?? []).join("\r\n");
 }
 
-export function buildMime(input: { to: string; cc?: string | null; bcc?: string | null; subject: string; body: string; signature?: "full" | "plain"; attachments?: MimeAttachment[] }): string {
+export function buildMime(input: { to: string; cc?: string | null; bcc?: string | null; subject: string; body: string; signature?: "full" | "plain"; signatureText?: string | null; attachments?: MimeAttachment[] }): string {
 	const headers = [
 		`To: ${input.to}`,
 		...(input.cc ? [`Cc: ${input.cc}`] : []),
@@ -586,7 +607,8 @@ export function buildMime(input: { to: string; cc?: string | null; bcc?: string 
 		`Subject: ${input.subject}`,
 		"MIME-Version: 1.0",
 	];
-	if (!input.signature && !input.attachments?.length) {
+	const footer = resolveFooter(input.signature, input.signatureText);
+	if (!footer && !input.attachments?.length) {
 		// legacy bare path — byte-identical output
 		headers.push('Content-Type: text/plain; charset="UTF-8"', "Content-Transfer-Encoding: 8bit");
 		return `${headers.join("\r\n")}\r\n\r\n${input.body}`;
@@ -594,7 +616,7 @@ export function buildMime(input: { to: string; cc?: string | null; bcc?: string 
 	if (input.attachments?.length) {
 		// attachments → multipart/mixed: body section first, one base64 part per file
 		headers.push('Content-Type: multipart/mixed; boundary="_basalt_att"');
-		const lines = ["--_basalt_att", bodySection(input.body, input.signature)];
+		const lines = ["--_basalt_att", bodySection(input.body, footer)];
 		for (const a of input.attachments) {
 			const name = mimeFilename(a.filename);
 			lines.push(
@@ -609,18 +631,20 @@ export function buildMime(input: { to: string; cc?: string | null; bcc?: string 
 		lines.push("--_basalt_att--");
 		return [headers.join("\r\n"), "", ...lines].join("\r\n");
 	}
+	// no attachments → the alternative content IS the body; its header is the
+	// top-level Content-Type, emitted exactly once
 	headers.push('Content-Type: multipart/alternative; boundary="_basalt_sig"');
-	return [headers.join("\r\n"), "", bodySection(input.body, input.signature)].join("\r\n");
+	return [headers.join("\r\n"), "", alternativeContent(input.body, footer!)].join("\r\n");
 }
 
 /** Send via Gmail. Returns the new message id + its Gmail thread id. */
 export async function sendGmail(
 	account: EmailAccount,
-	input: { to: string; cc?: string | null; bcc?: string | null; subject: string; body: string; signature?: "full" | "plain"; inReplyToGmailId?: string; attachments?: MimeAttachment[] },
+	input: { to: string; cc?: string | null; bcc?: string | null; subject: string; body: string; signature?: "full" | "plain"; signatureText?: string | null; inReplyToGmailId?: string; attachments?: MimeAttachment[] },
 ): Promise<{ id: string; threadId: string }> {
 	// Gmail threads replies via the threadId param — no In-Reply-To guessing
 	const threadId = input.inReplyToGmailId ? await threadIdOf(account, input.inReplyToGmailId) : undefined;
-	const raw = toBase64Url(buildMime({ to: input.to, cc: input.cc, bcc: input.bcc, subject: input.subject, body: input.body, signature: input.signature, attachments: input.attachments }));
+	const raw = toBase64Url(buildMime({ to: input.to, cc: input.cc, bcc: input.bcc, subject: input.subject, body: input.body, signature: input.signature, signatureText: input.signatureText, attachments: input.attachments }));
 	const res = await gmail<{ id: string; threadId: string }>(account, "/messages/send", {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },

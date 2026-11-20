@@ -44,6 +44,7 @@ export const PUT = async (event: APIEvent) => {
 		if (version === null) return json({ error: "not found" }, 404);
 	}
 	if (body.signature !== undefined && !["", "full", "plain", "none"].includes(body.signature)) return json({ error: "invalid signature" }, 400);
+	if (body.signatureText !== undefined && typeof body.signatureText !== "string") return json({ error: "invalid signatureText" }, 400);
 	// drizzle throws "No values to set" on an empty set — a body-only autosave
 	// (the common case) has no meta fields, so skip the update entirely
 	const meta = {
@@ -55,6 +56,8 @@ export const PUT = async (event: APIEvent) => {
 		...(body.bcc !== undefined ? { bccEmail: body.bcc || null } : {}),
 		// '' clears to auto (null): campaign → plain, else full
 		...(body.signature !== undefined ? { signature: body.signature || null } : {}),
+		// per-draft footer override; '' clears back to the branded variant
+		...(body.signatureText !== undefined ? { signatureText: body.signatureText || null } : {}),
 	};
 	if (Object.keys(meta).length === 0) return json({ ok: true, version });
 	const [row] = await db.update(emailOutbox).set(meta).where(eq(emailOutbox.id, event.params!.id)).returning();
