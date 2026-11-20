@@ -49,27 +49,24 @@ export default function PortalValue() {
 		<PortalLayout user={user()}>
 			<Title>Value — Basalt Client Portal</Title>
 			<h1 class="page-title">Value</h1>
-			<p class="page-subtitle">Savings from replacing SaaS subscriptions with your own software</p>
+			<p class="page-subtitle">Proof of the work — shipped deliverables, reviews, hours</p>
 
 			<Show when={data()} fallback={<p class="muted">Loading…</p>}>
 				{(d) => (
-					<Show
-						when={d().tools.length > 0}
-						fallback={<Card class="empty">No replaced tools yet — savings appear here as each one is cut over.</Card>}
-					>
-						{/* Headline + investment strip */}
+					<>
+						{/* Proof-of-work strip — counts only, always shown */}
 						<div class="stat-grid" style={{ "margin-top": "24px" }}>
 							<div class="stat-card">
-								<div class="label">Saved to date</div>
-								<div class="value">{usd(d().savedToDate)}</div>
+								<div class="label">Deliverables completed</div>
+								<div class="value">{d().deliverablesCompleted}</div>
 							</div>
 							<div class="stat-card">
-								<div class="label">Tools replaced</div>
-								<div class="value">{d().tools.filter((t) => t.cutoverDate).length}</div>
+								<div class="label">Updates posted</div>
+								<div class="value">{d().updatesPosted}</div>
 							</div>
 							<div class="stat-card">
-								<div class="label">Hours this month</div>
-								<div class="value">{Math.round(d().hoursThisMonth * 10) / 10}</div>
+								<div class="label">PRs reviewed</div>
+								<div class="value">{d().prsReviewed}</div>
 							</div>
 							<div class="stat-card">
 								<div class="label">Hours total</div>
@@ -77,45 +74,66 @@ export default function PortalValue() {
 							</div>
 						</div>
 
-						{/* Cumulative savings chart */}
-						<Show when={d().series.length > 1}>
+						{/* Savings — only when a replaced subscription is material enough
+						    that the admin made it client-visible (clientVisible rows with
+						    a past cutover; the accrual math needs one). */}
+						<Show when={d().hasVisibleSavings}>
 							<div style={{ "margin-top": "32px" }}>
-								<div class="section-heading">Cumulative savings</div>
-								<Card style={{ padding: "20px" }}>
-									<SavingsChart series={d().series} />
-								</Card>
+								<div class="section-heading">Cash saved — replacing SaaS with your own software</div>
+								<div class="stat-grid" style={{ "margin-top": "12px" }}>
+									<div class="stat-card">
+										<div class="label">Saved to date</div>
+										<div class="value">{usd(d().savedToDate)}</div>
+									</div>
+									<div class="stat-card">
+										<div class="label">Tools replaced</div>
+										<div class="value">{d().tools.filter((t) => t.cutoverDate).length}</div>
+									</div>
+									<div class="stat-card">
+										<div class="label">Hours this month</div>
+										<div class="value">{Math.round(d().hoursThisMonth * 10) / 10}</div>
+									</div>
+								</div>
+
+								<Show when={d().series.length > 1}>
+									<div style={{ "margin-top": "32px" }}>
+										<div class="section-heading">Cumulative savings</div>
+										<Card style={{ padding: "20px" }}>
+											<SavingsChart series={d().series} />
+										</Card>
+									</div>
+								</Show>
+
+								<div style={{ "margin-top": "32px" }}>
+									<div class="section-heading">Replaced tools</div>
+									<Table class="table">
+										<TableHeader>
+											<TableRow>
+												<TableHead>Tool</TableHead>
+												<TableHead>Was</TableHead>
+												<TableHead>Cut over</TableHead>
+												<TableHead>Saved to date</TableHead>
+												</TableRow>
+										</TableHeader>
+										<TableBody>
+											<For each={d().tools}>
+												{(t) => (
+													<TableRow>
+														<TableCell>{t.name}</TableCell>
+														<TableCell class="mono">{usd(t.monthlyCost)}/mo</TableCell>
+														<TableCell class="muted">
+															{t.cutoverDate ? new Date(t.cutoverDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "planned"}
+														</TableCell>
+														<TableCell class="mono" style={{ "font-weight": "500" }}>{usd(t.saved)}</TableCell>
+													</TableRow>
+												)}
+											</For>
+										</TableBody>
+									</Table>
+								</div>
 							</div>
 						</Show>
-
-						{/* Replaced tools */}
-						<div style={{ "margin-top": "32px" }}>
-							<div class="section-heading">Replaced tools</div>
-							<Table class="table">
-								<TableHeader>
-									<TableRow>
-										<TableHead>Tool</TableHead>
-										<TableHead>Was</TableHead>
-										<TableHead>Cut over</TableHead>
-										<TableHead>Saved to date</TableHead>
-									</TableRow>
-								</TableHeader>
-								<TableBody>
-									<For each={d().tools}>
-										{(t) => (
-											<TableRow>
-												<TableCell>{t.name}</TableCell>
-												<TableCell class="mono">{usd(t.monthlyCost)}/mo</TableCell>
-												<TableCell class="muted">
-													{t.cutoverDate ? new Date(t.cutoverDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "planned"}
-												</TableCell>
-												<TableCell class="mono" style={{ "font-weight": "500" }}>{usd(t.saved)}</TableCell>
-											</TableRow>
-										)}
-									</For>
-								</TableBody>
-							</Table>
-						</div>
-					</Show>
+					</>
 				)}
 			</Show>
 		</PortalLayout>

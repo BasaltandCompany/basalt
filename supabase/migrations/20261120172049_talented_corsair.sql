@@ -1,0 +1,1 @@
+ALTER TABLE "tools" ADD COLUMN IF NOT EXISTS "client_visible" boolean DEFAULT true NOT NULL;

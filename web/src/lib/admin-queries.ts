@@ -388,6 +388,8 @@ export const createToolAction = formAction(async (formData: FormData) => {
 		monthlyCost: Number(formData.get("monthly_cost") || 0),
 		cutoverDate: formData.get("cutover_date") ? new Date(String(formData.get("cutover_date"))) : null,
 		notes: String(formData.get("notes") || "") || null,
+		// unchecked checkbox = field absent; only the admin UI calls these actions
+		clientVisible: formData.get("client_visible") !== null,
 	});
 	await revalidate(getCompanyValueQuery.key);
 	throw redirect(String(formData.get("_referer") || "/admin/companies"));
@@ -403,6 +405,7 @@ export const updateToolAction = formAction(async (formData: FormData) => {
 			monthlyCost: Number(formData.get("monthly_cost") || 0),
 			cutoverDate: formData.get("cutover_date") ? new Date(String(formData.get("cutover_date"))) : null,
 			notes: String(formData.get("notes") || "") || null,
+			clientVisible: formData.get("client_visible") !== null,
 		})
 		.where(eq(tools.id, String(formData.get("id"))));
 	await revalidate(getCompanyValueQuery.key);

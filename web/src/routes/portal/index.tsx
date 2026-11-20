@@ -48,12 +48,14 @@ export default function PortalHome() {
 								<div class="label">Open Invoices</div>
 								<div class="value">{d().invoiceCount}</div>
 							</div>
-							<a href="/portal/value" style={{ "text-decoration": "none" }}>
-								<div class="stat-card">
-									<div class="label">Saved to date</div>
-									<div class="value">{usd(value()?.savedToDate ?? 0)}</div>
-								</div>
-							</a>
+							<Show when={value()?.hasVisibleSavings}>
+								<a href="/portal/value" style={{ "text-decoration": "none" }}>
+									<div class="stat-card">
+										<div class="label">Saved to date</div>
+										<div class="value">{usd(value()?.savedToDate ?? 0)}</div>
+									</div>
+								</a>
+							</Show>
 						</div>
 
 						{/* ── Projects list ────────────────────────── */}
@@ -61,21 +63,23 @@ export default function PortalHome() {
 							<div class="section-heading">Projects</div>
 							<div style={{ display: "flex", "flex-direction": "column", gap: "12px" }}>
 								<For each={d().projects} fallback={<Card class="empty">No projects yet.</Card>}>
-									{(proj) => (
-										<Card style={{ padding: "20px" }}>
-											<div style={{ display: "flex", "justify-content": "space-between", "align-items": "center" }}>
-												<div>
-													<span style={{ "font-size": "15px", "font-weight": "500" }}>{proj.name}</span>
-													<span class="muted" style={{ "font-size": "13px", "margin-left": "8px" }}>{proj.companyName}</span>
-												</div>
-												<span style={{ "text-transform": "capitalize", "font-size": "13px" }} class="muted">
-													{proj.engagementType === "project"
-														? `$${(proj.fixedPrice ?? 0).toLocaleString()} fixed`
-														: `$${proj.hourlyRate}/hr`}
-												</span>
-											</div>
-										</Card>
-									)}
+										{(proj) => (
+												<a href={`/portal/projects/${proj.id}`} style={{ "text-decoration": "none", color: "inherit", display: "block" }}>
+												<Card style={{ padding: "20px" }}>
+													<div style={{ display: "flex", "justify-content": "space-between", "align-items": "center" }}>
+														<div>
+															<span style={{ "font-size": "15px", "font-weight": "500" }}>{proj.name}</span>
+															<span class="muted" style={{ "font-size": "13px", "margin-left": "8px" }}>{proj.companyName}</span>
+														</div>
+														<span style={{ "text-transform": "capitalize", "font-size": "13px" }} class="muted">
+															{proj.engagementType === "project"
+																? `$${(proj.fixedPrice ?? 0).toLocaleString()} fixed`
+																: `$${proj.hourlyRate}/hr`}
+														</span>
+													</div>
+												</Card>
+												</a>
+										)}
 								</For>
 							</div>
 						</div>
