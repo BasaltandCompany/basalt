@@ -9,8 +9,20 @@ use tauri::{
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_opener::OpenerExt;
 
-const ADMIN_URL: &str = "https://basalt.ac/admin";
-const ALLOWED_HOST: &str = "basalt.ac";
+// ADMIN_URL can be overridden at build time for dev —
+// `ADMIN_URL=http://localhost:3001 bun run dev` points the shell at the local
+// web app. Data updates need no reload either way: the page's live poll
+// (~3s) pulls them; Reload (Cmd+R) picks up a new deploy or clears a stale bundle.
+fn admin_url() -> &'static str {
+  option_env!("ADMIN_URL").unwrap_or("https://basalt.ac/admin")
+}
+
+fn allowed_host() -> String {
+  tauri::Url::parse(admin_url())
+    .ok()
+    .and_then(|u| u.host_str().map(str::to_string))
+    .unwrap_or_else(|| "basalt.ac".to_string())
+}
 
 fn show_main(app: &tauri::AppHandle) {
   if let Some(win) = app.get_webview_window("main") {
@@ -42,7 +54,8 @@ pub fn run() {
       // Same-origin navigation stays in the window; anything else (e.g.
       // YouTube embeds, docs links) opens in the default browser.
       let handle = app.handle().clone();
-      let url: tauri::Url = ADMIN_URL.parse().expect("valid admin url");
+      let host = allowed_host();
+      let url: tauri::Url = admin_url().parse().expect("valid admin url");
       WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
         .title("Basalt Desktop")
         .inner_size(1400.0, 900.0)
@@ -58,13 +71,19 @@ pub fn run() {
           "(function(){document.addEventListener('keydown',function(e){if(e.key==='Escape')e.preventDefault();},true)})();",
         )
         .on_navigation(move |nav| {
-          let keep = nav.host_str() == Some(ALLOWED_HOST) || nav.scheme() == "about";
+          let keep = nav.host_str() == Some(host.as_str()) || nav.scheme() == "about";
           if !keep {
             let _ = handle.opener().open_url(nav.to_string(), None::<&str>);
           }
           keep
         })
         .build()?;
+
+      // Menu bar with Cmd+R Reload — data is already live via the page's poll;
+      // this is for picking up a fresh deploy or clearing a stale bundle.
+      let reload = MenuItem::with_id(app, "reload", "Reload", true, Some("CmdOrCtrl+R"))?;
+      let app_menu = Menu::with_items(app, &[&reload])?;
+      app.set_menu(app_menu)?;
 
       let open = MenuItem::with_id(app, "open", "Open Basalt Desktop", true, None::<&str>)?;
       let sync = MenuItem::with_id(app, "sync", "Sync meetings now", true, None::<&str>)?;
@@ -96,6 +115,14 @@ pub fn run() {
       if let tauri::WindowEvent::CloseRequested { api, .. } = event {
         api.prevent_close();
         let _ = window.hide();
+      }
+    })
+    // App-menu events (Reload).
+    .on_menu_event(|app, event| {
+      if event.id.as_ref() == "reload" {
+        if let Some(win) = app.get_webview_window("main") {
+          let _ = win.reload();
+        }
       }
     })
     .run(tauri::generate_context!())

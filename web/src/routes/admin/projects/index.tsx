@@ -1,6 +1,6 @@
 import { Title } from "@solidjs/meta";
-import { createMemo, For, Show, Loading, createSignal } from "solid-js";
-import { useAction } from "@solidjs/router";
+import { createMemo, For, Show, Loading, createSignal, createEffect } from "solid-js";
+import { useAction, revalidate } from "@solidjs/router";
 
 import CreateDialog from "~/components/CreateDialog";
 import Layout from "~/components/Layout";
@@ -12,6 +12,10 @@ import {
 import { getCompaniesForSelectQuery } from "~/lib/admin-queries";
 import { Card, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@basaltac/ui";
 import SelectField from "~/components/select-field";
+import { ingestKind } from "~/lib/sync/sync-client";
+import { poolRows, poolSeeded } from "~/lib/sync/pool";
+import type { PoolRow } from "~/lib/sync/merge";
+import type { Project } from "~/db/schema";
 
 const statusBadge: Record<string, string> = {
 	active: "badge-active",
@@ -27,8 +31,21 @@ export default function Projects() {
 	});
 	const createProject = useAction(createProjectAction);
 	const [engagementType, setEngagementType] = createSignal("hourly");
-
 	const isHourly = createMemo(() => engagementType() !== "project");
+	// sync pool: the list renders from the pool once seeded, so edits made on a
+	// project's page (or by an agent) appear here instantly
+	createEffect(
+		() => projects(),
+		(list) => {
+			if (!list) return;
+			ingestKind("project", list as unknown as PoolRow[], {
+				reconcile: true,
+				refetch: () => void revalidate("projects"),
+			});
+		},
+	);
+	type ProjectRow = Project & { companyName: string };
+	const list = () => (poolSeeded("project") ? poolRows<ProjectRow>("project") : projects() ?? []);
 
 	return (
 		<Layout user={user()}>
@@ -114,7 +131,7 @@ export default function Projects() {
 
 			<Loading fallback={<p class="muted">Loading…</p>}>
 				<Show when={projects()} fallback={<p class="muted">Loading…</p>}>
-					{(list) => (
+					{(listGate) => (
 						<Show when={list().length > 0} fallback={
 							<Card class="empty">No projects yet. Create your first one above.</Card>
 						}>
@@ -130,7 +147,7 @@ export default function Projects() {
 									</TableRow>
 								</TableHeader>
 								<TableBody>
-									<For each={list()}>
+								<For each={list()}>
 										{(p) => (
 											<TableRow>
 												<TableCell>
