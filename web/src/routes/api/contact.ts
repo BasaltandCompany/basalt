@@ -1,7 +1,7 @@
 // /api/contact — the Basalt /contact form target. Deliverable email to Collin
 // via the existing Resend setup (alertEmail). CORS for the marketing origin,
 // honeypot + rate limit like brain-request. No storage: the inbox IS the store.
-import type { APIEvent } from "@solidjs/start/server";
+import type { APIEvent } from "filesystem-routing/api";
 import { alertEmail } from "~/lib/publish";
 
 const WINDOW_MS = 60 * 60 * 1000;

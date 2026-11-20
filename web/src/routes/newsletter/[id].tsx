@@ -3,7 +3,7 @@
 // no rebuild, no redeploy.
 import { Title } from "@solidjs/meta";
 import { useParams } from "@solidjs/router";
-import { Show, Suspense, createResource } from "solid-js";
+import { Show, Loading, createMemo } from "solid-js";
 import MarketingPage from "~/components/marketing/MarketingPage";
 import { Header } from "~/components/marketing/Header";
 import { Footer } from "~/components/marketing/Footer";
@@ -14,22 +14,21 @@ import "~/styles/marketing-issue.css";
 
 export default function DispatchIssuePage() {
 	const params = useParams();
-	const [issue] = createResource(() =>
-		getDispatchIssueQuery(params.id ?? "").then(async (i) => {
-			if (!i) return null;
-			// the snapshot published/republished to the web — edits after publish
-			// keep rendering the old version here until republished. The web
-			// appendix renders after the body; /brain links carry ?ref= so the
-			// request attributes itself to this issue.
-			const md = i.webMarkdown ?? i.markdown;
-			const html = renderIssueBody(await renderMentionsInMarkdown(md), i.webAppendix, "web")
-				.replaceAll('href="/brain"', `href="/brain?ref=${i.id}"`)
-				.replaceAll('href="https://basalt.ac/brain"', `href="/brain?ref=${i.id}"`);
-			return { ...i, subject: newsletterSubject({ markdown: md, title: i.title }), html };
-		}),
-	);
+	const issue = createMemo(async () => {
+		const i = await getDispatchIssueQuery(params.id ?? "");
+		if (!i) return null;
+		// the snapshot published/republished to the web — edits after publish
+		// keep rendering the old version here until republished. The web
+		// appendix renders after the body; /brain links carry ?ref= so the
+		// request attributes itself to this issue.
+		const md = i.webMarkdown ?? i.markdown;
+		const html = renderIssueBody(await renderMentionsInMarkdown(md), i.webAppendix, "web")
+			.replaceAll('href="/brain"', `href="/brain?ref=${i.id}"`)
+			.replaceAll('href="https://basalt.ac/brain"', `href="/brain?ref=${i.id}"`);
+		return { ...i, subject: newsletterSubject({ markdown: md, title: i.title }), html };
+	});
 	return (
-		<Suspense fallback={<div style={{ "min-height": "60vh", display: "grid", "place-items": "center" }}>Loading…</div>}>
+		<Loading fallback={<div style={{ "min-height": "60vh", display: "grid", "place-items": "center" }}>Loading…</div>}>
 			<Show when={issue()}>
 				{(i) => (
 					<MarketingPage title={`${i().subject} — The Basalt Dispatch`} description={i().subject}>
@@ -56,6 +55,6 @@ export default function DispatchIssuePage() {
 					</MarketingPage>
 				)}
 			</Show>
-		</Suspense>
+		</Loading>
 	);
 }

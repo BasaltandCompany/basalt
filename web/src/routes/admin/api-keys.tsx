@@ -1,6 +1,7 @@
 import { Title } from "@solidjs/meta";
-import { createAsync, useAction } from "@solidjs/router";
-import { For, Show, Suspense, createSignal } from "solid-js";
+import { createMemo } from "solid-js";
+import { useAction } from "@solidjs/router";
+import { For, Show, Loading, createSignal } from "solid-js";
 import CreateDialog, { type CreateResult } from "~/components/CreateDialog";
 import Layout from "~/components/Layout";
 import ConfirmButton from "~/components/ConfirmButton";
@@ -15,8 +16,8 @@ import { Button, Card } from "@basaltac/ui";
 /** Memberless API keys — server-to-server auth (e.g. the Anarlog publisher).
  *  Raw key is shown once at creation; only a hash is stored. */
 export default function AdminApiKeys() {
-	const user = createAsync(() => getUserQuery(), { deferStream: true });
-	const keys = createAsync(() => getAdminApiKeysQuery(), { deferStream: true });
+	const user = createMemo(() => getUserQuery(), { deferStream: true });
+	const keys = createMemo(() => getAdminApiKeysQuery(), { deferStream: true });
 	const createKey = useAction(createAdminApiKeyAction);
 	const revokeKey = useAction(revokeAdminApiKeyAction);
 
@@ -52,7 +53,7 @@ export default function AdminApiKeys() {
 				</CreateDialog>
 			</div>
 
-			<Suspense fallback={<p class="muted">Loading…</p>}>
+			<Loading fallback={<p class="muted">Loading…</p>}>
 				<Show
 					when={keys()?.length}
 					fallback={<p class="muted">No admin API keys yet.</p>}
@@ -80,7 +81,7 @@ export default function AdminApiKeys() {
 						</For>
 					</div>
 				</Show>
-			</Suspense>
+			</Loading>
 		</Layout>
 	);
 }

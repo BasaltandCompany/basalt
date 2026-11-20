@@ -3,7 +3,7 @@
 // POST   /api/links {target, docId?} → create (slug always generated, never chosen)
 // PATCH  /api/links {slug, target, docId?} → retarget and/or attach/detach (docId: null detaches)
 // DELETE /api/links?slug=x           → remove
-import type { APIEvent } from "@solidjs/start/server";
+import type { APIEvent } from "filesystem-routing/api";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "~/db";
 import { docs, shortLinks } from "~/db/schema";

@@ -2,7 +2,7 @@
 // writing, careers). The landing page (/) has its own fixed-stage chrome and
 // does NOT use these.
 import { Meta, Title } from "@solidjs/meta"
-import type { JSX } from "solid-js"
+import type { JSX } from "@solidjs/web"
 import { Logo } from "@/brand/logo"
 import { Button } from "@basaltac/ui"
 

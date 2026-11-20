@@ -1,6 +1,7 @@
 import { Title } from "@solidjs/meta";
-import { createAsync, useAction, useNavigate } from "@solidjs/router";
-import { For, Show, Suspense, createSignal, createMemo } from "solid-js";
+import { createMemo, For, Show, Loading, createSignal } from "solid-js";
+import { useNavigate, useAction } from "@solidjs/router";
+
 import CreateDialog from "~/components/CreateDialog";
 import Layout from "~/components/Layout";
 import { getUserQuery } from "~/lib/queries";
@@ -78,11 +79,11 @@ function sortCards(a: OutreachProspect, b: OutreachProspect, dueIds: Set<string>
 }
 
 function DigestSection(props: { brainUrl: string }) {
-	const digest = createAsync(() => getBrainDigestQuery(props.brainUrl), {
+	const digest = createMemo(() => getBrainDigestQuery(props.brainUrl), {
 		deferStream: true,
 	});
 	return (
-		<Suspense fallback={<p class="muted" style={{ "font-size": "12px" }}>Loading digest…</p>}>
+		<Loading fallback={<p class="muted" style={{ "font-size": "12px" }}>Loading digest…</p>}>
 			<Show when={digest()} fallback={<p class="muted" style={{ "font-size": "12px" }}>No digest available.</p>}>
 				{(d) => (
 					<Show
@@ -110,12 +111,12 @@ function DigestSection(props: { brainUrl: string }) {
 					</Show>
 				)}
 			</Show>
-		</Suspense>
+		</Loading>
 	);
 }
 
 function ActivityDetails(props: { prospect: OutreachProspect }) {
-	const activity = createAsync(() => getBrainActivityQuery(props.prospect.id));
+	const activity = createMemo(() => getBrainActivityQuery(props.prospect.id));
 	const reset = useAction(resetBrainActivityAction);
 	const [resetMsg, setResetMsg] = createSignal("");
 	async function handleReset() {
@@ -132,7 +133,7 @@ function ActivityDetails(props: { prospect: OutreachProspect }) {
 		setResetMsg(r.error ?? r.success ?? "");
 	}
 	return (
-		<Suspense fallback={<p class="muted" style={{ "font-size": "12px" }}>Loading…</p>}>
+		<Loading fallback={<p class="muted" style={{ "font-size": "12px" }}>Loading…</p>}>
 			<Show when={activity()}>
 				{(a) => (
 					<Show
@@ -156,7 +157,7 @@ function ActivityDetails(props: { prospect: OutreachProspect }) {
 					</Show>
 				)}
 			</Show>
-		</Suspense>
+		</Loading>
 	);
 }
 
@@ -241,7 +242,7 @@ function brainHref(p: OutreachProspect): string {
  *  who-has-the-ball badge, one-click address linking from thread history. */
 function EmailSection(props: { prospect: OutreachProspect }) {
 	const p = () => props.prospect;
-	const data = createAsync(() => getProspectEmailCardQuery(p().id));
+	const data = createMemo(() => getProspectEmailCardQuery(p().id));
 	const setContact = useAction(setOutreachContactAction);
 	const navigate = useNavigate();
 	const [linkMsg, setLinkMsg] = createSignal("");
@@ -255,7 +256,7 @@ function EmailSection(props: { prospect: OutreachProspect }) {
 		if (r.error) setLinkMsg(r.error);
 	}
 	return (
-		<Suspense fallback={<p class="muted" style={{ "font-size": "12px" }}>Loading email…</p>}>
+		<Loading fallback={<p class="muted" style={{ "font-size": "12px" }}>Loading email…</p>}>
 			<Show when={data()}>
 				{(d) => (
 					<div
@@ -322,7 +323,7 @@ function EmailSection(props: { prospect: OutreachProspect }) {
 					</div>
 				)}
 			</Show>
-		</Suspense>
+		</Loading>
 	);
 }
 
@@ -553,9 +554,8 @@ function BoardCard(props: {
 
 	return (
 		<div
-			class="board-card"
+			class={["board-card", { dragging: dragging() }]}
 			ref={cardRef}
-			classList={{ dragging: dragging() }}
 			style={{ "border-color": props.overdue ? "var(--red)" : undefined }}
 			onPointerDown={onPointerDown}
 		>
@@ -729,7 +729,7 @@ function BoardCard(props: {
 }
 
 function Board() {
-	const outreach = createAsync(() => getOutreachQuery(), { deferStream: true });
+	const outreach = createMemo(() => getOutreachQuery(), { deferStream: true });
 	const setStage = useAction(setOutreachStageAction);
 	const [hoverStage, setHoverStage] = createSignal<string | undefined>();
 	const [error, setError] = createSignal("");
@@ -781,7 +781,7 @@ function Board() {
 			<Show when={error()}>
 				<p class="login-error">{error()}</p>
 			</Show>
-			<Suspense fallback={<p class="muted">Loading…</p>}>
+			<Loading fallback={<p class="muted">Loading…</p>}>
 				<Show when={outreach()?.all.length} fallback={<p class="muted">No prospects yet — add one above.</p>}>
 					{/* pinned Today queue — everything due now, overdue first */}
 					<Show when={outreach()?.due.length}>
@@ -809,9 +809,8 @@ function Board() {
 						<For each={columns()}>
 							{(col) => (
 								<div
-									class="board-col"
-										data-stage={col.stage}
-									classList={{ "drag-over": hoverStage() === col.stage }}
+									class={["board-col", { "drag-over": hoverStage() === col.stage }]}
+									data-stage={col.stage}
 								>
 									<div class="board-col-head">
 										<span class="dot" style={{ background: STAGE_COLOR[col.stage] }} />
@@ -839,13 +838,13 @@ function Board() {
 						</For>
 					</div>
 				</Show>
-			</Suspense>
+			</Loading>
 		</div>
 	);
 }
 
 export default function AdminOutreach() {
-	const user = createAsync(() => getUserQuery(), { deferStream: true });
+	const user = createMemo(() => getUserQuery(), { deferStream: true });
 	const createProspect = useAction(createOutreachAction);
 
 	return (

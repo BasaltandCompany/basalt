@@ -1,7 +1,7 @@
 // Newsletter landing — SSR (not prerendered) so the archive always lists
 // freshly published issues straight from the DB.
-import { createAsync } from "@solidjs/router";
-import { For, Show, onMount } from "solid-js";
+import { createMemo } from "solid-js";
+import { For, Show, onSettled } from "solid-js";
 import MarketingPage from "~/components/marketing/MarketingPage";
 import { Header } from "~/components/marketing/Header";
 import { Footer } from "~/components/marketing/Footer";
@@ -10,9 +10,10 @@ import { getDispatchIssuesQuery } from "~/lib/dispatch-queries";
 import "~/styles/marketing-newsletter.css";
 
 export default function Newsletter() {
-	const issues = createAsync(() => getDispatchIssuesQuery());
+	const issues = createMemo(() => getDispatchIssuesQuery());
 
-	onMount(() => {
+	onSettled(() => {
+		if (typeof window === "undefined") return; // onSettled runs on the server too
 		// traffic source on newsletter landing (marketing PostHog project)
 		const ph = window.posthog;
 		if (ph) {

@@ -1,5 +1,5 @@
 import { and, inArray, isNull } from "drizzle-orm";
-import type { APIEvent } from "@solidjs/start/server";
+import type { APIEvent } from "filesystem-routing/api";
 import { getAuthedClient } from "~/lib/session";
 import { db } from "~/db";
 import { emailOutbox } from "~/db/schema";

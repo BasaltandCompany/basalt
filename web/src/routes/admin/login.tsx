@@ -1,12 +1,13 @@
 import { Title } from "@solidjs/meta";
-import { createAsync, useAction } from "@solidjs/router";
+import { createMemo } from "solid-js";
+import { useAction } from "@solidjs/router";
 import { Show, createSignal } from "solid-js";
 import { getUserQuery, loginAction } from "~/lib/queries";
 import { Button, Card } from "@basaltac/ui";
 import Brand from "~/components/Brand";
 
 export default function Login() {
-	const user = createAsync(() => getUserQuery(), { deferStream: true });
+	const user = createMemo(() => getUserQuery(), { deferStream: true });
 	const login = useAction(loginAction);
 	const [error, setError] = createSignal("");
 	const [loading, setLoading] = createSignal(false);

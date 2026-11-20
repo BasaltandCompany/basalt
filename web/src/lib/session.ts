@@ -1,4 +1,4 @@
-import { getCookie, setCookie } from "@solidjs/start/http";
+import { getCookie, setCookie } from "~/lib/http";
 import { supabaseAdmin } from "./supabase";
 import type { User } from "@supabase/supabase-js";
 

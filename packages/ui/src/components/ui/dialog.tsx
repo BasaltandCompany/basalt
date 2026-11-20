@@ -1,5 +1,8 @@
-import type { Component, ComponentProps, JSX, ValidComponent } from "solid-js"
-import { splitProps } from "solid-js"
+import type { ClassValue } from "clsx"
+import type { Component } from "solid-js";
+import type { ValidComponent } from "@solidjs/web";
+import type { ComponentProps, JSX } from "@solidjs/web"
+import { splitProps } from "../../solid2-compat"
 
 import * as DialogPrimitive from "@kobalte/core/dialog"
 import type { PolymorphicProps } from "@kobalte/core/polymorphic"
@@ -21,7 +24,7 @@ const DialogPortal: Component<DialogPrimitive.DialogPortalProps> = (props) => {
 }
 
 type DialogOverlayProps<T extends ValidComponent = "div"> =
-  DialogPrimitive.DialogOverlayProps<T> & { class?: string | undefined }
+  DialogPrimitive.DialogOverlayProps<T> & { class?: ClassValue | undefined }
 
 const DialogOverlay = <T extends ValidComponent = "div">(
   props: PolymorphicProps<T, DialogOverlayProps<T>>
@@ -40,7 +43,7 @@ const DialogOverlay = <T extends ValidComponent = "div">(
 
 type DialogContentProps<T extends ValidComponent = "div"> =
   DialogPrimitive.DialogContentProps<T> & {
-    class?: string | undefined
+    class?: ClassValue | undefined
     children?: JSX.Element
   }
 
@@ -98,7 +101,7 @@ const DialogFooter: Component<ComponentProps<"div">> = (props) => {
 }
 
 type DialogTitleProps<T extends ValidComponent = "h2"> = DialogPrimitive.DialogTitleProps<T> & {
-  class?: string | undefined
+  class?: ClassValue | undefined
 }
 
 const DialogTitle = <T extends ValidComponent = "h2">(
@@ -115,7 +118,7 @@ const DialogTitle = <T extends ValidComponent = "h2">(
 
 type DialogDescriptionProps<T extends ValidComponent = "p"> =
   DialogPrimitive.DialogDescriptionProps<T> & {
-    class?: string | undefined
+    class?: ClassValue | undefined
   }
 
 const DialogDescription = <T extends ValidComponent = "p">(

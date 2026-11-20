@@ -2,7 +2,7 @@
 // GET /l/:slug → count click atomically, 302 to target. Unknown slug → /.
 // Bot/prefetcher UAs (LinkedInBot, email scanners, …) still get redirected —
 // unfurls must work — but never count: `clicks` = human clicks only.
-import type { APIEvent } from "@solidjs/start/server";
+import type { APIEvent } from "filesystem-routing/api";
 import { eq, sql } from "drizzle-orm";
 import { db } from "~/db";
 import { newsletterEvents, shortLinks } from "~/db/schema";
@@ -13,11 +13,11 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const GET = async (event: APIEvent) => {
 	const ua = event.request.headers.get("user-agent");
 	const [row] = isBotUA(ua)
-		? await db.select().from(shortLinks).where(eq(shortLinks.slug, event.params.slug)).limit(1)
+		? await db.select().from(shortLinks).where(eq(shortLinks.slug, event.params!.slug)).limit(1)
 		: await db
 				.update(shortLinks)
 				.set({ clicks: sql`${shortLinks.clicks} + 1` })
-				.where(eq(shortLinks.slug, event.params.slug))
+				.where(eq(shortLinks.slug, event.params!.slug))
 				.returning();
 	// email clicks carry ?r={{email}} (Resend's per-recipient substitution —
 	// see perPersonLinks in publish-core). Social clicks have no r and stay
@@ -27,7 +27,7 @@ export const GET = async (event: APIEvent) => {
 		await db
 			.insert(newsletterEvents)
 			.values({
-				eventId: `click:${event.params.slug}:${r}:${Date.now()}`,
+				eventId: `click:${event.params!.slug}:${r}:${Date.now()}`,
 				type: "click",
 				docId: row.docId ?? null,
 				recipient: r,

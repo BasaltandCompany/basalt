@@ -1,6 +1,7 @@
 import { Title } from "@solidjs/meta";
-import { A, createAsync, useAction, useParams, revalidate } from "@solidjs/router";
-import { For, Show, Suspense, createSignal } from "solid-js";
+import { useParams, revalidate, useAction } from "@solidjs/router";
+import { createMemo } from "solid-js";
+import { For, Show, Loading, createSignal } from "solid-js";
 import CreateDialog from "~/components/CreateDialog";
 import Layout from "~/components/Layout";
 import ProjectDocuments from "~/components/ProjectDocuments";
@@ -34,26 +35,26 @@ import { Button, Card } from "@basaltac/ui";
 import SelectField from "~/components/select-field";
 
 export default function CompanyDetail() {
-	const user = createAsync(() => getUserQuery(), { deferStream: true });
+	const user = createMemo(() => getUserQuery(), { deferStream: true });
 	const params = useParams();
 	const companyId = () => params.id!;
 
-	const companies = createAsync(() => getCompaniesQuery(), { deferStream: true });
+	const companies = createMemo(() => getCompaniesQuery(), { deferStream: true });
 	const company = () => (companies() ?? []).find((c) => c.id === companyId());
 
-	const companyMembers = createAsync(
+	const companyMembers = createMemo(
 		() => getCompanyMembersQuery(companyId()),
 		{ deferStream: true },
 	);
-	const signedInEmails = createAsync(() => getSignedInEmailsQuery(), {
+	const signedInEmails = createMemo(() => getSignedInEmailsQuery(), {
 		deferStream: true,
 	});
 	// Invite pending = member never signed in (invite unaccepted/expired, or
 	// auth user missing). Resend button shows until their first sign-in.
 	const invitePending = (email: string) =>
 		!(signedInEmails() ?? []).includes(email);
-	const allMembers = createAsync(() => getMembersQuery(), { deferStream: true });
-	const projects = createAsync(() => getProjectsForSelectQuery(), {
+	const allMembers = createMemo(() => getMembersQuery(), { deferStream: true });
+	const projects = createMemo(() => getProjectsForSelectQuery(), {
 		deferStream: true,
 	});
 	const companyProjects = () =>
@@ -70,10 +71,10 @@ export default function CompanyDetail() {
 	const [error, setError] = createSignal("");
 	const [success, setSuccess] = createSignal("");
 
-	const companyTools = createAsync(() => getCompanyToolsQuery(companyId()), { deferStream: true });
-	const reviewerUsage = createAsync(() => getCompanyReviewerUsageQuery(companyId()), { deferStream: true });
-	const companyReviews = createAsync(() => getReviewerReviewsQuery(companyId()), { deferStream: true });
-	const companyValue = createAsync(() => getCompanyValueQuery(companyId()), { deferStream: true });
+	const companyTools = createMemo(() => getCompanyToolsQuery(companyId()), { deferStream: true });
+	const reviewerUsage = createMemo(() => getCompanyReviewerUsageQuery(companyId()), { deferStream: true });
+	const companyReviews = createMemo(() => getReviewerReviewsQuery(companyId()), { deferStream: true });
+	const companyValue = createMemo(() => getCompanyValueQuery(companyId()), { deferStream: true });
 	const addTool = useAction(createToolAction);
 	const updateTool = useAction(updateToolAction);
 	const deleteTool = useAction(deleteToolAction);
@@ -112,9 +113,9 @@ export default function CompanyDetail() {
 	return (
 		<Layout user={user()}>
 			<Title>Company Detail — Basalt</Title>
-			<A href="/admin/companies" class="muted" style={{ "font-size": "13px", "margin-bottom": "8px", display: "inline-block" }}>
+			<a href="/admin/companies" class="muted" style={{ "font-size": "13px", "margin-bottom": "8px", display: "inline-block" }}>
 				All Companies
-			</A>
+			</a>
 
 			<Show when={company()} fallback={<p class="muted">Loading…</p>}>
 				{(c) => (
@@ -187,7 +188,7 @@ export default function CompanyDetail() {
 								</CreateDialog>
 							</div>
 
-							<Suspense fallback={<p class="muted">Loading…</p>}>
+							<Loading fallback={<p class="muted">Loading…</p>}>
 								<Show when={companyValue()}>{(v) => (
 									<div class="stat-grid" style={{ "margin-bottom": "16px" }}>
 										<div class="stat-card">
@@ -268,7 +269,7 @@ export default function CompanyDetail() {
 										</Show>
 									)}
 								</Show>
-							</Suspense>
+							</Loading>
 						</div>
 
 						{/* ── Members ─────────────────────────────────── */}
@@ -336,7 +337,7 @@ export default function CompanyDetail() {
 							<p style={{ color: "#16a34a", "font-size": "13px", "margin-bottom": "12px" }}>{success()}</p>
 						</Show>
 
-							<Suspense fallback={<p class="muted">Loading…</p>}>
+							<Loading fallback={<p class="muted">Loading…</p>}>
 								<Show when={companyMembers()}>
 									{(list) => (
 										<Show when={list().length > 0} fallback={<Card class="empty">No members yet.</Card>}>
@@ -376,11 +377,11 @@ export default function CompanyDetail() {
 										</Show>
 									)}
 								</Show>
-							</Suspense>
+							</Loading>
 						</div>
 
 						{/* ── Projects ────────────────────────────────── */}
-						<Suspense fallback={<p class="muted">Loading…</p>}>
+						<Loading fallback={<p class="muted">Loading…</p>}>
 							<div style={{ "margin-top": "40px" }}>
 								<div class="section-heading">Projects</div>
 								<Show when={companyProjects().length > 0} fallback={<Card class="empty">No projects yet for this company.</Card>}>
@@ -398,9 +399,9 @@ export default function CompanyDetail() {
 									</For>
 								</Show>
 							</div>
-						</Suspense>
+						</Loading>
 				{/* ── Basalt Reviewer (automated PR reviews) ── */}
-				<Suspense fallback={<p class="muted">Loading…</p>}>
+				<Loading fallback={<p class="muted">Loading…</p>}>
 					<div style={{ "margin-top": "40px" }}>
 						<div class="section-heading">PR reviews</div>
 						<Show
@@ -445,7 +446,7 @@ export default function CompanyDetail() {
 							</Show>
 						</Show>
 					</div>
-				</Suspense>
+				</Loading>
 					</>
 				)}
 			</Show>
@@ -463,15 +464,15 @@ function CompanyProjectSection(props: {
 	toggleInvForm: () => void;
 	onInvoice: (e: Event) => void;
 }) {
-	const invoices = createAsync(() => getInvoicesQuery(props.proj.id), { deferStream: true });
+	const invoices = createMemo(() => getInvoicesQuery(props.proj.id), { deferStream: true });
 	const deleteInvoice = useAction(deleteInvoiceAction);
 
 	return (
 		<Card style={{ "margin-bottom": "16px", padding: "24px" }}>
 			<div style={{ display: "flex", "justify-content": "space-between", "align-items": "center", "margin-bottom": "16px" }}>
-				<A href={`/admin/projects/${props.proj.id}`} style={{ "font-size": "16px", "font-weight": "500" }}>
+				<a href={`/admin/projects/${props.proj.id}`} style={{ "font-size": "16px", "font-weight": "500" }}>
 					{props.proj.name}
-				</A>
+				</a>
 			</div>
 
 			<ProjectDocuments projectId={props.proj.id} referer={props.referer} />
@@ -521,7 +522,7 @@ function CompanyProjectSection(props: {
 						</form>
 					</Card>
 				</Show>
-				<Suspense fallback={<p class="muted" style={{ "font-size": "12px" }}>Loading…</p>}>
+				<Loading fallback={<p class="muted" style={{ "font-size": "12px" }}>Loading…</p>}>
 					<Show when={invoices()}>
 						{(list) => (
 							<Show when={list().length > 0} fallback={<p class="muted" style={{ "font-size": "12px" }}>No invoices.</p>}>
@@ -554,7 +555,7 @@ function CompanyProjectSection(props: {
 							</Show>
 						)}
 					</Show>
-				</Suspense>
+				</Loading>
 			</div>
 		</Card>
 	);

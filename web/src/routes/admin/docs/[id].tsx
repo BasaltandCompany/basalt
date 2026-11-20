@@ -1,5 +1,6 @@
 import { Title } from "@solidjs/meta";
-import { useParams, createAsync } from "@solidjs/router";
+import { useParams } from "@solidjs/router";
+import { createMemo } from "solid-js";
 import { Show } from "solid-js";
 import Layout from "~/components/Layout";
 import { DocEditor } from "~/components/DocEditor";
@@ -7,7 +8,7 @@ import { getDocQuery } from "~/lib/docs-queries";
 
 export default function AdminDocEditor() {
 	const params = useParams();
-	const doc = createAsync(() => getDocQuery(params.id ?? ""), { deferStream: true });
+	const doc = createMemo(() => getDocQuery(params.id ?? ""), { deferStream: true });
 	return (
 		<Layout>
 			<Show when={doc()}>

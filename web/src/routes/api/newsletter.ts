@@ -1,4 +1,4 @@
-import type { APIEvent } from "@solidjs/start/server";
+import type { APIEvent } from "filesystem-routing/api";
 import { Resend } from "resend";
 import { generateScorecardPDF } from "./scorecard-pdf";
 import type { ScoreData } from "./types";

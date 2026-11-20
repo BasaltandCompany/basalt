@@ -1,5 +1,6 @@
 import { Title } from "@solidjs/meta";
-import { createAsync, useAction, useSearchParams } from "@solidjs/router";
+import { useSearchParams, useAction } from "@solidjs/router";
+import { createMemo } from "solid-js";
 import { For, Show, createEffect, createSignal } from "solid-js";
 import { Button, Card } from "@basaltac/ui";
 import Brand from "~/components/Brand";
@@ -24,7 +25,7 @@ const SCOPE_LABELS: Record<string, string> = {
 export default function OAuthConsent() {
 	const [searchParams] = useSearchParams();
 	const authorizationId = () => String(searchParams.authorization_id ?? "");
-	const consent = createAsync(() => getConsentQuery(authorizationId()), { deferStream: true });
+	const consent = createMemo(() => getConsentQuery(authorizationId()), { deferStream: true });
 
 	const login = useAction(oauthLoginAction);
 	const approve = useAction(approveConsentAction);
@@ -43,10 +44,12 @@ export default function OAuthConsent() {
 
 	// Repeat sign-ins where the user already granted: the server skipped consent
 	// and handed us the redirect with the code — just continue it.
-	createEffect(() => {
-		const s = consent();
-		if (s?.status === "continue") window.location.assign(s.redirectUrl);
-	});
+	createEffect(
+		() => consent(),
+		(s) => {
+			if (s?.status === "continue") window.location.assign(s.redirectUrl);
+		},
+	);
 
 	async function handleSubmit(e: Event) {
 		e.preventDefault();

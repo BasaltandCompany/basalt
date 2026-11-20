@@ -1,6 +1,6 @@
 import { Title } from "@solidjs/meta";
 import { useParams } from "@solidjs/router";
-import { createEffect, createResource, createSignal, For, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { Button } from "@basaltac/ui";
 import { Logo } from "~/brand/logo";
 import { getOpenDropMeta } from "~/lib/drop-share";
@@ -13,7 +13,7 @@ const label = "block font-sans text-xs font-medium uppercase tracking-[0.2em] te
 
 export default function DropPage() {
 	const params = useParams();
-	const [meta] = createResource(async () => getOpenDropMeta(params.token ?? ""));
+	const meta = createMemo(async () => getOpenDropMeta(params.token ?? ""));
 	const [files, setFiles] = createSignal<File[]>([]);
 	const [result, setResult] = createSignal<{ ok?: boolean; error?: string } | null>(null);
 	const [busy, setBusy] = createSignal(false);
@@ -22,10 +22,14 @@ export default function DropPage() {
 	// never re-applies solid-meta's reactive text to the SSR'd element, so drive
 	// document.title explicitly once the resource resolves.
 	const title = () =>
-		meta.loading ? "Secure upload — Basalt" : meta() ? `${meta()!.title} — Secure upload` : "Not found — Basalt";
-	createEffect(() => {
-		document.title = title();
-	});
+		meta() ? `${meta()!.title} — Secure upload` : "Not found — Basalt";
+	// Solid 2: compute tracks, effect writes.
+	createEffect(
+		() => title(),
+		(t) => {
+			document.title = t;
+		},
+	);
 
 	async function submit(e: SubmitEvent) {
 		e.preventDefault();

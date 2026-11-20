@@ -1,6 +1,7 @@
 import { Title } from "@solidjs/meta";
-import { createAsync, useAction } from "@solidjs/router";
-import { For, Show, Suspense, createSignal } from "solid-js";
+import { createMemo } from "solid-js";
+import { useAction } from "@solidjs/router";
+import { For, Show, Loading, createSignal } from "solid-js";
 import CreateDialog from "~/components/CreateDialog";
 import Layout from "~/components/Layout";
 import { LintedTextarea } from "~/components/LintedTextarea";
@@ -431,8 +432,8 @@ function Campaign(props: { campaign: CampaignData; store: CampaignStore }) {
 }
 
 export default function AdminCampaigns() {
-	const user = createAsync(() => getUserQuery(), { deferStream: true });
-	const campaigns = createAsync(() => getCampaignsQuery(), { deferStream: true });
+	const user = createMemo(() => getUserQuery(), { deferStream: true });
+	const campaigns = createMemo(() => getCampaignsQuery(), { deferStream: true });
 	const createCampaign = useAction(createCampaignAction);
 	const updateCampaign = useAction(updateCampaignAction);
 	const saveTemplates = useAction(setCampaignTemplatesAction);
@@ -586,11 +587,11 @@ export default function AdminCampaigns() {
 				</CreateDialog>
 			</div>
 
-			<Suspense fallback={<p class="muted">Loading…</p>}>
+			<Loading fallback={<p class="muted">Loading…</p>}>
 				<Show when={campaigns()?.length} fallback={<p class="muted">No campaigns yet — create one above.</p>}>
 					<For each={campaigns()}>{(c) => <Campaign campaign={c} store={store} />}</For>
 				</Show>
-			</Suspense>
+			</Loading>
 		</Layout>
 	);
 }

@@ -1,5 +1,5 @@
-import type { APIEvent } from "@solidjs/start/server";
-import { redirect } from "@solidjs/router";
+import type { APIEvent } from "filesystem-routing/api";
+import { redirect } from "@solidjs/web";
 import { getAuthedClient } from "~/lib/session";
 import { makeGithubAuthState } from "~/lib/github-prs";
 

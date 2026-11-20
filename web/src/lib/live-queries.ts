@@ -1,7 +1,7 @@
 // Live admin feed — client side. Polls /api/changes every 5s while the tab is
 // visible; any new event revalidates all queries (agent edits appear ~5s, no
 // refresh). The pure reducer is exported for the test.
-import { onCleanup, onMount } from "solid-js";
+import { onCleanup, onSettled } from "solid-js";
 
 const POLL_MS = 3_000; // knob: poll cadence while the tab is visible — open editors apply agent edits within ~this window
 
@@ -24,7 +24,7 @@ export function applyPoll(cursor: number | null, res: PollResult): { revalidate:
 
 /** Mount once (Layout.tsx). No-op during SSR. */
 export function useLiveQueries(): void {
-	onMount(() => {
+	onSettled(() => {
 		let cursor: number | null = null;
 		let inFlight = false;
 

@@ -1,6 +1,6 @@
 // Old issue-01 URL (was a hand-built static page; the issue now lives in the
 // DB). 302 to the live DB issue so inbound links and SEO survive.
-import type { APIEvent } from "@solidjs/start/server";
+import type { APIEvent } from "filesystem-routing/api";
 import { listPublishedDispatch } from "~/lib/dispatch";
 
 export const GET = async (_event: APIEvent) => {

@@ -1,4 +1,5 @@
-import { query, action, redirect, revalidate } from "@solidjs/router";
+import { query, formAction, revalidate } from "@solidjs/router";
+import { redirect } from "@solidjs/web";
 import { and, asc, desc, eq, isNotNull, isNull, ne } from "drizzle-orm";
 import { db } from "~/db";
 import { emailOutbox } from "~/db/schema";
@@ -104,7 +105,7 @@ export const getOutboxQuery = query(async () => {
 	return db.select().from(emailOutbox).orderBy(desc(emailOutbox.updatedAt)).limit(50);
 }, "email-outbox");
 
-export const syncEmailAction = action(async () => {
+export const syncEmailAction = formAction(async () => {
 	"use server";
 	await requireAdmin();
 	const account = await requireAccount();
@@ -115,7 +116,7 @@ export const syncEmailAction = action(async () => {
 	return out;
 }, "syncEmail");
 
-export const archiveEmailAction = action(async (formData: FormData) => {
+export const archiveEmailAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const account = await requireAccount();
@@ -123,7 +124,7 @@ export const archiveEmailAction = action(async (formData: FormData) => {
 	return { ok: true };
 }, "archiveEmail");
 
-export const unreadEmailAction = action(async (formData: FormData) => {
+export const unreadEmailAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const account = await requireAccount();
@@ -131,7 +132,7 @@ export const unreadEmailAction = action(async (formData: FormData) => {
 	return { ok: true };
 }, "unreadEmail");
 
-export const sendDraftAction = action(async (formData: FormData) => {
+export const sendDraftAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	return sendOutboxDraft(String(formData.get("outboxId")), String(formData.get("body") ?? "") || undefined);

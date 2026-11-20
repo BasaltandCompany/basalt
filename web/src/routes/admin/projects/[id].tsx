@@ -1,6 +1,7 @@
 import { Title } from "@solidjs/meta";
-import { A, useNavigate, useParams, createAsync, useAction } from "@solidjs/router";
-import { For, Show, Suspense, createSignal } from "solid-js";
+import { createMemo } from "solid-js";
+import { useNavigate, useParams, useAction } from "@solidjs/router";
+import { For, Show, Loading, createSignal } from "solid-js";
 import CreateDialog from "~/components/CreateDialog";
 import Layout from "~/components/Layout";
 import ProjectDocuments from "~/components/ProjectDocuments";
@@ -47,13 +48,13 @@ const quoteBadge: Record<QuoteStatus, string> = {
 export default function ProjectDetail() {
 	const params = useParams();
 	const navigate = useNavigate();
-	const user = createAsync(() => getUserQuery(), { deferStream: true });
-	const project = createAsync(() => getProjectQuery(params.id!), { deferStream: true });
-	const entries = createAsync(() => getProjectEntriesQuery(params.id!), { deferStream: true });
-	const deliverables = createAsync(() => getDeliverablesQuery(params.id!), { deferStream: true });
-	const companies = createAsync(() => getCompaniesForSelectQuery(), { deferStream: true });
-	const projectQuotes = createAsync(() => getProjectQuotesQuery(params.id!), { deferStream: true });
-	const allQuotes = createAsync(() => getQuotesQuery(), { deferStream: true });
+	const user = createMemo(() => getUserQuery(), { deferStream: true });
+	const project = createMemo(() => getProjectQuery(params.id!), { deferStream: true });
+	const entries = createMemo(() => getProjectEntriesQuery(params.id!), { deferStream: true });
+	const deliverables = createMemo(() => getDeliverablesQuery(params.id!), { deferStream: true });
+	const companies = createMemo(() => getCompaniesForSelectQuery(), { deferStream: true });
+	const projectQuotes = createMemo(() => getProjectQuotesQuery(params.id!), { deferStream: true });
+	const allQuotes = createMemo(() => getQuotesQuery(), { deferStream: true });
 	const createEntry = useAction(createTimeEntryAction);
 	const deleteEntry = useAction(deleteTimeEntryAction);
 	const deleteDeliverable = useAction(deleteDeliverableAction);
@@ -133,14 +134,14 @@ export default function ProjectDetail() {
 
 	return (
 		<Layout user={user()}>
-			<Suspense fallback={<p class="muted">Loading…</p>}>
+			<Loading fallback={<p class="muted">Loading…</p>}>
 				<Show when={project()} fallback={<p class="muted">Loading…</p>}>
 					{(p) => (
 						<>
 							<Title>{p().name} — Basalt</Title>
-							<A href="/admin/projects" class="muted" style={{ "font-size": "13px", "margin-bottom": "8px", display: "inline-block" }}>
+							<a href="/admin/projects" class="muted" style={{ "font-size": "13px", "margin-bottom": "8px", display: "inline-block" }}>
 								All Projects
-							</A>
+							</a>
 							<div style={{ display: "flex", "justify-content": "space-between", "align-items": "flex-start", gap: "16px" }}>
 								<div>
 									<h1 class="page-title" style={{ "margin-bottom": "0" }}>{p().name}</h1>
@@ -204,7 +205,7 @@ export default function ProjectDetail() {
 								</CreateDialog>
 							</div>
 
-							<Suspense fallback={<p class="muted">Loading…</p>}>
+							<Loading fallback={<p class="muted">Loading…</p>}>
 								<Show when={deliverables()} fallback={<p class="muted">Loading…</p>}>
 									{(list) => (
 										<Show when={list().length > 0} fallback={<Card class="empty">No deliverables yet.</Card>}>
@@ -330,7 +331,7 @@ export default function ProjectDetail() {
 										</Show>
 									)}
 								</Show>
-							</Suspense>
+							</Loading>
 
 							{/* Quotes — accepted+signed = the contract */}
 							<div style={{ display: "flex", "justify-content": "space-between", "align-items": "center", "margin-bottom": "16px" }}>
@@ -365,7 +366,7 @@ export default function ProjectDetail() {
 									</p>
 								</CreateDialog>
 							</div>
-							<Suspense fallback={<p class="muted">Loading…</p>}>
+							<Loading fallback={<p class="muted">Loading…</p>}>
 								<Show when={projectQuotes()} fallback={<p class="muted">Loading…</p>}>
 									{(list) => (
 										<Show when={list().length > 0} fallback={<Card class="empty">No quotes attached.</Card>}>
@@ -374,7 +375,7 @@ export default function ProjectDetail() {
 													{(q) => (
 															<Card style={{ padding: "20px" }}>
 																<div style={{ display: "flex", "justify-content": "space-between", "align-items": "center", gap: "12px" }}>
-																	<A href={`/admin/quotes/${q.id}`} style={{ "font-size": "15px", "font-weight": "500" }}>{q.title}</A>
+																	<a href={`/admin/quotes/${q.id}`} style={{ "font-size": "15px", "font-weight": "500" }}>{q.title}</a>
 																	<div style={{ display: "flex", "align-items": "center", gap: "12px" }}>
 																		<span class={`badge ${quoteBadge[q.status]}`} style={{ "text-transform": "capitalize" }}>{q.status}</span>
 																		<span class="mono muted" style={{ "font-size": "13px" }}>{money(q.total)}</span>
@@ -394,7 +395,7 @@ export default function ProjectDetail() {
 										</Show>
 									)}
 								</Show>
-							</Suspense>
+							</Loading>
 							
 							{/* Documents */}
 							<ProjectDocuments
@@ -498,7 +499,7 @@ export default function ProjectDetail() {
 						</>
 					)}
 				</Show>
-			</Suspense>
+			</Loading>
 		</Layout>
 	);
 }

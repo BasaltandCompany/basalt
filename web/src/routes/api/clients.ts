@@ -1,4 +1,4 @@
-import type { APIEvent } from "@solidjs/start/server";
+import type { APIEvent } from "filesystem-routing/api";
 import { checkApiKey } from "~/lib/api-key";
 import { db } from "~/db";
 import { companies } from "~/db/schema";

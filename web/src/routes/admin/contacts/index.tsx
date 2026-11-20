@@ -1,6 +1,7 @@
 import { Title } from "@solidjs/meta";
-import { A, createAsync, useAction } from "@solidjs/router";
-import { For, Show, Suspense } from "solid-js";
+import { createMemo } from "solid-js";
+import { useAction } from "@solidjs/router";
+import { For, Show, Loading } from "solid-js";
 import CreateDialog from "~/components/CreateDialog";
 import Layout from "~/components/Layout";
 import { createPersonAction, getCompaniesQuery, getPeopleQuery } from "~/lib/admin-queries";
@@ -8,9 +9,9 @@ import { getUserQuery } from "~/lib/queries";
 import { Card, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@basaltac/ui";
 
 export default function People() {
-	const user = createAsync(() => getUserQuery(), { deferStream: true });
-	const people = createAsync(() => getPeopleQuery(), { deferStream: true });
-	const companies = createAsync(() => getCompaniesQuery(), { deferStream: true });
+	const user = createMemo(() => getUserQuery(), { deferStream: true });
+	const people = createMemo(() => getPeopleQuery(), { deferStream: true });
+	const companies = createMemo(() => getCompaniesQuery(), { deferStream: true });
 	const createPerson = useAction(createPersonAction);
 
 	return (
@@ -50,7 +51,7 @@ export default function People() {
 				</CreateDialog>
 			</div>
 
-			<Suspense fallback={<p class="muted">Loading…</p>}>
+			<Loading fallback={<p class="muted">Loading…</p>}>
 				<Show when={people()} fallback={<p class="muted">Loading…</p>}>
 					{(list) => (
 						<Show when={list().length > 0} fallback={<Card class="empty">No people yet. Add one above.</Card>}>
@@ -69,7 +70,7 @@ export default function People() {
 										{(m) => (
 											<TableRow>
 												<TableCell>
-													<A href={`/admin/contacts/${m.id}`}>{m.name}</A>
+													<a href={`/admin/contacts/${m.id}`}>{m.name}</a>
 												</TableCell>
 												<TableCell class="muted">{m.email}</TableCell>
 												<TableCell class="muted">
@@ -91,7 +92,7 @@ export default function People() {
 						</Show>
 					)}
 				</Show>
-			</Suspense>
+			</Loading>
 		</Layout>
 	);
 }

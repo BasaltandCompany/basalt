@@ -1,7 +1,7 @@
 // Record a stage verdict (upsert per item+stage) — session or mc_ key guarded.
 // POST /api/funnels/results { itemId, stage, verdict, evidenceUrl?, note?, method? }
 // Triggers promotion on all-stages-pass and un-approves the linked prospect on a fail.
-import type { APIEvent } from "@solidjs/start/server";
+import type { APIEvent } from "filesystem-routing/api";
 import { recordStageVerdict } from "~/lib/funnels";
 import { funnelAuthed } from "~/lib/funnel-auth";
 

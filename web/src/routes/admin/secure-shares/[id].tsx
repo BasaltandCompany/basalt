@@ -1,6 +1,7 @@
 import { Title } from "@solidjs/meta";
-import { createAsync, revalidate, useNavigate, useParams } from "@solidjs/router";
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createMemo } from "solid-js";
+import { revalidate, useNavigate, useParams } from "@solidjs/router";
+import { createSignal, For, onCleanup, onSettled, Show } from "solid-js";
 import ConfirmButton from "~/components/ConfirmButton";
 import Layout from "~/components/Layout";
 import { getShareDetail } from "~/lib/secure-share-queries";
@@ -13,7 +14,7 @@ const fmtBytes = (n: number | null) =>
 export default function SecureShareDetail() {
 	const params = useParams();
 	const navigate = useNavigate();
-	const detail = createAsync(() => getShareDetail(params.id ?? ""), { deferStream: true });
+	const detail = createMemo(() => getShareDetail(params.id ?? ""), { deferStream: true });
 	const [copied, setCopied] = createSignal(false);
 	const [viewed, setViewed] = createSignal<{ id: string; text: string } | null>(null);
 	const [viewError, setViewError] = createSignal("");
@@ -29,7 +30,8 @@ export default function SecureShareDetail() {
 		setLocked(false);
 		armTimer();
 	}
-	onMount(() => {
+	onSettled(() => {
+		if (typeof window === "undefined") return; // onSettled runs on the server too
 		armTimer();
 		for (const ev of ["pointermove", "pointerdown", "keydown"]) document.addEventListener(ev, wake);
 	});

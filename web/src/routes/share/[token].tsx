@@ -1,6 +1,6 @@
 import { Title } from "@solidjs/meta";
 import { useParams } from "@solidjs/router";
-import { createEffect, createResource, For, Match, Switch } from "solid-js";
+import { createEffect, createMemo, For, Match, Switch } from "solid-js";
 import { Logo } from "~/brand/logo";
 import { getDocByShareToken } from "~/lib/docs-share";
 import { mentionTitles } from "~/lib/mention-render-server";
@@ -37,9 +37,9 @@ function mdToHtml(md: string): string {
 
 export default function SharedDoc() {
 	const params = useParams();
-	const [doc] = createResource(async () => {
+	const doc = createMemo(async () => {
 		const d = await getDocByShareToken(params.token ?? "");
-		// shared previews degrade mentions to plain @Title text (this page's
+		// shared previews degrade mentions to plain @Title text (this page.s
 		// tiny md→html escaper would eat raw anchor HTML)
 		return d ? { ...d, markdown: await mentionTitles(d.markdown) } : null;
 	});
@@ -48,10 +48,14 @@ export default function SharedDoc() {
 	// the fallback's tag in <head> first and browsers keep the first title.
 	// Hydration never re-applies solid-meta's reactive text to the SSR'd
 	// element, so drive document.title explicitly once the resource resolves.
-	const title = () => (doc.loading ? "Basalt" : doc() ? `${doc()!.title} — Basalt` : "Not found — Basalt");
-	createEffect(() => {
-		document.title = title();
-	});
+	const title = () => (doc() ? `${doc()!.title} — Basalt` : "Not found — Basalt");
+	// Solid 2: compute tracks, effect writes.
+	createEffect(
+		() => title(),
+		(t) => {
+			document.title = t;
+		},
+	);
 
 	return (
 		<div class="flex min-h-screen flex-col bg-background text-foreground">
@@ -63,7 +67,7 @@ export default function SharedDoc() {
 			</header>
 			<main class="mx-auto w-full max-w-[720px] flex-1 px-6 py-16">
 				<Switch fallback={null}>
-					<Match when={!doc.loading && !doc()}>
+					<Match when={!doc()}>
 						<p class="text-sm text-muted-foreground">This share link is invalid or was unshared.</p>
 					</Match>
 					<Match when={doc()}>

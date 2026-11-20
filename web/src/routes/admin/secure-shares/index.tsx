@@ -1,6 +1,6 @@
 import { Title } from "@solidjs/meta";
-import { A, createAsync } from "@solidjs/router";
-import { createResource, For, Show, createSignal, onMount } from "solid-js";
+import { createMemo, For, Show, createSignal, onSettled } from "solid-js";
+
 import ConfirmButton from "~/components/ConfirmButton";
 import CreateDialog from "~/components/CreateDialog";
 import Layout from "~/components/Layout";
@@ -31,7 +31,7 @@ const fmtBytes = (n: number | null) =>
 // Everything is AES-256-GCM encrypted at rest under a master key; contents are
 // admin-viewable only. Clients upload via /drop/<token> with no login.
 export default function AdminSecureShares() {
-	const user = createAsync(() => getUserQuery(), { deferStream: true });
+	const user = createMemo(() => getUserQuery(), { deferStream: true });
 	const [shares, setShares] = createSignal<Share[]>([]);
 	const [projectOptions, setProjectOptions] = createSignal<ProjectOption[]>([]);
 
@@ -43,7 +43,7 @@ export default function AdminSecureShares() {
 			setProjectOptions(body.projects);
 		}
 	}
-	onMount(() => void refresh());
+	onSettled(() => void refresh());
 
 	async function create(fd: FormData): Promise<{ error?: string; success?: string; token?: string }> {
 		const r = await fetch("/api/secure-shares", {
@@ -162,7 +162,7 @@ export default function AdminSecureShares() {
 						{(s) => (
 							<TableRow>
 								<TableCell>
-									<A href={`/admin/secure-shares/${s.id}`}>{s.title}</A>
+									<a href={`/admin/secure-shares/${s.id}`}>{s.title}</a>
 								</TableCell>
 								<TableCell>
 									<Show when={s.projectName} fallback={<span class="muted">—</span>}>

@@ -2,7 +2,7 @@
 // Built on the shadcn Command parts (cmdk-solid); filtering, arrow-key
 // selection and Enter handling come from cmdk — this file is behavior only.
 // g <key>: g e email · g d docs · g a admin · g m meetings · g o outreach
-import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
+import { For, Show, createSignal, onCleanup, onSettled } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { CommandDialog,
 	CommandEmpty,
@@ -88,7 +88,8 @@ export default function CommandPalette() {
 		setSearch("");
 	};
 
-	onMount(() => {
+	onSettled(() => {
+		if (typeof window === "undefined") return; // onSettled runs on the server too
 		let gTimer: ReturnType<typeof setTimeout> | undefined;
 		const handler = (e: KeyboardEvent) => {
 			const target = e.target as HTMLElement;

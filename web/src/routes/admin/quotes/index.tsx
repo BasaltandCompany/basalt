@@ -1,5 +1,6 @@
 import { Title } from "@solidjs/meta";
-import { A, createAsync, useAction } from "@solidjs/router";
+import { createMemo } from "solid-js";
+import { useAction } from "@solidjs/router";
 import { For, Show } from "solid-js";
 import Layout from "~/components/Layout";
 import CreateDialog from "~/components/CreateDialog";
@@ -16,11 +17,11 @@ const statusBadge: Record<string, string> = {
 };
 
 export default function AdminQuotes() {
-	const user = createAsync(() => getUserQuery(), { deferStream: true });
-	const quotes = createAsync(() => getQuotesQuery(), { deferStream: true });
+	const user = createMemo(() => getUserQuery(), { deferStream: true });
+	const quotes = createMemo(() => getQuotesQuery(), { deferStream: true });
 	const createQuote = useAction(createQuoteAction);
-	const companies = createAsync(() => getCompaniesForSelectQuery(), { deferStream: true });
-	const projects = createAsync(() => getProjectsForSelectQuery(), { deferStream: true });
+	const companies = createMemo(() => getCompaniesForSelectQuery(), { deferStream: true });
+	const projects = createMemo(() => getProjectsForSelectQuery(), { deferStream: true });
 
 	return (
 		<Layout user={user()}>
@@ -85,7 +86,7 @@ export default function AdminQuotes() {
 									{(q) => (
 										<TableRow>
 											<TableCell>
-												<A href={`/admin/quotes/${q.id}`}>{q.title}</A>
+												<a href={`/admin/quotes/${q.id}`}>{q.title}</a>
 											</TableCell>
 											<TableCell>{q.companyName}</TableCell>
 											<TableCell class="mono">

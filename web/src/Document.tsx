@@ -1,0 +1,34 @@
+import type { ParentProps } from "solid-js";
+import { HydrationScript } from "@solidjs/web";
+
+// The html shell. Carried over from the old entry-server: PWA meta (iOS
+// home-screen install, no service worker — offline-caching an authed admin
+// is a trap) and ONE PostHog project for everything client-facing
+// (marketing + portal); /admin (the owner's own browsing) and localhost
+// never init. Click tracking rides on every tracked page.
+// ponytail: SPA route changes don't fire $pageview — marketing pages use
+// full-load <a> so they do; add a router hook if portal funnels ever need
+// per-route pageviews.
+const POSTHOG_SNIPPET = `!function(t,e){var o,n,p,r;e.__SV||(window.posthog && window.posthog.__loaded)||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="an ln init xn Cn Br kn In capture Fn nn calculateEventProperties On register register_once register_for_session unregister unregister_for_session Ln getFeatureFlag getFeatureFlagPayload getFeatureFlagResult getAllFeatureFlags isFeatureEnabled reloadFeatureFlags updateFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSurveysLoaded onSessionId getSurveys getActiveMatchingSurveys renderSurvey displaySurvey cancelPendingSurvey canRenderSurvey canRenderSurveyAsync Dn identify setPersonProperties unsetPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset shutdown setIdentity clearIdentity get_distinct_id getGroups get_session_id get_session_replay_url alias set_config startSessionRecording stopSessionRecording sessionRecordingStarted captureException addExceptionStep captureLog startExceptionAutocapture stopExceptionAutocapture loadToolbar get_property getSessionProperty An Rn createPersonProfile setInternalOrTestUser $n yn jn opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing get_explicit_consent_status is_capturing clear_opt_in_out_capturing Tn debug Ur Rt getPageViewId captureTraceFeedback captureTraceMetric pn".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);if(location.hostname!=='localhost'&&location.hostname!=='127.0.0.1'&&!location.pathname.startsWith('/admin')){posthog.init('phc_rpJ26ytLdoSyu4tBkiQS2rriBNWaNwDV9SZ9BejegvPK',{api_host:'https://agave.madcactus.org',ui_host:'https://us.posthog.com',defaults:'2026-05-30',person_profiles:'always'});document.addEventListener('click',function(e){var el=e.target.closest('[data-ph-event]');if(el)posthog.capture(el.dataset.phEvent,{text:el.textContent.trim().substring(0,80),href:el.href||''});if(e.target.closest('a[href*="cal.com"]'))posthog.capture('cta_calendar',{href:e.target.closest('a').href});if(e.target.closest('a[href^="mailto:"]'))posthog.capture('cta_email',{href:e.target.closest('a').href});if(e.target.closest('a[href*="/scorecard"]'))posthog.capture('scorecard_navigate',{from:window.location.pathname});if(e.target.closest('a[href*="/newsletter"]'))posthog.capture('newsletter_navigate',{from:window.location.pathname});});}`;
+
+export default function Document(props: ParentProps) {
+	return (
+		<html lang="en" spellcheck="true">
+			<head>
+				<meta charset="utf-8" />
+				<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+				<link rel="icon" type="image/svg+xml" href="/basalt-favicon.svg" />
+				{/* iOS home-screen install (PWA-minimal: no service worker) */}
+				<link rel="apple-touch-icon" href="/icons/icon-180.png" />
+				<meta name="apple-mobile-web-app-capable" content="yes" />
+				<meta name="mobile-web-app-capable" content="yes" />
+				<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+				<meta name="theme-color" content="#0A0A0A" />
+				<link rel="manifest" href="/manifest.webmanifest" />
+				<script>{POSTHOG_SNIPPET}</script>
+				<HydrationScript />
+			</head>
+			<body>{props.children}</body>
+		</html>
+	);
+}

@@ -1,7 +1,7 @@
 // Secure shares admin API — session-guarded.
 // GET  /api/secure-shares → { shares: [...with item counts], projects: [for the create select] }
 // POST /api/secure-shares {title, note?, projectId?, expiresAt?} → create (token + DEK wrap generated here)
-import type { APIEvent } from "@solidjs/start/server";
+import type { APIEvent } from "filesystem-routing/api";
 import { count, desc, eq, max } from "drizzle-orm";
 import { db } from "~/db";
 import { projects, secureShareItems, secureShares } from "~/db/schema";

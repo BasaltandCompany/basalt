@@ -1,6 +1,7 @@
 import { Title } from "@solidjs/meta";
-import { createAsync, useAction, useSearchParams } from "@solidjs/router";
-import { Show, Suspense } from "solid-js";
+import { useSearchParams, useAction } from "@solidjs/router";
+import { createMemo } from "solid-js";
+import { Show, Loading } from "solid-js";
 import Layout from "~/components/Layout";
 import { getUserQuery } from "~/lib/queries";
 import {
@@ -17,8 +18,8 @@ import { Button, Card } from "@basaltac/ui";
  *  silently attach someone else's GitHub identity to a signed-in admin. */
 export default function GithubLink() {
 	const [searchParams] = useSearchParams();
-	const user = createAsync(() => getUserQuery(), { deferStream: true });
-	const preview = createAsync(
+	const user = createMemo(() => getUserQuery(), { deferStream: true });
+	const preview = createMemo(
 		() =>
 			getGithubLinkPreviewQuery(
 				String(searchParams.code ?? ""),
@@ -58,7 +59,7 @@ export default function GithubLink() {
 			<Title>Link GitHub account — Basalt</Title>
 			<Card style={{ width: "100%", "max-width": "480px", padding: "32px" }}>
 				<h1 class="page-title" style={{ "font-size": "20px" }}>Link GitHub account</h1>
-				<Suspense fallback={<p class="muted">Checking the GitHub authorization…</p>}>
+				<Loading fallback={<p class="muted">Checking the GitHub authorization…</p>}>
 					<Show when={ready()} fallback={<p class="muted" style={{ "font-size": "13px", "margin-top": "12px" }}>{failure()}</p>}>
 						{(identity) => (
 							<>
@@ -75,7 +76,7 @@ export default function GithubLink() {
 							</>
 						)}
 					</Show>
-				</Suspense>
+				</Loading>
 			</Card>
 		</Layout>
 	);

@@ -1,4 +1,5 @@
-import { query, action, redirect, revalidate } from "@solidjs/router";
+import { query, formAction, revalidate } from "@solidjs/router";
+import { redirect } from "@solidjs/web";
 import { db } from "~/db";
 import { brainFacts, brainRequests, docs, newsletterEvents, shortLinks } from "~/db/schema";
 import { getAuthedClient } from "~/lib/session";
@@ -75,7 +76,7 @@ export const getDocStatsQuery = query(async (id: string): Promise<DocStats | nul
 	return { kind: "newsletter", opens: doc.opens, clicks, requests, perPerson };
 }, "doc-stats");
 
-export const createDocAction = action(async (formData: FormData) => {
+export const createDocAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const title = String(formData.get("title") || "").trim() || "Untitled";
@@ -111,7 +112,7 @@ export const getIssueStatsQuery = query(async () => {
 
 // "Add learning" next to a sent issue's stats — a tagged voice lesson the
 // drafting agents must fetch (topic=subject / topic=cta) before writing.
-export const addIssueLearningAction = action(async (formData: FormData) => {
+export const addIssueLearningAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const fact = String(formData.get("fact") || "").trim();

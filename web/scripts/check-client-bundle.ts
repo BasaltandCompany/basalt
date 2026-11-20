@@ -8,7 +8,7 @@
 // the build if any appear. Run as part of `bun run build`.
 import { Glob } from "bun";
 
-const ASSETS = ".output/public/_build/assets";
+const ASSETS = "dist/client/assets";
 
 // Every marker names a module that must stay server-side. Add more as new
 // server-only chains appear — the point is catching the leak, not the culprit.

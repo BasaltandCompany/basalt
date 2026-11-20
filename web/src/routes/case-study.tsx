@@ -1,7 +1,7 @@
 // Anonymized case study (public university) — ported from the dashboard's
 // marketing route onto the ink theme + library primitives. Copy verbatim;
 // FMR vellum css replaced by layout utilities.
-import type { JSX } from "solid-js"
+import type { JSX } from "@solidjs/web"
 import { Page } from "@/components/site"
 import { Button } from "@basaltac/ui"
 import { Separator } from "@basaltac/ui"

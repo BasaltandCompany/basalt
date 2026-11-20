@@ -1,4 +1,5 @@
-import { query, action, redirect, revalidate } from "@solidjs/router";
+import { query, formAction, revalidate } from "@solidjs/router";
+import { redirect } from "@solidjs/web";
 import { eq, and, gte, lte, desc, sql } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm";
 import { getCurrentUser, signIn } from "./session";
@@ -20,7 +21,7 @@ export const getUserQuery = query(async () => {
 	return getCurrentUser();
 }, "user");
 
-export const loginAction = action(async (formData: FormData) => {
+export const loginAction = formAction(async (formData: FormData) => {
 	"use server";
 	const email = String(formData.get("email"));
 	const password = String(formData.get("password"));
@@ -67,7 +68,7 @@ export const getProjectQuery = query(async (id: string) => {
 	return row;
 }, "project");
 
-export const createProjectAction = action(async (formData: FormData) => {
+export const createProjectAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const name = String(formData.get("name") || "").trim();
@@ -99,7 +100,7 @@ export function dateOrNull(v: FormDataEntryValue | null): string | null {
 	return s || null;
 }
 
-export const updateProjectAction = action(async (formData: FormData) => {
+export const updateProjectAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id") || "");
@@ -242,7 +243,7 @@ function refererFromFormData(formData: FormData) {
 	return "/";
 }
 
-export const createTimeEntryAction = action(async (formData: FormData) => {
+export const createTimeEntryAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const projectId = String(formData.get("project_id"));
@@ -258,7 +259,7 @@ export const createTimeEntryAction = action(async (formData: FormData) => {
 	throw redirect(refererFromFormData(formData));
 }, "createTimeEntry");
 
-export const deleteTimeEntryAction = action(async (formData: FormData) => {
+export const deleteTimeEntryAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const id = String(formData.get("id"));
@@ -288,7 +289,7 @@ export const getTimerQuery = query(async () => {
 	return row ?? null;
 }, "timer");
 
-export const startTimerAction = action(async (formData: FormData) => {
+export const startTimerAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const projectId = String(formData.get("project_id"));
@@ -307,7 +308,7 @@ export const startTimerAction = action(async (formData: FormData) => {
 	throw redirect(refererFromFormData(formData));
 }, "startTimer");
 
-export const stopTimerAction = action(async (formData: FormData) => {
+export const stopTimerAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	const [t] = await db.select().from(timer).limit(1);
@@ -329,7 +330,7 @@ export const stopTimerAction = action(async (formData: FormData) => {
 	throw redirect(refererFromFormData(formData));
 }, "stopTimer");
 
-export const discardTimerAction = action(async (formData: FormData) => {
+export const discardTimerAction = formAction(async (formData: FormData) => {
 	"use server";
 	await requireAdmin();
 	await db.delete(timer);

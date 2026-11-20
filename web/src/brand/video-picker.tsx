@@ -43,11 +43,13 @@ export function VideoPicker(props: {
   const [loading, setLoading] = createSignal(false)
   const [preview, setPreview] = createSignal<Clip | null>(null)
 
-  createEffect(() => {
-    const q = query()
-    const ctrl = new AbortController()
-    setLoading(true)
-    const params = new URLSearchParams({
+  // Solid 2: compute tracks the query, effect runs the fetch and returns cleanup.
+  createEffect(
+    () => query(),
+    (q) => {
+      const ctrl = new AbortController()
+      setLoading(true)
+      const params = new URLSearchParams({
       action: "query",
       format: "json",
       origin: "*",
@@ -59,12 +61,12 @@ export function VideoPicker(props: {
       iiprop: "url|mime|size",
       iiurlwidth: "480",
     })
-    fetch(`https://commons.wikimedia.org/w/api.php?${params}`, { signal: ctrl.signal })
-      .then((r) => r.json())
-      .then((data) => {
-        const pages: object = data.query?.pages ?? {}
-        const found: Clip[] = Object.values(pages)
-          .map((p): Clip | null => {
+      fetch(`https://commons.wikimedia.org/w/api.php?${params}`, { signal: ctrl.signal })
+        .then((r) => r.json())
+        .then((data) => {
+          const pages: object = data.query?.pages ?? {}
+          const found: Clip[] = Object.values(pages)
+            .map((p): Clip | null => {
             const info = (p as { imageinfo?: Array<Record<string, unknown>> }).imageinfo?.[0]
             if (!info) return null
             const mime = String(info.mime ?? "")
@@ -76,14 +78,15 @@ export function VideoPicker(props: {
               mb: Math.round(Number(info.size ?? 0) / 1e6),
               mime,
             }
-          })
+            })
           .filter((c): c is Clip => c !== null)
-        setClips(found)
-        setLoading(false)
-      })
-      .catch(() => setLoading(false))
-    onCleanup(() => ctrl.abort())
-  })
+          setClips(found)
+          setLoading(false)
+        })
+        .catch(() => setLoading(false))
+      return () => ctrl.abort()
+    },
+  )
 
   const setHero = (url: string | null) => {
     if (url) localStorage.setItem(KEY, url)

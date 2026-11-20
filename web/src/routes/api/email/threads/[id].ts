@@ -1,4 +1,4 @@
-import type { APIEvent } from "@solidjs/start/server";
+import type { APIEvent } from "filesystem-routing/api";
 import { getAuthedClient } from "~/lib/session";
 import { getPrimaryAccount, setThreadArchived, setThreadUnread, setThreadSpam, threadWithMessages, trashThread } from "~/lib/gmail";
 
@@ -13,7 +13,7 @@ export const GET = async (event: APIEvent) => {
 	if (!account) {
 		return new Response(JSON.stringify({ error: "NO_ACCOUNT: connect Gmail first" }), { status: 400 });
 	}
-	const full = await threadWithMessages(account, event.params.id);
+	const full = await threadWithMessages(account, event.params!.id);
 	if (!full) return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
 	return new Response(JSON.stringify(full), { headers: { "Content-Type": "application/json" } });
 };
@@ -34,22 +34,22 @@ export const POST = async (event: APIEvent) => {
 	try {
 		switch (body.op) {
 			case "archive":
-				await setThreadArchived(account, event.params.id, true);
+				await setThreadArchived(account, event.params!.id, true);
 				break;
 			case "unarchive":
-				await setThreadArchived(account, event.params.id, false);
+				await setThreadArchived(account, event.params!.id, false);
 				break;
 			case "read":
-				await setThreadUnread(account, event.params.id, false);
+				await setThreadUnread(account, event.params!.id, false);
 				break;
 			case "spam":
-				await setThreadSpam(account, event.params.id);
+				await setThreadSpam(account, event.params!.id);
 				break;
 			case "delete":
-				await trashThread(account, event.params.id);
+				await trashThread(account, event.params!.id);
 				break;
 			case "unread":
-				await setThreadUnread(account, event.params.id, true);
+				await setThreadUnread(account, event.params!.id, true);
 				break;
 			default:
 				return new Response(JSON.stringify({ error: "unknown op" }), { status: 400 });

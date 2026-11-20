@@ -1,7 +1,7 @@
 // Per-funnel schedule config — what the scheduler pulls and how often.
 // GET  /api/funnels/runs/:id/schedule → { schedule } (defaults if never saved)
 // PUT  same → upsert { enabled?, discoverySource?, discoveryIntervalDays?, enrichPerDay?, techPerDay? }
-import type { APIEvent } from "@solidjs/start/server";
+import type { APIEvent } from "filesystem-routing/api";
 import { eq } from "drizzle-orm";
 import { db } from "~/db";
 import { funnelSchedules } from "~/db/schema";
@@ -19,14 +19,14 @@ async function scheduleFor(funnelId: string) {
 
 export const GET = async (event: APIEvent) => {
 	if (!(await (event.request))) return json({ error: "Unauthorized" }, 401);
-	const info = await getRunStages(event.params.id);
+	const info = await getRunStages(event.params!.id);
 	if (!info) return json({ error: "Run not found" }, 404);
 	return json({ schedule: await scheduleFor(info.run.funnelId) });
 };
 
 export const PUT = async (event: APIEvent) => {
 	if (!(await (event.request))) return json({ error: "Unauthorized" }, 401);
-	const info = await getRunStages(event.params.id);
+	const info = await getRunStages(event.params!.id);
 	if (!info) return json({ error: "Run not found" }, 404);
 	const body = (await event.request.json().catch(() => ({}))) as {
 		enabled?: boolean;

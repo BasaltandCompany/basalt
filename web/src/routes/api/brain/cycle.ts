@@ -1,4 +1,4 @@
-import type { APIEvent } from "@solidjs/start/server";
+import type { APIEvent } from "filesystem-routing/api";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { hashKey } from "~/lib/crypto";
 import { db } from "~/db";

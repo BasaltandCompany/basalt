@@ -1,4 +1,5 @@
-import { useAction, useLocation, createAsync } from "@solidjs/router";
+import { useLocation, useAction } from "@solidjs/router";
+import { createMemo } from "solid-js";
 import { For, Show, createSignal, onCleanup } from "solid-js";
 import {
 	discardTimerAction,
@@ -26,8 +27,8 @@ function fmtElapsed(ms: number): string {
  * effect reads t() while timer() flips during a start/stop revalidation.
  */
 export default function Timer() {
-	const timer = createAsync(() => getTimerQuery());
-	const projects = createAsync(() => getProjectsQuery());
+	const timer = createMemo(() => getTimerQuery());
+	const projects = createMemo(() => getProjectsQuery());
 	const start = useAction(startTimerAction);
 	const stop = useAction(stopTimerAction);
 	const discard = useAction(discardTimerAction);

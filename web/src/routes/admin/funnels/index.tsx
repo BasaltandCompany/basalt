@@ -1,6 +1,6 @@
 import { Title } from "@solidjs/meta";
-import { A, createAsync } from "@solidjs/router";
-import { For, Show, createMemo, createSignal, onMount } from "solid-js";
+import { createMemo, For, Show, createSignal, onSettled } from "solid-js";
+
 import Layout from "~/components/Layout"
 import { toast } from "~/lib/toast"
 
@@ -19,7 +19,7 @@ const fmtDate = (iso: string) => new Date(iso).toLocaleString("en-US", { month: 
 // fails one (stays as audit). Finished funnels are archived (never deleted) —
 // they grey out below the runs table and drop out of the New-run dropdown.
 export default function AdminFunnels() {
-	createAsync(() => getUserQuery(), { deferStream: true });
+	createMemo(() => getUserQuery(), { deferStream: true });
 	const [funnels, setFunnels] = createSignal<Funnel[]>([]);
 	const [runs, setRuns] = createSignal<Run[]>([]);
 	const [itemCounts, setItemCounts] = createSignal<Record<string, number>>({});
@@ -32,7 +32,7 @@ export default function AdminFunnels() {
 		setRuns(body.runs);
 		setItemCounts(body.itemCounts ?? {});
 	}
-	onMount(() => void refresh());
+	onSettled(() => void refresh());
 
 	const active = createMemo(() => funnels().filter((f) => !f.archivedAt));
 	const archived = createMemo(() =>
@@ -118,7 +118,7 @@ export default function AdminFunnels() {
 					<For each={runs()}>
 						{(r) => (
 							<tr>
-								<td><A href={`/admin/funnels/${r.id}`}>{r.note || r.id.slice(0, 8)}</A></td>
+								<td><a href={`/admin/funnels/${r.id}`}>{r.note || r.id.slice(0, 8)}</a></td>
 								<td>{r.funnelName}</td>
 								<td>{r.source}</td>
 								<td>{r.status === "open" ? <span class="badge badge-active">open</span> : <span class="muted">closed</span>}</td>

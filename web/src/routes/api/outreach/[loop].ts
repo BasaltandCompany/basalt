@@ -9,7 +9,7 @@
 // The human fit review sits between A and B: only icpApproved rows enter the
 // queue, and the automation (not this API) enforces the daily invite cap and
 // the abort conditions.
-import type { APIEvent } from "@solidjs/start/server";
+import type { APIEvent } from "filesystem-routing/api";
 import { and, asc, count, eq, gt, ilike, inArray, isNotNull, isNull } from "drizzle-orm";
 import { db } from "~/db";
 import { outreachProspects } from "~/db/schema";

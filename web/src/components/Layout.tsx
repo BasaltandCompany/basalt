@@ -1,6 +1,6 @@
-import { A, createAsync } from "@solidjs/router";
-import { clientOnly } from "@solidjs/start";
-import { For, ParentComponent, Show, createEffect, createSignal, onMount } from "solid-js";
+import { createMemo } from "solid-js";
+import { useLocation } from "@solidjs/router";
+import { For, ParentComponent, Show, createEffect, createSignal, onSettled } from "solid-js";
 import Timer from "~/components/Timer";
 import Brand from "~/components/Brand";
 import CommandPalette from "~/components/CommandPalette";
@@ -8,9 +8,10 @@ import Toaster from "~/components/Toaster";
 import { getDueOutreachCountQuery } from "~/lib/admin-queries";
 import { useLiveQueries } from "~/lib/live-queries";
 
-// clientOnly: the widget mounts via <Portal> and throws during hydration in
-// dev ("create new DOM elements during hydration") — render it post-hydration.
-const FeedbackWidget = clientOnly(() =>
+import { lazy } from "solid-js";
+// start mode has no clientOnly; lazy + onSettled mount reproduces it — the
+// widget renders only after hydration, so it never fights the server HTML.
+const FeedbackWidget = lazy(() =>
 	import("@aspectrr/feedback-widget").then((m) => ({ default: m.FeedbackWidget })),
 );
 
@@ -47,15 +48,19 @@ const NavIcon: ParentComponent<{ d: string }> = (p) => (
 );
 
 const Layout: ParentComponent<{ user?: { id?: string; email?: string } | null }> = (props) => {
-	const dueOutreach = createAsync(() => getDueOutreachCountQuery(), { deferStream: true });
+	const loc = useLocation();
+	const dueOutreach = createMemo(() => getDueOutreachCountQuery(), { deferStream: true });
 	useLiveQueries(); // poll /api/changes → revalidate() so agent edits appear without refresh
 	// ponytail: sidebar state loads after mount — SSR always renders expanded, so
 	// a saved collapse/open flashes for one frame. Move to cookies if that bugs you.
 	const [collapsed, setCollapsed] = createSignal(false);
 	const [mobileOpen, setMobileOpen] = createSignal(false);
-	onMount(() => {
+	const [mounted, setMounted] = createSignal(false);
+	onSettled(() => {
+		if (typeof window === "undefined") return; // onSettled runs on the server too
 		setCollapsed(localStorage.getItem("sidebar-collapsed") === "1");
 		setMobileOpen(localStorage.getItem("sidebar-mobile-open") === "1");
+		setMounted(true);
 	});
 
 	function toggleCollapsed() {
@@ -74,14 +79,14 @@ const Layout: ParentComponent<{ user?: { id?: string; email?: string } | null }>
 	}
 
 	return (
-		<div class="layout" classList={{ collapsed: collapsed(), "mobile-open": mobileOpen() }}>
+		<div class={["layout", { collapsed: collapsed(), "mobile-open": mobileOpen() }]}>
 			<CommandPalette />
 			<div class="mobile-topbar">
 				<button
 					type="button"
 					class="mobile-menu"
 					aria-label={mobileOpen() ? "Close menu" : "Open menu"}
-					aria-expanded={mobileOpen()}
+					aria-expanded={mobileOpen() ? "true" : "false"}
 					onClick={() => setMobile(!mobileOpen())}
 				>
 					<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
@@ -96,7 +101,7 @@ const Layout: ParentComponent<{ user?: { id?: string; email?: string } | null }>
 					type="button"
 					class="sidebar-collapse"
 					title={collapsed() ? "Expand sidebar" : "Collapse sidebar"}
-					aria-expanded={!collapsed()}
+					aria-expanded={!collapsed() ? "true" : "false"}
 					onClick={toggleCollapsed}
 				>
 					{collapsed() ? "›" : "‹"}
@@ -109,11 +114,9 @@ const Layout: ParentComponent<{ user?: { id?: string; email?: string } | null }>
 				<nav class="sidebar-nav">
 					<For each={links}>
 						{(link) => (
-							<A
-								href={link.href}
-								end={link.href === "/admin"}
-								class="nav-link"
-								activeClass="active"
+							<a
+							href={link.href}
+							class={["nav-link", { active: link.href === "/admin" ? loc.pathname === "/admin" : loc.pathname.startsWith(link.href) }]}
 							title={link.label}
 							onClick={() => setMobile(false)} // drawer closes on navigation
 							>
@@ -122,7 +125,7 @@ const Layout: ParentComponent<{ user?: { id?: string; email?: string } | null }>
 								<Show when={link.href === "/admin/outreach"}>
 									<span class="nav-count">{dueOutreach() ?? ""}</span>
 								</Show>
-							</A>
+							</a>
 						)}
 					</For>
 				</nav>
@@ -142,7 +145,9 @@ const Layout: ParentComponent<{ user?: { id?: string; email?: string } | null }>
 								<span class="nav-label">Sign out</span>
 							</button>
 						</form>
-						<FeedbackWidget source="madcactus-dashboard" server="https://aspectrr-feedback.fly.dev" />
+						<Show when={mounted()}>
+							<FeedbackWidget source="madcactus-dashboard" server="https://aspectrr-feedback.fly.dev" />
+						</Show>
 					</div>
 				</div>
 			</aside>

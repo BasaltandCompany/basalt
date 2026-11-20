@@ -1,5 +1,6 @@
-import { A, createAsync, useAction, useNavigate } from "@solidjs/router";
-import { For, Show, Suspense, createSignal } from "solid-js";
+import { createMemo } from "solid-js";
+import { useNavigate, useAction } from "@solidjs/router";
+import { For, Show, Loading, createSignal } from "solid-js";
 import CreateDialog from "~/components/CreateDialog";
 import { getDocsQuery, createDocAction, getIssueStatsQuery, addIssueLearningAction } from "~/lib/docs-queries";
 import { Button, Card } from "@basaltac/ui";
@@ -12,8 +13,8 @@ export default function DocList(props: {
 	subtitle: string;
 	createPlaceholder: string;
 }) {
-	const docs = createAsync(() => getDocsQuery(), { deferStream: true });
-	const stats = createAsync(() => getIssueStatsQuery(), { deferStream: true });
+	const docs = createMemo(() => getDocsQuery(), { deferStream: true });
+	const stats = createMemo(() => getIssueStatsQuery(), { deferStream: true });
 	const create = useAction(createDocAction);
 	const navigate = useNavigate();
 	const [genre, setGenre] = createSignal("");
@@ -65,7 +66,7 @@ export default function DocList(props: {
 			</div>
 			<p class="page-subtitle">{props.subtitle}</p>
 
-			<Suspense fallback={<div class="muted">Loading…</div>}>
+			<Loading fallback={<div class="muted">Loading…</div>}>
 				<Show
 					when={docs()?.filter((d) => d.kind === props.kind).length}
 					fallback={<div class="muted">Nothing here yet.</div>}
@@ -73,7 +74,7 @@ export default function DocList(props: {
 					<For each={docs()?.filter((d) => d.kind === props.kind)}>
 						{(d) => (
 							<Card style={{ padding: "16px 20px", "margin-bottom": "10px" }}>
-								<A href={`/admin/${props.kind ? `${props.kind}s` : "docs"}/${d.id}`} style={{ display: "block", "text-decoration": "none" }}>
+								<a href={`/admin/${props.kind ? `${props.kind}s` : "docs"}/${d.id}`} style={{ display: "block", "text-decoration": "none" }}>
 									<div style={{ "font-size": "15px", "font-weight": 500, color: "var(--foreground)" }}>{d.title}</div>
 								<div class="muted" style={{ "font-size": "13px", "margin-top": "4px" }}>
 									{new Date(d.updatedAt).toLocaleString()} · v{d.version}
@@ -85,7 +86,7 @@ export default function DocList(props: {
 									<Show when={d.status === "failed"}> · <span style={{ color: "var(--bad, #ef4444)" }}>publish failed</span></Show>
 									<Show when={d.shareToken}> · shared</Show>
 								</div>
-								</A>
+								</a>
 								<Show when={props.kind === "newsletter" && d.status === "published"}>
 									<div class="muted" style={{ "font-size": "12px", "margin-top": "4px" }}>
 										{d.opens} opens · {stats()?.clicksByDoc[d.id] ?? 0} short-link clicks · {stats()?.requestsByDoc[d.id] ?? 0} brain requests
@@ -96,7 +97,7 @@ export default function DocList(props: {
 						)}
 					</For>
 				</Show>
-			</Suspense>
+			</Loading>
 		</>
 	);
 }

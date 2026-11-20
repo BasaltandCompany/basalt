@@ -1,4 +1,5 @@
-import { Show, createSignal, type JSX } from "solid-js";
+import { Show, createSignal } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import { toast } from "~/lib/toast";
 import { Button } from "@basaltac/ui";
 import { Dialog,

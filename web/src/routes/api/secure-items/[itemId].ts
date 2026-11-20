@@ -3,7 +3,7 @@
 // GET /api/secure-items/:id             → decrypted file stream (attachment download)
 // Guests have no path here: the drop endpoint is upload-only (ASPTR-218 covers
 // any future client-login gating).
-import type { APIEvent } from "@solidjs/start/server";
+import type { APIEvent } from "filesystem-routing/api";
 import { eq } from "drizzle-orm";
 import { db } from "~/db";
 import { secureShareItems, secureShares } from "~/db/schema";
@@ -18,7 +18,7 @@ function json(body: unknown, status = 200) {
 
 export async function GET(event: APIEvent) {
 	if ((await getAuthedClient()) === null) return json({ error: "Unauthorized" }, 401);
-	const id = event.params.id ?? "";
+	const id = event.params!.id ?? "";
 	const format = new URL(event.request.url).searchParams.get("format");
 
 	const [item] = await db

@@ -7,7 +7,7 @@
 // mirroring macro's selection toolbar.
 // Node registry + markdown transformers (GFM tables, page breaks) live in
 // ~/lib/doc-markdown so they stay testable headless.
-import { onCleanup, onMount, createEffect, createSignal, Show, For } from "solid-js";
+import { onCleanup, onSettled, createEffect, createSignal, Show, For } from "solid-js";
 import { DOC_NODES, DOC_TRANSFORMERS, $isAtEmptyListItemStart, MentionNode, $isMentionNode, normalizeDocMarkdown } from "~/lib/doc-markdown";
 import { TableCellNode, TableRowNode, TableNode, $isTableNode, $createTableNode, $isTableCellNode, $isTableRowNode } from "@lexical/table";
 import type { LexicalNode } from "lexical";
@@ -132,10 +132,11 @@ export default function LexicalDocEditor(props: {
 		return cardCache.get(key)!;
 	};
 	let triggerSeq = 0;
-	// set inside onMount (needs the editor closure); the dropdown calls this
+	// set inside onSettled (needs the editor closure); the dropdown calls this
 	let insertMentionFn: ((hit: ComponentSearchHit) => void) | undefined;
 
-	onMount(() => {
+	onSettled(() => {
+		if (typeof window === "undefined") return; // onSettled runs on the server too
 		const ed = createEditor({
 			namespace: "madcactus-docs",
 			nodes: DOC_NODES,
@@ -276,10 +277,12 @@ export default function LexicalDocEditor(props: {
 		const onWinResize = () => scheduleLintPaint();
 		window.addEventListener("resize", onWinResize);
 		// violations prop changes repaint (rAF: let the render settle first)
-		createEffect(() => {
-			void props.violations?.length;
-			requestAnimationFrame(paintLint);
-		});
+		createEffect(
+			() => props.violations?.length,
+			() => {
+				requestAnimationFrame(paintLint);
+			},
+		);
 
 		const currentMd = () => {
 			let md = "";
@@ -295,13 +298,15 @@ export default function LexicalDocEditor(props: {
 		// seed + react to markdown prop changes; skip when the change came from
 		// our own typing (md equals what's already in the editor) so we never
 		// clobber the user's in-flight edits
-		createEffect(() => {
-			const md = props.markdown;
-			if (md === currentMd()) return;
-			ed.update(() => {
-				$convertFromMarkdownString(normalizeDocMarkdown(md), DOC_TRANSFORMERS);
-			});
-		});
+		createEffect(
+			() => ({ md: props.markdown, cur: currentMd() }),
+			(v) => {
+				if (v.md === v.cur) return;
+				ed.update(() => {
+					$convertFromMarkdownString(normalizeDocMarkdown(v.md), DOC_TRANSFORMERS);
+				});
+			},
+		);
 
 		// ── @-mention picker ─────────────────────────────────────────
 		// typing "@query" before the caret opens a registry-backed typeahead;
@@ -338,10 +343,11 @@ export default function LexicalDocEditor(props: {
 			else closePicker();
 		};
 		let pickerFetchTimer: ReturnType<typeof setTimeout> | undefined;
-		createEffect(() => {
-			const p = picker();
-			if (!p) return;
-			clearTimeout(pickerFetchTimer);
+		createEffect(
+			() => picker(),
+			(p) => {
+				if (!p) return;
+				clearTimeout(pickerFetchTimer);
 			pickerFetchTimer = setTimeout(async () => {
 				if (!p.q) return;
 				try {
@@ -357,7 +363,8 @@ export default function LexicalDocEditor(props: {
 					/* offline/search error — picker just stays empty */
 				}
 			}, 180);
-		});
+			},
+		);
 		/** insert a chip, splicing the "@query" trigger text out of its node */
 		const insertMention = (hit: ComponentSearchHit) => {
 			const p = picker();
@@ -784,8 +791,7 @@ export default function LexicalDocEditor(props: {
 			<div ref={lintOverlay} class="lint-overlay" aria-hidden="true" />
 			<div
 				ref={host}
-				class="doc-editor"
-				classList={{ readonly: !!props.readOnly }}
+				class={["doc-editor", { readonly: !!props.readOnly }]}
 				onBlur={() => props.onBlur?.()}
 				// Lexical toggles contenteditable itself only on setEditable() CHANGES —
 				// the app owns the initial attribute, and a missing/false one leaves the
@@ -804,25 +810,25 @@ export default function LexicalDocEditor(props: {
 					// preventDefault keeps the text selection alive when clicking buttons
 					onMouseDown={(e) => e.preventDefault()}
 				>
-					<button type="button" title="Bold (⌘B)" classList={{ active: tbFmt().bold }} onClick={() => api?.fmt("bold")}>
+					<button type="button" title="Bold (⌘B)" class={{ active: tbFmt().bold }} onClick={() => api?.fmt("bold")}>
 						<b>B</b>
 					</button>
-					<button type="button" title="Italic (⌘I)" classList={{ active: tbFmt().italic }} onClick={() => api?.fmt("italic")}>
+					<button type="button" title="Italic (⌘I)" class={{ active: tbFmt().italic }} onClick={() => api?.fmt("italic")}>
 						<i>i</i>
 					</button>
-					<button type="button" title="Strikethrough (⌘⇧X)" classList={{ active: tbFmt().strike }} onClick={() => api?.fmt("strikethrough")}>
+					<button type="button" title="Strikethrough (⌘⇧X)" class={{ active: tbFmt().strike }} onClick={() => api?.fmt("strikethrough")}>
 						<s>S</s>
 					</button>
-					<button type="button" title="Inline code (⌘E)" classList={{ active: tbFmt().code }} onClick={() => api?.fmt("code")}>
+					<button type="button" title="Inline code (⌘E)" class={{ active: tbFmt().code }} onClick={() => api?.fmt("code")}>
 						{"</>"}
 					</button>
-					<button type="button" title="Heading" classList={{ active: tbFmt().h2 }} onClick={() => api?.toggleH2()}>
+					<button type="button" title="Heading" class={{ active: tbFmt().h2 }} onClick={() => api?.toggleH2()}>
 						H
 					</button>
 					<button type="button" title="Bullet list" onClick={() => api?.bulletList()}>
 						•
 					</button>
-					<button type="button" title="Quote" classList={{ active: tbFmt().quote }} onClick={() => api?.toggleQuote()}>
+					<button type="button" title="Quote" class={{ active: tbFmt().quote }} onClick={() => api?.toggleQuote()}>
 						❝
 					</button>
 					<button type="button" title="Link" onClick={() => api?.link()}>
@@ -837,7 +843,7 @@ export default function LexicalDocEditor(props: {
 						{(hit, i) => (
 							<button
 								type="button"
-								classList={{ selected: i() === pickerIdx() }}
+								class={{ selected: i() === pickerIdx() }}
 								onMouseDown={(e) => {
 									e.preventDefault(); // keep editor focus/selection
 									insertMentionFn?.(hit);

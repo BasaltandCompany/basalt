@@ -3,14 +3,14 @@
 // Resend/Gmail prefetches and repeats never inflate), then 302 to the static
 // seal. ?r={{email}} is Resend's per-recipient substitution; an unsubstituted
 // literal or missing param just logs per-doc (anon).
-import type { APIEvent } from "@solidjs/start/server";
+import type { APIEvent } from "filesystem-routing/api";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "~/db";
 import { docs, newsletterEvents } from "~/db/schema";
 import { UUID_RE } from "~/lib/uuid";
 
 export const GET = async (event: APIEvent) => {
-	const docId = event.params.docId ?? "";
+	const docId = event.params!.docId ?? "";
 	if (UUID_RE.test(docId)) {
 		try {
 			const [doc] = await db.select({ id: docs.id }).from(docs).where(eq(docs.id, docId)).limit(1);

@@ -1,6 +1,7 @@
 import { Title } from "@solidjs/meta";
-import { A, createAsync, useAction } from "@solidjs/router";
-import { For, Show, Suspense, createSignal } from "solid-js";
+import { createMemo } from "solid-js";
+import { useAction } from "@solidjs/router";
+import { For, Show, Loading, createSignal } from "solid-js";
 import Layout from "~/components/Layout";
 import ConfirmButton from "~/components/ConfirmButton";
 import {
@@ -71,9 +72,9 @@ function SourceTile(props: {
 }
 
 export default function Home() {
-	const user = createAsync(() => getUserQuery(), { deferStream: true });
-	const data = createAsync(() => getDashboardQuery(), { deferStream: true });
-	const overview = createAsync(() => getOverviewQuery(), { deferStream: true });
+	const user = createMemo(() => getUserQuery(), { deferStream: true });
+	const data = createMemo(() => getDashboardQuery(), { deferStream: true });
+	const overview = createMemo(() => getOverviewQuery(), { deferStream: true });
 	const createEntry = useAction(createTimeEntryAction);
 	const deleteEntry = useAction(deleteTimeEntryAction);
 	const [entryError, setEntryError] = createSignal("");
@@ -112,7 +113,7 @@ export default function Home() {
 				})}
 			</p>
 
-			<Suspense fallback={<p class="muted">Loading…</p>}>
+			<Loading fallback={<p class="muted">Loading…</p>}>
 				<Show when={overview()}>
 					{(ov) => (
 						<>
@@ -207,9 +208,9 @@ export default function Home() {
 											{(d) => (
 												<TableRow>
 													<TableCell>
-														<A href={`/admin/projects/${d.projectId}`}>
+														<a href={`/admin/projects/${d.projectId}`}>
 															{d.title}
-														</A>
+														</a>
 													</TableCell>
 													<TableCell class="muted">{d.projectName}</TableCell>
 													<TableCell>
@@ -418,7 +419,7 @@ export default function Home() {
 														{new Date(e.entryDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
 													</TableCell>
 													<TableCell>
-														<A href={`/admin/projects/${e.projectId}`}>{e.projectName}</A>
+														<a href={`/admin/projects/${e.projectId}`}>{e.projectName}</a>
 													</TableCell>
 													<TableCell>{e.description}</TableCell>
 													<TableCell class="hours" style={{ "text-align": "right" }}>{e.hours}</TableCell>
@@ -442,7 +443,7 @@ export default function Home() {
 						</>
 					)}
 				</Show>
-			</Suspense>
+			</Loading>
 		</Layout>
 	);
 }

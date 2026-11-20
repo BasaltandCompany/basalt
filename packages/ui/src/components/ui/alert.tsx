@@ -1,5 +1,8 @@
-import type { Component, ComponentProps, ValidComponent } from "solid-js"
-import { splitProps } from "solid-js"
+import type { ClassValue } from "clsx"
+import type { Component } from "solid-js";
+import type { ValidComponent } from "@solidjs/web";
+import type { ComponentProps } from "@solidjs/web"
+import { splitProps } from "../../solid2-compat"
 
 import * as AlertPrimitive from "@kobalte/core/alert"
 import type { PolymorphicProps } from "@kobalte/core/polymorphic"
@@ -25,7 +28,7 @@ const alertVariants = cva(
 )
 
 type AlertRootProps<T extends ValidComponent = "div"> = AlertPrimitive.AlertRootProps<T> &
-  VariantProps<typeof alertVariants> & { class?: string | undefined }
+  VariantProps<typeof alertVariants> & { class?: ClassValue | undefined }
 
 const Alert = <T extends ValidComponent = "div">(props: PolymorphicProps<T, AlertRootProps<T>>) => {
   const [local, others] = splitProps(props as AlertRootProps, ["class", "variant"])

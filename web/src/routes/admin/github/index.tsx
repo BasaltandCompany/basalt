@@ -1,6 +1,7 @@
 import { Title } from "@solidjs/meta";
-import { createAsync, useAction } from "@solidjs/router";
-import { For, Show, Suspense } from "solid-js";
+import { createMemo } from "solid-js";
+import { useAction } from "@solidjs/router";
+import { For, Show, Loading } from "solid-js";
 import ConfirmButton from "~/components/ConfirmButton";
 import Layout from "~/components/Layout";
 import { getUserQuery } from "~/lib/queries";
@@ -16,9 +17,9 @@ import { Button, Card } from "@basaltac/ui";
  *  the same identity pool the OAuth server issues); installations mirror
  *  webhook events. */
 export default function AdminGithub() {
-	const user = createAsync(() => getUserQuery(), { deferStream: true });
-	const installations = createAsync(() => getGithubInstallationsQuery(), { deferStream: true });
-	const identities = createAsync(() => getGithubIdentitiesQuery(), { deferStream: true });
+	const user = createMemo(() => getUserQuery(), { deferStream: true });
+	const installations = createMemo(() => getGithubInstallationsQuery(), { deferStream: true });
+	const identities = createMemo(() => getGithubIdentitiesQuery(), { deferStream: true });
 	const unlink = useAction(unlinkGithubIdentityAction);
 
 	async function handleUnlink(githubId: number) {
@@ -44,7 +45,7 @@ export default function AdminGithub() {
 			</div>
 
 			<div class="section-heading">Installations</div>
-			<Suspense fallback={<p class="muted">Loading…</p>}>
+			<Loading fallback={<p class="muted">Loading…</p>}>
 				<Show when={installations()?.length} fallback={<p class="muted">No installations yet — install the GitHub App on a repo and it shows here.</p>}>
 					<div style={{ display: "flex", "flex-direction": "column", gap: "8px", "margin-bottom": "32px" }}>
 						<For each={installations()}>
@@ -61,10 +62,10 @@ export default function AdminGithub() {
 						</For>
 					</div>
 				</Show>
-			</Suspense>
+			</Loading>
 
 			<div class="section-heading">Linked identities</div>
-			<Suspense fallback={<p class="muted">Loading…</p>}>
+			<Loading fallback={<p class="muted">Loading…</p>}>
 				<Show when={identities()?.length} fallback={<p class="muted">No GitHub accounts linked yet — “Link GitHub account” ties one to your Basalt login.</p>}>
 					<div style={{ display: "flex", "flex-direction": "column", gap: "8px", "margin-bottom": "32px" }}>
 						<For each={identities()}>
@@ -81,7 +82,7 @@ export default function AdminGithub() {
 						</For>
 					</div>
 				</Show>
-			</Suspense>
+			</Loading>
 
 			<div class="section-heading">Setup</div>
 			<Card style={{ padding: "20px" }}>

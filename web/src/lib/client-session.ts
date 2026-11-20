@@ -1,4 +1,4 @@
-import { getCookie, setCookie } from "@solidjs/start/http";
+import { getCookie, setCookie } from "~/lib/http";
 import { eq } from "drizzle-orm";
 import { db } from "~/db";
 import { clientMembers } from "~/db/schema";

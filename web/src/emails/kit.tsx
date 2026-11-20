@@ -3,9 +3,9 @@
 // NOT @basaltac/ui: email clients need table layouts + inline styles, so these
 // primitives mirror the brand instead of reusing web components. Palette and
 // identity match lib/email-signature.ts (Basalt & Company).
-import type { JSX } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import { Show } from "solid-js";
-import { SIGNAL_RED } from "~/brand/logo";
+const SIGNAL_RED = "#C8102E"; // ponytail: inlined until brand/ (phase 5) ports off solid 1; restore the ~/brand/logo import then
 
 export const BRAND = {
 	siteUrl: (process.env.PUBLIC_SITE_URL?.replace(/\/$/, "") ?? "https://basalt.ac") as string,

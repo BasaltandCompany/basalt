@@ -4,7 +4,8 @@
 // Admin-only through the same server query the editor uses. No admin chrome —
 // this document must look like the marketing site, because it is one.
 import { Title } from "@solidjs/meta";
-import { useParams, createAsync } from "@solidjs/router";
+import { useParams } from "@solidjs/router";
+import { createMemo } from "solid-js";
 import { Show } from "solid-js";
 import MarketingPage from "~/components/marketing/MarketingPage";
 import { Header } from "~/components/marketing/Header";
@@ -15,7 +16,7 @@ import "~/styles/marketing-issue.css";
 
 export default function DispatchIssuePreviewPage() {
 	const params = useParams();
-	const doc = createAsync(() => getDocQuery(params.id ?? ""), { deferStream: true });
+	const doc = createMemo(() => getDocQuery(params.id ?? ""), { deferStream: true });
 	return (
 		<Show when={doc()}>
 			{(d) => {

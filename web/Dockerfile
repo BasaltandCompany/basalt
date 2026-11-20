@@ -6,20 +6,19 @@ FROM oven/bun:1.4 AS builder
 WORKDIR /app
 
 COPY package.json bun.lock* bun.lockb* ./
-COPY patches patches
 COPY web/package.json web/package.json
 COPY packages/ui/package.json packages/ui/package.json
 RUN bun install
 
 COPY . .
 WORKDIR /app/web
-# dummy url: db/index.ts throws at import without it, which would silently
-# kill the marketing prerender in this build stage (queries fail harmlessly;
-# runtime uses the real fly secret, this env stays in the builder only)
+# dummy url: db/index.ts throws at import without it. Marketing prerender
+# (postbuild) never queries the DB, so the dummy is fine; the boot scheduler's
+# failed tick is caught+logged. Runtime uses the real fly secret.
 ENV DATABASE_URL=postgres://dummy@localhost:5/dummy
 RUN bun run build
 
-# ═══ Runner: just the compiled output ═══
+# ═══ Runner: prod deps + compiled output ═══
 FROM oven/bun:1.4 AS runner
 WORKDIR /app
 
@@ -29,9 +28,19 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/web/.output ./.output
+# The SSR bundle externalizes node_modules deps, and bun nests the app's
+# deps under web/node_modules (root keeps only workspace links) — copy both.
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/web/node_modules ./web/node_modules
+
+COPY --from=builder /app/web/dist ./web/dist
+COPY --from=builder /app/packages/ui ./packages/ui
+
+EXPOSE 3000
+# web/scripts holds bun-server.ts (the production entry) and prerender.ts
+COPY --from=builder /app/web/scripts ./web/scripts
 
 EXPOSE 3000
 ENV HOST=0.0.0.0 PORT=3000 NODE_ENV=production
-
-CMD ["bun", ".output/server/index.mjs"]
+WORKDIR /app/web
+CMD ["bun", "scripts/bun-server.ts"]
