@@ -298,6 +298,9 @@ export const tools = pgTable(
 		// null = not yet cut over (planned); savings only accrue from this date
 		cutoverDate: timestamp("cutover_date"),
 		notes: text("notes"),
+		// false = the replaced subscription is immaterial next to the engagement;
+		// admin ledger + net ROI still count it, the client-facing pages hide it
+		clientVisible: boolean("client_visible").notNull().default(true),
 		createdAt: timestamp("created_at").notNull().defaultNow(),
 		updatedAt: timestamp("updated_at")
 			.notNull()

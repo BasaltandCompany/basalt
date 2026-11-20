@@ -185,6 +185,10 @@ export default function CompanyDetail() {
 										<label for="t_notes">Notes</label>
 										<textarea id="t_notes" name="notes" rows={2} placeholder="Replaced with the in-house pipeline" />
 									</div>
+									<label style={{ display: "flex", gap: "8px", "align-items": "center", "font-size": "13px" }}>
+										<input type="checkbox" name="client_visible" checked />
+										Show on the client's value page (untick when the subscription is immaterial next to the engagement)
+									</label>
 								</CreateDialog>
 							</div>
 
@@ -246,6 +250,10 @@ export default function CompanyDetail() {
 																	value={t.cutoverDate ? new Date(t.cutoverDate).toISOString().slice(0, 10) : ""}
 																	style={{ "font-size": "13px" }}
 																/>
+																			<label class="muted" style={{ display: "inline-flex", gap: "4px", "align-items": "center", "font-size": "12px" }}>
+																				<input type="checkbox" name="client_visible" checked={t.clientVisible} />
+																				client page
+																			</label>
 																<Button variant="outline" size="sm" type="submit">
 																	{t.cutoverDate ? "Update" : "Cut over"}
 																</Button>

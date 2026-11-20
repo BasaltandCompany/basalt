@@ -799,6 +799,12 @@ declare module "virtual:file-routes" {
       $$route?: undefined;
     },
     {
+      path: "/portal/projects/:id";
+      page: true;
+      $component: FileRouteLazyRef<Pick<typeof import("./src/routes/portal/projects/[id]"), Extract<"default", keyof typeof import("./src/routes/portal/projects/[id]")>>>;
+      $$route?: undefined;
+    },
+    {
       path: "/portal/quotes/:id";
       page: true;
       $component: FileRouteLazyRef<Pick<typeof import("./src/routes/portal/quotes/[id]"), Extract<"default", keyof typeof import("./src/routes/portal/quotes/[id]")>>>;
@@ -1307,6 +1313,14 @@ declare module "virtual:file-routes" {
       id: "/admin/companies/:id";
       page: true;
       $component: FileRouteLazyRef<Pick<typeof import("./src/routes/admin/companies/[id]"), Extract<"default", keyof typeof import("./src/routes/admin/companies/[id]")>>>;
+      $$route?: undefined;
+      children?: undefined;
+    },
+    {
+      path: "/portal/projects/:id";
+      id: "/portal/projects/:id";
+      page: true;
+      $component: FileRouteLazyRef<Pick<typeof import("./src/routes/portal/projects/[id]"), Extract<"default", keyof typeof import("./src/routes/portal/projects/[id]")>>>;
       $$route?: undefined;
       children?: undefined;
     },

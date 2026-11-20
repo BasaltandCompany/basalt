@@ -6,6 +6,10 @@
 @import "@basaltac/ui/theme.css";
 
 /* feedback-widget is stubbed (solid-1 build) — no styles needed */
+/* @basaltac/ui utilities (size-4, h-10, …) live outside web/src — without this
+   source, every class used only in the ui package is missing from the build
+   (post-#197 regression: unsized SVGs rendered as giant chevrons) */
+@source "../../packages/ui/src";
 @theme inline {
     --font-sans: 'Geist Variable', sans-serif;
 	--color-signal: #C8102E;
