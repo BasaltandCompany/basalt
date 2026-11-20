@@ -464,6 +464,106 @@ export const clientLoginAction = formAction(async (formData: FormData) => {
 	throw redirect("/portal");
 }, "client-login");
 
+// Non-redirecting member lookup for pages that need to render differently
+// when signed in (getClientUserQuery redirects; this doesn't).
+export const getPortalMemberQuery = query(async () => {
+	"use server";
+	return getClient();
+}, "portal-member");
+
+// Password reset origin for Supabase recovery redirect_to (must be on the
+// dashboard's Redirect Allow-list or GoTrue falls back to the Site URL).
+const SITE_URL = process.env.PUBLIC_SITE_URL?.replace(/\/$/, "") ?? "https://basalt.ac";
+
+export const clientForgotPasswordAction = formAction(async (formData: FormData) => {
+	"use server";
+	const email = String(formData.get("email") || "").trim().toLowerCase();
+	// Portal rule: only active members get a reset email (Supabase auth is
+	// just the password gate), and the response is identical either way so it
+	// can't be used to enumerate members.
+	const [member] = await db
+		.select({ id: clientMembers.id })
+		.from(clientMembers)
+		.where(eq(clientMembers.email, email))
+		.limit(1);
+	if (member) {
+		try {
+			await supabaseAdmin().auth.resetPasswordForEmail(email, {
+				redirectTo: `${SITE_URL}/portal/reset-password`,
+			});
+		} catch {
+			// A timed-out send must not leak infra detail into the UI.
+		}
+	}
+	return { error: null };
+}, "client-forgot-password");
+
+export const clientResetPasswordAction = formAction(async (formData: FormData) => {
+	"use server";
+	// Two recovery-token shapes (implicit fragment access_token, PKCE query
+	// token_hash) or a logged-in member changing their password.
+	const accessToken = String(formData.get("access_token") || "");
+	const tokenHash = String(formData.get("token_hash") || "");
+	const password = String(formData.get("password") || "");
+	if (password.length < 6) return { error: "Password must be at least 6 characters." };
+
+	let authUserId: string | null = null;
+	try {
+		if (accessToken) {
+			const { data, error } = await supabaseAdmin().auth.getUser(accessToken);
+			if (!error && data.user) authUserId = data.user.id;
+		} else if (tokenHash) {
+			const { data, error } = await supabaseAdmin().auth.verifyOtp({
+				token_hash: tokenHash,
+				type: "recovery",
+			});
+			if (!error && data.user) authUserId = data.user.id;
+		}
+	} catch {
+		// Supabase timeout → treated as an invalid link below.
+	}
+	let member: { id: string; isActive: boolean } | undefined;
+	if (authUserId) {
+		// Token proves control of the email; resolve that email's membership.
+		const { data } = await supabaseService().auth.admin.getUserById(authUserId);
+		const email = data.user?.email?.toLowerCase();
+		if (email) {
+			[member] = await db
+				.select({ id: clientMembers.id, isActive: clientMembers.isActive })
+				.from(clientMembers)
+				.where(eq(clientMembers.email, email))
+				.limit(1);
+		}
+	} else {
+		// No token → logged-in member changing their password. Member sessions
+		// aren't Supabase sessions, so resolve the auth user by email.
+		const current = await getClient();
+		if (current) {
+			[member] = await db
+				.select({ id: clientMembers.id, isActive: clientMembers.isActive })
+				.from(clientMembers)
+				.where(eq(clientMembers.email, current.email))
+				.limit(1);
+			if (member?.isActive) {
+				const [authUser] = (await db.execute(
+					sql`select id from auth.users where lower(email) = ${current.email} limit 1`
+				)) as unknown as { id: string }[];
+				authUserId = authUser?.id ?? null;
+			}
+		}
+	}
+	if (!authUserId)
+		return { error: "This reset link is invalid or has expired. Request a new one." };
+	if (!member || !member.isActive)
+		return { error: "Your portal account isn't active. Contact us for access." };
+
+	const { error } = await supabaseService().auth.admin.updateUserById(authUserId, { password });
+	if (error) return { error: `Could not update password: ${error.message}` };
+
+	setClientSessionCookie(member.id);
+	throw redirect("/portal");
+}, "client-reset-password");
+
 // Consumes the token Supabase appends to /portal/login after an invite-email
 // click and sets the member's first password. Two proof shapes are accepted:
 // an implicit-flow access_token (fragment; what admin-API invites produce with
