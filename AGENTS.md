@@ -9,6 +9,7 @@ This codebase exists to run a consulting firm. Every business object in that fir
 3. **Ownership vs reference.** Real FKs mean ownership and cascade deletes (project → company, video → prospect). Cross-references and mentions (`@[kind:id]` in docs, agent-created links) go in `entity_links` — a deleted target degrades to a "deleted" card, it never cascades. Existing FKs were NOT migrated into `entity_links`; `get_component`/`list_links` report both.
 4. **Before hand-rolling an MCP tool, check `list_component_types`** on `/api/brain-mcp`. Generic component tools (`get_component`, `search_components`, `link_components`, `list_links`, `create_video`) already cover the registry; new components get MCP presence for free from here on.
 5. **State is public.** Every component exposes a card (title, status, subtitle, links) via `resolveCard`. Build views, mentions, and hover states on cards — not bespoke per-page queries.
+6. **Admin interactions are transactions.** Migrated surfaces render from the sync pool and write via `transact()` (`web/src/lib/sync/`, guide in `docs/transactional-ui.md`) — optimistic UI, durable queue, server reconciles. New admin surfaces follow the same pattern; query+revalidate is the legacy path.
 
 Deliberately NOT registered: the brain subsystem (`brain_pages`, `brain_facts`, …) keeps its own vocabulary (entity slugs). Unifying the two is a future, explicit decision.
 

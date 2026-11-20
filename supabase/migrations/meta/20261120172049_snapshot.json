@@ -1,5 +1,5 @@
 {
-  "id": "44d6db3a-d5c7-457b-acd5-5992447186b0",
+  "id": "ce43671d-bc97-40fc-b493-f6b5384d27ab",
   "prevId": "7769f979-0450-41b4-9dfe-a6bde11619b9",
   "version": "7",
   "dialect": "postgresql",
@@ -4054,87 +4054,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.project_updates": {
-      "name": "project_updates",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "title": {
-          "name": "title",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "body": {
-          "name": "body",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "emailed_at": {
-          "name": "emailed_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "idx_project_updates_project": {
-          "name": "idx_project_updates_project",
-          "columns": [
-            {
-              "expression": "project_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "project_updates_project_id_projects_id_fk": {
-          "name": "project_updates_project_id_projects_id_fk",
-          "tableFrom": "project_updates",
-          "tableTo": "projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.projects": {
       "name": "projects",
       "schema": "",
@@ -6085,6 +6004,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "client_visible": {
+          "name": "client_visible",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
         },
         "created_at": {
           "name": "created_at",
