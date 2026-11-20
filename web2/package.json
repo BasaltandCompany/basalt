@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "bun --bun vite",
     "build": "bun --bun vite build",
+    "postbuild": "bun scripts/prerender.ts",
     "serve": "bun vite preview",
     "typecheck": "tsc --noEmit"
   },
