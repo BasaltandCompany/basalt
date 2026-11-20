@@ -1,0 +1,918 @@
+import { Title } from "@solidjs/meta";
+import { createMemo, For, Show, Loading, createSignal } from "solid-js";
+import { useNavigate } from "@solidjs/router";
+
+import CreateDialog from "~/components/CreateDialog";
+import Layout from "~/components/Layout";
+import { getUserQuery } from "~/lib/queries";
+import {
+	getOutreachQuery,
+	createOutreachAction,
+	setOutreachStageAction,
+	setOutreachIcpAction,
+	setOutreachNextActionAction,
+	setOutreachBrainAction,
+	setOutreachVideoAction,
+	getBrainDigestQuery,
+	getBrainActivityQuery,
+	setOutreachContactAction,
+	resetBrainActivityAction,
+	getProspectEmailCardQuery,
+	setProspectCampaignAction,
+	type BrainActivity,
+	type BrainDigestItem,
+} from "~/lib/admin-queries";
+import { OUTREACH_STAGES, stageLabel, type OutreachProspect, type OutreachStage, type Video } from "~/db/schema";
+import type { ProspectEmailStatus } from "~/lib/admin-queries";
+import { fmtDate, fmtDur, videoSummary } from "~/lib/video-summary";
+import { Button } from "@basaltac/ui2";
+import SelectField from "~/components/select-field";
+
+const STAGE_COLOR: Record<string, string> = {
+	candidate: "var(--muted-foreground)",
+	proposed: "#8e7cc3",
+	sent: "var(--muted-foreground)",
+	// ponytail: board dots are per-stage data-viz, not status badges — they keep
+	// distinct hues inline now that --green/--orange vars are gone from the theme.
+	watching: "#c4862a",
+	replied: "#2980b9",
+	meeting: "#2980b9",
+	won: "#3d9970",
+	shutdown: "var(--red)",
+};
+
+
+/** The one next stage an advance button moves a card to (with its preset
+ *  next-action interval — see STAGE_NEXT_DAYS in admin-queries). */
+const ADVANCE: Partial<Record<OutreachStage, { next: OutreachStage; label: string }>> = {
+	candidate: { next: "proposed", label: "Invite → +3d" },
+	proposed: { next: "sent", label: "Invite sent → +3d" },
+	sent: { next: "watching", label: "Followed up → +4d" },
+	watching: { next: "replied", label: "Replied → +1d" },
+	replied: { next: "meeting", label: "Meeting set → +1d" },
+};
+
+/** datetime-local value for an existing date (local wall clock). */
+function toInputValue(d: Date | null): string {
+	if (!d) return "";
+	const p = (n: number) => String(n).padStart(2, "0");
+	const x = new Date(d);
+	return `${x.getFullYear()}-${p(x.getMonth() + 1)}-${p(x.getDate())}T${p(x.getHours())}:${p(x.getMinutes())}`;
+}
+
+/** datetime-local submits wall clock; pin it to an instant (ISO+Z) in the
+ * browser's tz so the server (which may run UTC) stores what was meant. */
+function withInstantIso(fd: FormData): FormData {
+	const v = String(fd.get("next_action_at") || "");
+	fd.set("next_action_at", v ? new Date(v).toISOString() : "");
+	return fd;
+}
+
+/** Due first, then by next action (no date sinks to bottom), then newest. */
+function sortCards(a: OutreachProspect, b: OutreachProspect, dueIds: Set<string>): number {
+	const d = Number(dueIds.has(b.id)) - Number(dueIds.has(a.id));
+	if (d) return d;
+	const an = a.nextActionAt?.getTime() ?? Infinity;
+	const bn = b.nextActionAt?.getTime() ?? Infinity;
+	if (an !== bn) return an - bn;
+	return b.createdAt.getTime() - a.createdAt.getTime();
+}
+
+function DigestSection(props: { brainUrl: string }) {
+	const digest = createMemo(() => getBrainDigestQuery(props.brainUrl), {
+		deferStream: true,
+	});
+	return (
+		<Loading fallback={<p class="muted" style={{ "font-size": "12px" }}>Loading digest…</p>}>
+			<Show when={digest()} fallback={<p class="muted" style={{ "font-size": "12px" }}>No digest available.</p>}>
+				{(d) => (
+					<Show
+						when={!d().error}
+						fallback={<p class="muted" style={{ "font-size": "12px", "font-style": "italic" }}>brain unreachable</p>}
+					>
+						<div style={{ "font-size": "12px" }}>
+							<div class="muted" style={{ "margin-bottom": "4px" }}>What to mention:</div>
+							<ul style={{ margin: "0", "padding-left": "18px" }}>
+								<For each={(d() as { items: BrainDigestItem[] }).items}>
+									{(item) => (
+										<li style={{ "margin-bottom": "3px" }}>
+											<span class="badge" style={{ color: "var(--muted-foreground)", "margin-right": "6px" }}>{item.kind}</span>
+											<Show when={item.citationUrl} fallback={<span>{item.headline}</span>}>
+												<a href={item.citationUrl} target="_blank" rel="noreferrer">{item.headline}</a>
+											</Show>
+											<Show when={item.occurredOn}>
+												<span class="muted"> · {item.occurredOn}</span>
+											</Show>
+										</li>
+									)}
+								</For>
+							</ul>
+						</div>
+					</Show>
+				)}
+			</Show>
+		</Loading>
+	);
+}
+
+function ActivityDetails(props: { prospect: OutreachProspect }) {
+	const activity = createMemo(() => getBrainActivityQuery(props.prospect.id));
+	const reset = resetBrainActivityAction;
+	const [resetMsg, setResetMsg] = createSignal("");
+	async function handleReset() {
+		if (
+			!confirm(
+				`Reset ${props.prospect.company} brain metrics? Wipes visits, clicks, scroll, dwell and tool history on the brain. Cannot be undone.`,
+			)
+		)
+			return;
+		setResetMsg("");
+		const fd = new FormData();
+		fd.set("id", props.prospect.id);
+		const r = (await reset(fd)) as { error?: string; success?: string };
+		setResetMsg(r.error ?? r.success ?? "");
+	}
+	return (
+		<Loading fallback={<p class="muted" style={{ "font-size": "12px" }}>Loading…</p>}>
+			<Show when={activity()}>
+				{(a) => (
+					<Show
+						when={!a().error}
+						fallback={
+							<p class="muted" style={{ "font-size": "12px", "font-style": "italic" }}>
+								{a().error === "no key" ? "no activity key configured for this brain" : "brain unreachable"}
+							</p>
+						}
+					>
+						<ActivityMetrics activity={(a() as { activity: BrainActivity }).activity} />
+						<ActivityChart days={(a() as { activity: BrainActivity }).activity.days} />
+						<div style={{ display: "flex", gap: "8px", "align-items": "center", "margin-top": "6px", "flex-wrap": "wrap" }}>
+							<Button variant="outline" size="sm" type="button"  onClick={handleReset}>
+								reset metrics
+							</Button>
+							<Show when={resetMsg()}>
+								<span class="muted" style={{ "font-size": "12px" }}>{resetMsg()}</span>
+							</Show>
+						</div>
+					</Show>
+				)}
+			</Show>
+		</Loading>
+	);
+}
+
+function ActivityChart(props: { days: { dd: string; v: number; t: number }[] }) {
+	// brains only report days with activity — fill a 14-slot window ending today
+	// so "gaps" read as gaps, not as a shorter chart
+	const byDay = new Map(props.days.map((d) => [d.dd, d]));
+	const slots = Array.from({ length: 14 }, (_, i) => {
+		const dd = new Date(Date.now() - (13 - i) * 86_400_000).toISOString().slice(0, 10);
+		return byDay.get(dd) ?? { dd, v: 0, t: 0 };
+	});
+	const max = Math.max(1, ...slots.map((s) => s.v + s.t));
+	return (
+		<div>
+			<svg
+				viewBox="0 0 140 30"
+				style={{ width: "100%", height: "34px", display: "block", "margin-top": "4px" }}
+				role="img"
+				aria-label="visits and agent tool calls per day, last 14 days"
+			>
+				<For each={slots}>
+					{(s, i) => {
+						const x = i() * 10;
+						const vh = (s.v / max) * 26;
+						const th = (s.t / max) * 26;
+						return (
+							<>
+								<rect x={x} y={28 - vh} width={6} height={vh} fill="#2980b9" rx={1} />
+								<rect x={x + 6.5} y={28 - th} width={3} height={th} fill="#8e7cc3" rx={1} />
+							</>
+						);
+					}}
+				</For>
+				<line x1={0} y1={28.5} x2={140} y2={28.5} stroke="rgba(127,127,127,0.35)" stroke-width={1} />
+			</svg>
+			<div class="muted" style={{ "font-size": "11px" }}>
+				last 14 days — <span style={{ color: "#2980b9" }}>▮</span> visits <span style={{ color: "#8e7cc3" }}>▮</span> agent tool calls
+			</div>
+		</div>
+	);
+}
+
+function ActivityMetrics(props: { activity: BrainActivity }) {
+	const a = () => props.activity;
+	return (
+		<Show
+			when={a().visits > 0 || a().toolCalls > 0}
+			fallback={<p class="muted" style={{ "font-size": "12px", "font-style": "italic" }}>no brain activity yet</p>}
+		>
+			<div class="muted" style={{ "font-size": "12px", margin: "5px 0", display: "grid", gap: "2px" }}>
+				<div>
+					{a().visits} visit{a().visits === 1 ? "" : "s"}
+					<Show when={a().visitDays > 1}> across {a().visitDays} days</Show>
+					<Show when={a().lastVisit}> · last {fmtDate(new Date(a().lastVisit!))}</Show>
+				</div>
+				<div>
+					read to {a().maxDepth}% · dwell {a().maxDwell ? fmtDur(a().maxDwell) : "0s"} · {a().clicks} click{a().clicks === 1 ? "" : "s"}
+				</div>
+				<Show when={a().toolCalls > 0}>
+					<div>
+						MCP: {a().toolCalls} call{a().toolCalls === 1 ? "" : "s"}
+						<Show when={a().lastToolAt}> · last {fmtDate(new Date(a().lastToolAt!))}</Show>
+						<Show when={a().tools.length}> — {a().tools.join(", ")}</Show>
+					</div>
+				</Show>
+				<Show when={a().agent}>
+					<div>agent: {a().agent}</div>
+				</Show>
+			</div>
+		</Show>
+	);
+}
+
+/** Opening the brain from here auto-sets the me-cookie (?key=) so Collin's
+ * demo visits never pollute prospect tracking — no ritual to forget. */
+function brainHref(p: OutreachProspect): string {
+	const base = (p.brainUrl ?? "").replace(/\/+$/, "");
+	return p.brainActivityKey ? `${base}/?key=${p.brainActivityKey}` : base;
+}
+
+/** Email preview card: latest synced thread for the prospect's address,
+ *  who-has-the-ball badge, one-click address linking from thread history. */
+function EmailSection(props: { prospect: OutreachProspect }) {
+	const p = () => props.prospect;
+	const data = createMemo(() => getProspectEmailCardQuery(p().id));
+	const setContact = setOutreachContactAction;
+	const navigate = useNavigate();
+	const [linkMsg, setLinkMsg] = createSignal("");
+	async function linkAddress(addr: string) {
+		setLinkMsg("");
+		const fd = new FormData();
+		fd.set("id", p().id);
+		fd.set("contact_name", p().contactName ?? "");
+		fd.set("email", addr);
+		const r = (await setContact(fd)) as { error?: string };
+		if (r.error) setLinkMsg(r.error);
+	}
+	return (
+		<Loading fallback={<p class="muted" style={{ "font-size": "12px" }}>Loading email…</p>}>
+			<Show when={data()}>
+				{(d) => (
+					<div
+						title="open in emails tab"
+						style={{
+							background: "rgba(0, 0, 0, 0.04)",
+							"border-radius": "6px",
+							padding: "8px",
+							margin: "5px 0",
+							display: "grid",
+							gap: "4px",
+							cursor: "pointer",
+						}}
+						onClick={(e) => {
+							// the whole card jumps to the thread; chips/buttons keep their own behavior
+							if ((e.target as HTMLElement).closest("a,button")) return;
+							navigate(`/admin/email?q=${encodeURIComponent((d() as { email: string }).email)}`);
+						}}
+					>
+						<div style={{ display: "flex", "align-items": "baseline", gap: "6px" }}>
+							<span style={{ "font-weight": "600", "font-size": "12px" }}>Email</span>
+							<Show
+								when={(d() as { card: unknown }).card}
+								fallback={<span class="muted" style={{ "font-size": "12px" }}>no synced threads with this address</span>}
+							>
+								<span
+									class="badge"
+									style={{
+										color: (d() as { card: { replied: boolean } }).card.replied ? "var(--foreground)" : "var(--muted-foreground)",
+										"margin-left": "auto",
+									}}
+								>
+									{(d() as { card: { replied: boolean } }).card.replied ? "they replied" : "waiting on them"}
+								</span>
+							</Show>
+						</div>
+						<Show when={(d() as { card: { subject: string; lastMessageAt: Date } }).card}>
+							{(c) => (
+								<>
+									<div class="muted" style={{ "font-size": "12px" }}>
+										{c().subject} · {fmtDate(c().lastMessageAt)}
+									</div>
+									<div class="muted" style={{ "font-size": "12px", "white-space": "nowrap", overflow: "hidden", "text-overflow": "ellipsis" }}>
+										{((d() as { card: { snippet: string | null } }).card.snippet ?? "").replace(/\s+/g, " ")}
+									</div>
+								</>
+							)}
+						</Show>
+						<Show when={(d() as { suggestions: { email: string }[] }).suggestions.length}>
+							<div style={{ display: "flex", gap: "6px", "flex-wrap": "wrap", "margin-top": "4px" }}>
+								<span class="muted" style={{ "font-size": "12px", "align-self": "center" }}>link:</span>
+								<For each={(d() as { suggestions: { email: string; lastAt: Date }[] }).suggestions}>
+									{(s) => (
+										<Button variant="outline" size="sm" type="button"  title={fmtDate(s.lastAt)} onClick={() => linkAddress(s.email)}>
+											{s.email}
+										</Button>
+									)}
+								</For>
+							</div>
+						</Show>
+						<Show when={linkMsg()}>
+							<span class="login-error" style={{ "font-size": "12px" }}>{linkMsg()}</span>
+						</Show>
+					</div>
+				)}
+			</Show>
+		</Loading>
+	);
+}
+
+/** Boxed video block: description + copy email/test buttons + cap link. */
+function VideoSection(props: { videoUrl?: string | null; videoId: string; description?: string | null }) {
+	return (
+		<Show when={props.videoUrl}>
+			<div
+				style={{
+					background: "rgba(0, 0, 0, 0.04)",
+					"border-radius": "6px",
+					padding: "8px",
+					margin: "5px 0",
+					display: "grid",
+					gap: "6px",
+					"justify-items": "start",
+				}}
+			>
+				<div style={{ "font-weight": "600" }}>Video</div>
+				<Show when={props.description}>
+					<div class="muted">{props.description}</div>
+				</Show>
+				<Button variant="outline" size="sm" type="button"
+					
+					onClick={() => navigator.clipboard.writeText(`${location.origin}/v/${props.videoId}`)}
+				>
+					copy email link
+				</Button>
+				<Button variant="outline" size="sm" type="button"
+					
+					onClick={() => navigator.clipboard.writeText(`${location.origin}/v/${props.videoId}?test=1`)}
+				>
+					copy test email link
+				</Button>
+				<Button as="a" variant="outline" size="sm" href={props.videoUrl!} target="_blank" rel="noreferrer">cap ↗</Button>
+			</div>
+		</Show>
+	);
+}
+
+function BoardCard(props: {
+		prospect: OutreachProspect & { emailStatus?: ProspectEmailStatus | null; video?: Video | null };
+		due: boolean;
+		overdue?: boolean;
+		onDragStart?: (id: string | undefined) => void;
+		onHoverStage?: (stage: string | undefined) => void;
+		onDrop?: (stage: OutreachStage, id: string) => void;
+		campaigns?: { id: string; name: string }[];
+	}) {
+	const p = () => props.prospect;
+	const setStage = setOutreachStageAction;
+	const setIcp = setOutreachIcpAction;
+	const setBrain = setOutreachBrainAction;
+	const setVideo = setOutreachVideoAction;
+	const setNextAction = setOutreachNextActionAction;
+	const setContact = setOutreachContactAction;
+	const setCampaign = setProspectCampaignAction;
+	const [editing, setEditing] = createSignal(false);
+	const [error, setError] = createSignal("");
+	const [dragging, setDragging] = createSignal(false);
+	const [open, setOpen] = createSignal(false);
+	let dialogRef!: HTMLDialogElement;
+
+	// pointer-based drag (not HTML5 DnD): native drag is a black box across
+	// browsers/touch — link-steal, no auto-scroll, dead zones. With pointer
+	// events: <5px move = click (opens dialog), more = drag; drop target is
+	// resolved from elementFromPoint, so columns just need a data-stage attr.
+	let drag: { startX: number; startY: number; active: boolean } | null = null;
+	let cardRef!: HTMLDivElement;
+
+	function stageAt(x: number, y: number): string | undefined {
+		const el = document.elementFromPoint(x, y)?.closest?.("[data-stage]") as HTMLElement | null;
+		return el?.dataset.stage;
+	}
+
+	function onPointerDown(e: PointerEvent) {
+		if (e.button !== 0) return;
+		// buttons/inputs keep press semantics; links are allowed — preventDefault
+		// stops the browser from dragging the link URL instead of the card
+		if ((e.target as HTMLElement).closest("button,input,select,textarea,form,dialog")) return;
+		e.preventDefault();
+		drag = { startX: e.clientX, startY: e.clientY, active: false };
+		window.addEventListener("pointermove", onPointerMove);
+		window.addEventListener("pointerup", onPointerUp, { once: true });
+		window.addEventListener("pointercancel", onPointerCancel, { once: true });
+	}
+
+	function onPointerMove(e: PointerEvent) {
+		if (!drag) return;
+		if (!drag.active) {
+			if (Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) < 5) return;
+			drag.active = true;
+			setDragging(true);
+			props.onDragStart?.(p().id);
+		}
+		e.preventDefault();
+		props.onHoverStage?.(stageAt(e.clientX, e.clientY));
+		// horizontal auto-scroll when the pointer nears the board's edges
+		const board = cardRef.closest(".board") as HTMLElement | null;
+		if (board) {
+			const r = board.getBoundingClientRect();
+			if (e.clientX > r.right - 56) board.scrollLeft += 14;
+			else if (e.clientX < r.left + 56) board.scrollLeft -= 14;
+		}
+	}
+
+	function finish() {
+		window.removeEventListener("pointermove", onPointerMove);
+		setDragging(false);
+		drag = null;
+		props.onHoverStage?.(undefined);
+	}
+
+	function onPointerCancel() {
+		if (drag?.active) props.onDragStart?.(undefined);
+		finish();
+	}
+
+	function onPointerUp(e: PointerEvent) {
+		const wasDrag = drag?.active;
+		finish();
+		if (!wasDrag) {
+			// it was a click: links/buttons keep their own behavior
+			if (!(e.target as HTMLElement).closest("a,button,input,select,textarea,form")) {
+				setOpen(true);
+				if (!dialogRef.open) dialogRef.showModal();
+			}
+			return;
+		}
+		props.onDragStart?.(undefined);
+		const stage = stageAt(e.clientX, e.clientY);
+		if (stage && stage !== p().stage) props.onDrop?.(stage as OutreachStage, p().id);
+	}
+
+	// advance button: one click to the next stage WITH its next-action preset
+	async function advance() {
+		const a = ADVANCE[p().stage as OutreachStage];
+		if (!a) return;
+		setError("");
+		const fd = new FormData();
+		fd.set("id", p().id);
+		fd.set("stage", a.next);
+		fd.set("preset_next", "1");
+		const r = (await setStage(fd)) as { error?: string };
+		if (r.error) setError(r.error);
+	}
+
+	// candidate review: the fit gate the connect automation checks
+	async function approveIcp() {
+		setError("");
+		const fd = new FormData();
+		fd.set("id", p().id);
+		fd.set("icp_approved", p().icpApproved ? "0" : "1");
+		const r = (await setIcp(fd)) as { error?: string };
+		if (r.error) setError(r.error);
+	}
+
+	async function handleSave(e: Event) {
+		e.preventDefault();
+		setError("");
+		const fd = new FormData(e.target as HTMLFormElement);
+		const stage = String(fd.get("stage"));
+		if (stage !== p().stage) {
+			const sfd = new FormData();
+			sfd.set("id", p().id);
+			sfd.set("stage", stage);
+			const r = (await setStage(sfd)) as { error?: string };
+			if (r.error) {
+				setError(r.error);
+				return;
+			}
+		}
+		const res = (await setNextAction(withInstantIso(fd))) as { error?: string };
+		if (res.error) {
+			setError(res.error);
+			return;
+		}
+		const contactName = String(fd.get("contact_name") || "").trim();
+		const email = String(fd.get("email") || "").trim();
+		if (contactName !== (p().contactName ?? "") || email !== (p().email ?? "")) {
+			const rc = (await setContact(fd)) as { error?: string };
+			if (rc.error) {
+				setError(rc.error);
+				return;
+			}
+		}
+		const brainUrl = String(fd.get("brain_url") || "").trim();
+		const brainKey = String(fd.get("brain_activity_key") || "").trim();
+		if (brainUrl !== (p().brainUrl ?? "") || brainKey !== (p().brainActivityKey ?? "")) {
+			const r2 = (await setBrain(fd)) as { error?: string };
+			if (r2.error) {
+				setError(r2.error);
+				return;
+			}
+		}
+		const videoUrl = String(fd.get("video_url") || "").trim();
+		const videoDesc = String(fd.get("video_description") || "").trim();
+		if (videoUrl !== (p().video?.url ?? "") || videoDesc !== (p().video?.description ?? "")) {
+			const r3 = (await setVideo(fd)) as { error?: string };
+			if (r3.error) {
+				setError(r3.error);
+				return;
+			}
+		}
+		const campaignId = String(fd.get("campaign_id") || "").trim();
+		if (campaignId !== (p().campaignId ?? "")) {
+			const r4 = (await setCampaign(fd)) as { error?: string };
+			if (r4.error) {
+				setError(r4.error);
+				return;
+			}
+		}
+		const icpChanged =
+			String(fd.get("region")) !== p().region ||
+			String(fd.get("revenue_band")) !== p().revenueBand ||
+			String(fd.get("tech_team")) !== p().techTeam ||
+			String(fd.get("ai_interest")) !== p().aiInterest ||
+			String(fd.get("icp_approved")) !== (p().icpApproved ? "1" : "0");
+		if (icpChanged) {
+			const r5 = (await setIcp(fd)) as { error?: string };
+			if (r5.error) {
+				setError(r5.error);
+				return;
+			}
+		}
+		setEditing(false);
+	}
+
+	return (
+		<div
+			class="board-card"
+			ref={cardRef}
+			class={{ dragging: dragging() }}
+			style={{ "border-color": props.overdue ? "var(--red)" : undefined }}
+			onPointerDown={onPointerDown}
+		>
+			<div style={{ display: "flex", "align-items": "baseline", gap: "6px" }}>
+				<span style={{ "font-weight": "600", "font-size": "13px" }}>{p().company}</span>
+				<Show when={p().icpApproved}>
+					<span class="badge badge-active" style={{ "white-space": "nowrap" }}>ICP ✓</span>
+				</Show>
+				<Show when={props.due}>
+					<span class="badge" style={{ "margin-left": "auto", "white-space": "nowrap" }}>due</span>
+				</Show>
+			</div>
+			<Show when={p().stage === "candidate"}>
+				<Button variant="outline" size="sm" type="button"  style={{ margin: "4px 0" }} onClick={() => void approveIcp()}>
+					{p().icpApproved ? "Un-approve" : "Approve fit"}
+				</Button>
+			</Show>
+			<Show when={p().contactName || p().email}>
+				<div class="muted" style={{ "font-size": "12px" }}>
+					<Show when={p().contactName}>{p().contactName}</Show>
+					<Show when={p().contactName && p().email}> · </Show>
+					<Show when={p().email}>
+						<a href={`mailto:${p().email}`} class="muted">{p().email}</a>
+					</Show>
+				</div>
+			</Show>
+
+			<div class="muted" style={{ "font-size": "12px", margin: "5px 0", color: props.due ? "var(--foreground)" : undefined }}>
+				→ {fmtDate(p().nextActionAt)}
+				<Show when={p().nextActionNote}> — {p().nextActionNote}</Show>
+			</div>
+
+			{/* email status — matched by the prospect's address against the synced
+		    corpus; "view" opens the Email tab pre-filtered to that address */}
+			<Show when={p().emailStatus?.lastSentAt}>
+				<div class="muted" style={{ "font-size": "12px", margin: "5px 0" }}>
+					sent {fmtDate(p().emailStatus!.lastSentAt!)}
+				</div>
+			</Show>
+
+
+			{/* edit form lives in the detail dialog only — the card stays minimal.
+			    stage select covers touch + keyboard — HTML5 drag doesn't fire there */}
+
+			{/* detail dialog: email, brain digest + activity live here, not on the card */}
+			<dialog
+				class="prospect-modal"
+				ref={dialogRef}
+				onClick={(e) => e.stopPropagation()}
+				onClose={() => setOpen(false)}
+			>
+				<Show when={open()}>
+				<Show when={error()}>
+					<p class="login-error">{error()}</p>
+				</Show>
+					<div style={{ display: "flex", "align-items": "center", gap: "8px" }}>
+						<h2 style={{ margin: "0", "font-size": "15px" }}>{p().company}</h2>
+						<div style={{ "margin-left": "auto", display: "flex", gap: "6px" }}>
+						<Show when={ADVANCE[p().stage as OutreachStage]}>
+							<Button size="sm" type="button"  onClick={() => void advance()}>
+								{ADVANCE[p().stage as OutreachStage]!.label}
+							</Button>
+						</Show>
+						<Button variant="outline" size="sm" type="button"
+							
+							onClick={() => setEditing(!editing())}
+						>
+							{editing() ? "Close editor" : "Edit"}
+						</Button>
+								<Button variant="outline" size="sm" type="button"  onClick={() => dialogRef.close()}>
+									Close
+								</Button>
+							</div>
+					</div>
+					<Show when={p().contactName || p().email}>
+						<p style={{ margin: "10px 0", "font-size": "13px" }}>
+							<Show when={p().contactName}>{p().contactName} · </Show>
+							<Show when={p().email}>
+								<a href={`mailto:${p().email}`}>{p().email}</a>
+							</Show>
+						</p>
+					</Show>
+					<Show when={p().email}>
+						<EmailSection prospect={p()} />
+					</Show>
+					<div class="muted" style={{ "font-size": "12px", margin: "8px 0", color: props.due ? "var(--foreground)" : undefined }}>
+						→ {fmtDate(p().nextActionAt)}
+						<Show when={p().nextActionNote}> — {p().nextActionNote}</Show>
+					</div>
+					<div style={{ display: "flex", gap: "8px", "flex-wrap": "wrap", margin: "12px 0" }}>
+						<Show when={p().brainUrl}>
+							<Button as="a" variant="outline" size="sm" href={brainHref(p())} target="_blank" rel="noreferrer">brain ↗</Button>
+						</Show>
+						<VideoSection videoUrl={p().video?.url} videoId={p().video?.id ?? p().id} description={p().video?.description} />
+					</div>
+					<Show when={p().brainUrl}>
+						<ActivityDetails prospect={p()} />
+						<details style={{ "margin-top": "8px" }}>
+							<summary class="muted" style={{ cursor: "pointer", "font-size": "12px" }}>What to mention (digest)</summary>
+							<DigestSection brainUrl={p().brainUrl!} />
+						</details>
+					</Show>
+					<Show when={(() => { const v = p().video; return v ? videoSummary(v) : null; })()}>
+						{(s) => <div class="muted" style={{ "font-size": "12px", margin: "8px 0" }}>{s()}</div>}
+					</Show>
+					<Show when={p().notes}>
+						<p class="muted" style={{ "font-size": "12px", margin: "8px 0" }}>{p().notes}</p>
+					</Show>
+				</Show>
+				<Show when={editing()}>
+					<form onSubmit={handleSave} style={{ display: "grid", gap: "8px", "margin-top": "12px" }}>
+						<input type="hidden" name="id" value={p().id} />
+						<input type="text" name="contact_name" placeholder="Contact name" value={p().contactName ?? ""} />
+						<input type="email" name="email" placeholder="Email (sent-to address)" value={p().email ?? ""} spellcheck={false} />
+						<SelectField
+							name="stage"
+							value={p().stage}
+							options={OUTREACH_STAGES.map((s) => ({ value: s, label: stageLabel(s) }))}
+						/>
+						<input type="datetime-local" name="next_action_at" value={toInputValue(p().nextActionAt)} />
+						<input type="url" name="video_url" placeholder="Video URL (cap.so share link)" value={p().video?.url ?? ""} spellcheck={false} />
+						<input type="text" name="video_description" placeholder="Video description (what it shows / why)" value={p().video?.description ?? ""} />
+						<input type="text" name="next_action_note" placeholder="Next action note" value={p().nextActionNote ?? ""} />
+						<input type="url" name="brain_url" placeholder="Brain URL (https://….madcactus.org)" value={p().brainUrl ?? ""} spellcheck={false} />
+						<input type="text" name="brain_activity_key" placeholder="Brain activity key" value={p().brainActivityKey ?? ""} spellcheck={false} />
+						<SelectField
+							name="campaign_id"
+							value={p().campaignId ?? ""}
+							options={() => [
+								{ value: "", label: "— no campaign —" },
+								...(props.campaigns ?? []).map((c) => ({ value: c.id, label: c.name })),
+							]}
+						/>
+						{/* ICP fields — researched, never asked of the lead */}
+						<div style={{ display: "flex", gap: "8px", "flex-wrap": "wrap" }}>
+							<SelectField
+								name="region"
+								value={p().region}
+								options={["unknown", "Midwest", "other"].map((v) => ({ value: v, label: "region: " + v }))}
+							/>
+							<SelectField
+								name="revenue_band"
+								value={p().revenueBand}
+								options={["unknown", "low", "mid", "high"].map((v) => ({ value: v, label: "revenue: " + v }))}
+							/>
+							<SelectField
+								name="tech_team"
+								value={p().techTeam}
+								options={["unknown", "none", "small", "large"].map((v) => ({ value: v, label: "tech team: " + v }))}
+							/>
+							<SelectField
+								name="ai_interest"
+								value={p().aiInterest}
+								options={["unknown", "none", "some", "high"].map((v) => ({ value: v, label: "AI interest: " + v }))}
+							/>
+							<SelectField
+								name="icp_approved"
+								value={p().icpApproved ? "1" : "0"}
+								options={[
+									{ value: "0", label: "ICP: not approved" },
+									{ value: "1", label: "ICP: approved" },
+								]}
+							/>
+						</div>
+						<Button size="sm" type="submit">Save</Button>
+					</form>
+				</Show>
+			</dialog>
+		</div>
+	);
+}
+
+function Board() {
+	const outreach = createMemo(() => getOutreachQuery(), { deferStream: true });
+	const setStage = setOutreachStageAction;
+	const [hoverStage, setHoverStage] = createSignal<string | undefined>();
+	const [error, setError] = createSignal("");
+	// ponytail: optimistic stage override stays in place after a successful
+	// drop (the refetched query matches it anyway); only cleared on error.
+	const [overrides, setOverrides] = createSignal<Record<string, string>>({});
+
+	const dueIds = createMemo(() => new Set((outreach()?.due ?? []).map((p) => p.id)));
+
+	const columns = createMemo(() => {
+		const all = outreach()?.all ?? [];
+		return OUTREACH_STAGES.map((stage) => {
+			const cards = all
+				.filter((p) => (overrides()[p.id] ?? p.stage) === stage)
+				.sort((a, b) => sortCards(a, b, dueIds()));
+			return { stage, cards };
+		});
+	});
+
+	async function handleDrop(stage: OutreachStage, id: string) {
+		setError("");
+		setHoverStage(undefined);
+		const p = outreach()?.all.find((x) => x.id === id);
+		if (!p || p.stage === stage) return;
+		setOverrides((o) => ({ ...o, [id]: stage }));
+		const fd = new FormData();
+		fd.set("id", id);
+		fd.set("stage", stage);
+		const res = (await setStage(fd)) as { error?: string };
+		if (res.error) {
+			setOverrides((o) => {
+				const n = { ...o };
+				delete n[id];
+				return n;
+			});
+			setError(res.error);
+		}
+	}
+
+	// overdue = due before today started (red tint in the Today queue)
+	const overdueIds = createMemo(() => {
+		const start = new Date();
+		start.setHours(0, 0, 0, 0);
+		return new Set((outreach()?.due ?? []).filter((p) => p.nextActionAt && p.nextActionAt < start).map((p) => p.id));
+	});
+
+	return (
+		<div>
+			<Show when={error()}>
+				<p class="login-error">{error()}</p>
+			</Show>
+			<Loading fallback={<p class="muted">Loading…</p>}>
+				<Show when={outreach()?.all.length} fallback={<p class="muted">No prospects yet — add one above.</p>}>
+					{/* pinned Today queue — everything due now, overdue first */}
+					<Show when={outreach()?.due.length}>
+						<h2 style={{ "font-size": "15px", margin: "20px 0 10px" }}>
+							Today <span class="board-col-count">{outreach()?.due.length}</span>
+						</h2>
+						<div style={{ display: "flex", gap: "10px", "flex-wrap": "wrap", "margin-bottom": "20px" }}>
+							<For each={outreach()?.due}>
+								{(p) => (
+									<div style={{ width: "230px" }}>
+										<BoardCard
+											prospect={p}
+											due={true}
+											overdue={overdueIds().has(p.id)}
+											onHoverStage={setHoverStage}
+											onDrop={handleDrop}
+											campaigns={outreach()?.campaigns}
+										/>
+									</div>
+								)}
+							</For>
+						</div>
+					</Show>
+					<div class="board">
+						<For each={columns()}>
+							{(col) => (
+								<div
+									class="board-col"
+										data-stage={col.stage}
+									class={{ "drag-over": hoverStage() === col.stage }}
+								>
+									<div class="board-col-head">
+										<span class="dot" style={{ background: STAGE_COLOR[col.stage] }} />
+										{stageLabel(col.stage)}
+										<span class="board-col-count">{col.cards.length}</span>
+									</div>
+									<div class="board-cards">
+										<For each={col.cards}>
+											{(p) => (
+												<BoardCard
+													prospect={p}
+													due={dueIds().has(p.id)}
+													onHoverStage={setHoverStage}
+													onDrop={handleDrop}
+												campaigns={outreach()?.campaigns}
+												/>
+											)}
+										</For>
+										<Show when={!col.cards.length}>
+											<p class="muted" style={{ "font-size": "12px", margin: "0" }}>drop here</p>
+										</Show>
+									</div>
+								</div>
+							)}
+						</For>
+					</div>
+				</Show>
+			</Loading>
+		</div>
+	);
+}
+
+export default function AdminOutreach() {
+	const user = createMemo(() => getUserQuery(), { deferStream: true });
+	const createProspect = createOutreachAction;
+
+	return (
+		<Layout user={user()}>
+			<Title>Outreach — Basalt</Title>
+			<div style={{ display: "flex", "justify-content": "space-between", "align-items": "center", "gap": "16px", "margin-bottom": "32px" }}>
+				<div>
+					<h1 class="page-title">Outreach Pipeline</h1>
+					<p class="page-subtitle" style={{ "margin-bottom": "0" }}>
+						Drag cards between stages. Manual follow-ups for company-brain outreach — no email is sent from here.
+					</p>
+				</div>
+				<CreateDialog
+					label="Add prospect"
+					title="Add prospect"
+					submitLabel="Add"
+					onSubmit={(fd) => createProspect(withInstantIso(fd)) as Promise<{ error?: string; success?: string }>}
+				>
+					<div class="form-row">
+						<div class="form-group">
+							<label for="prospect_company">Company *</label>
+							<input type="text" id="prospect_company" name="company" required />
+						</div>
+						<div class="form-group">
+							<label for="prospect_contact">Contact name</label>
+							<input type="text" id="prospect_contact" name="contact_name" />
+						</div>
+					</div>
+					<div class="form-group">
+						<label for="prospect_email">Email</label>
+						<input type="email" id="prospect_email" name="email" spellcheck={false} />
+					</div>
+					<div class="form-row">
+						<div class="form-group">
+							<label for="prospect_brain">Brain URL</label>
+							<input type="url" id="prospect_brain" name="brain_url" placeholder="https://…" spellcheck={false} />
+						</div>
+						<div class="form-group">
+							<label for="prospect_brain_key">Brain activity key</label>
+							<input type="text" id="prospect_brain_key" name="brain_activity_key" spellcheck={false} />
+						</div>
+					</div>
+					<div class="form-row">
+						<div class="form-group">
+							<label for="prospect_video">Video URL</label>
+							<input type="url" id="prospect_video" name="video_url" spellcheck={false} />
+						</div>
+						<div class="form-group">
+							<label for="prospect_stage">Stage</label>
+							<SelectField
+								id="prospect_stage"
+								name="stage"
+								value={OUTREACH_STAGES[0]}
+								options={OUTREACH_STAGES.map((s) => ({ value: s, label: stageLabel(s) }))}
+							/>
+						</div>
+					</div>
+					<div class="form-group">
+						<label for="prospect_next">First next action</label>
+						<input type="datetime-local" id="prospect_next" name="next_action_at" />
+						<span class="muted" style={{ "font-size": "12px" }}>Defaults to 5 days from now.</span>
+					</div>
+				</CreateDialog>
+			</div>
+
+			<Board />
+		</Layout>
+	);
+}

@@ -1,0 +1,112 @@
+import { Title } from "@solidjs/meta";
+import { createMemo } from "solid-js";
+import { For, Show, Loading, createSignal } from "solid-js";
+import CreateDialog, { type CreateResult } from "~/components/CreateDialog";
+import Layout from "~/components/Layout";
+import ConfirmButton from "~/components/ConfirmButton";
+import { getUserQuery } from "~/lib/queries";
+import {
+	getAdminApiKeysQuery,
+	createAdminApiKeyAction,
+	revokeAdminApiKeyAction,
+} from "~/lib/admin-queries";
+import { Button, Card } from "@basaltac/ui2";
+
+/** Memberless API keys — server-to-server auth (e.g. the Anarlog publisher).
+ *  Raw key is shown once at creation; only a hash is stored. */
+export default function AdminApiKeys() {
+	const user = createMemo(() => getUserQuery(), { deferStream: true });
+	const keys = createMemo(() => getAdminApiKeysQuery(), { deferStream: true });
+	const createKey = createAdminApiKeyAction;
+	const revokeKey = revokeAdminApiKeyAction;
+
+	async function handleRevoke(id: string) {
+		const fd = new FormData();
+		fd.set("id", id);
+		return revokeKey(fd);
+	}
+
+	return (
+		<Layout user={user()}>
+			<Title>API Keys — Basalt</Title>
+			<div style={{ display: "flex", "justify-content": "space-between", "align-items": "center", "gap": "16px", "margin-bottom": "32px" }}>
+				<div>
+					<h1 class="page-title">API Keys</h1>
+					<p class="page-subtitle" style={{ "margin-bottom": "0" }}>
+						Server-to-server keys (not tied to a portal member) — used by the Anarlog meeting publisher. Works on{" "}
+						<code>/api/clients</code> and <code>/api/upload-transcript</code> via{" "}
+						<code>Authorization: Bearer mc_…</code>
+					</p>
+				</div>
+				<CreateDialog
+					label="Create Key"
+					title="Create API key"
+					submitLabel="Create Key"
+					onSubmit={(fd) => createKey(fd) as Promise<{ key?: string; error?: string }>}
+					renderSuccess={(res) => <KeyCreated result={res} />}
+				>
+					<div class="form-group">
+						<label for="label">Label</label>
+						<input type="text" id="label" name="label" placeholder="e.g. meeting-publisher" />
+					</div>
+				</CreateDialog>
+			</div>
+
+			<Loading fallback={<p class="muted">Loading…</p>}>
+				<Show
+					when={keys()?.length}
+					fallback={<p class="muted">No admin API keys yet.</p>}
+				>
+					<div style={{ display: "flex", "flex-direction": "column", gap: "8px" }}>
+						<For each={keys()}>
+							{(k) => (
+								<Card style={{ padding: "14px 20px", display: "flex", "align-items": "center", gap: "12px" }}>
+									<div style={{ flex: "1" }}>
+										<span style={{ "font-weight": "600", "font-size": "14px" }}>{k.label}</span>
+										<span class="mono muted" style={{ "font-size": "12px", "margin-left": "8px" }}>{k.keyPrefix}</span>
+									</div>
+									<span class="muted" style={{ "font-size": "12px" }}>
+										created {new Date(k.createdAt).toLocaleDateString()}
+										<Show when={k.lastUsedAt}> · last used {new Date(k.lastUsedAt!).toLocaleDateString()}</Show>
+									</span>
+									<Show
+										when={!k.revokedAt}
+										fallback={<span class="badge badge-paused">revoked</span>}
+									>
+										<ConfirmButton label="Revoke" danger onConfirm={() => handleRevoke(k.id)} />
+									</Show>
+								</Card>
+							)}
+						</For>
+					</div>
+				</Show>
+			</Loading>
+		</Layout>
+	);
+}
+
+/** One-time secret panel — the dialog stays open until this is dismissed. */
+function KeyCreated(props: { result: NonNullable<CreateResult> }) {
+	const [copied, setCopied] = createSignal(false);
+	const key = () => String(props.result.key ?? "");
+	return (
+		<div style={{ "border-top": "1px solid #16a34a", "border-bottom": "1px solid #16a34a", padding: "12px 0" }}>
+			<div style={{ "font-weight": "600", "margin-bottom": "6px" }}>
+				Key created — copy it now, it will not be shown again:
+			</div>
+			<div style={{ display: "flex", gap: "8px", "align-items": "center" }}>
+				<code class="mono" style={{ "font-size": "13px", "word-break": "break-all", flex: "1" }}>{key()}</code>
+				<Button variant="outline" size="sm" type="button"
+					
+					onClick={() => {
+						navigator.clipboard.writeText(key());
+						setCopied(true);
+						setTimeout(() => setCopied(false), 2000);
+					}}
+				>
+					{copied() ? "Copied" : "Copy"}
+				</Button>
+			</div>
+		</div>
+	);
+}
