@@ -81,7 +81,13 @@ export default function AdminEmail() {
 		searchParams.folder === "drafts" || searchParams.folder === "outbox" || searchParams.folder === "sent" ? searchParams.folder : "inbox";
 	const setFolder = (f: "inbox" | "drafts" | "outbox" | "sent") => setSearchParams({ folder: f === "inbox" ? undefined : f });
 	const activeQ = () => (typeof searchParams.q === "string" && searchParams.q ? searchParams.q : undefined);
-	const inbox = createMemo(() => getInboxQuery({ q: activeQ() }), { deferStream: true });
+	// q must be omitted, never undefined: the server-fn client treats ANY undefined
+	// argument value as non-JSON and rejects the call (the page dies to "Uncaught
+	// Client Exception" on the first revalidate or spa return to this route)
+	const inbox = createMemo(() => {
+		const q = activeQ();
+		return getInboxQuery(q ? { q } : {});
+	}, { deferStream: true });
 	const sync = useAction(syncEmailAction);
 
 	const [q, setQ] = createSignal(String(searchParams.q ?? ""));
