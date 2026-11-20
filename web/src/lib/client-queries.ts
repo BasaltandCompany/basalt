@@ -23,6 +23,8 @@ import {
 	docs,
 	timeEntries,
 	tools,
+	reviewerInstallations,
+	reviewerReviews,
 } from "~/db/schema";
 import type { DocumentType, QuoteStatus } from "~/db/schema";
 import { computeQuoteTotals, composeQuoteMarkdown } from "~/lib/quotes";
@@ -136,9 +138,11 @@ export const getClientDashboardQuery = query(async () => {
 	};
 }, "client-dashboard");
 
-/** The value story for the member's companies: gross saved, cumulative
- *  series for the chart, per-tool rows, and hours invested. Fees are
- *  deliberately absent — cost math is admin-only. */
+/** The client-facing value story: proof-of-work counters (counts, never
+ *  dollars) plus the savings ledger — but only the rows the admin marked
+ *  clientVisible. Immaterial replacements (e.g. a $220/yr Jotform next to a
+ *  five-figure engagement) stay admin-side: the full ledger + net ROI live
+ *  on the admin company page. Fees never appear here. */
 export const getClientValueQuery = query(async () => {
 	"use server";
 	const member = await getClient();
@@ -150,12 +154,12 @@ export const getClientValueQuery = query(async () => {
 		.where(eq(clientCompanyMembers.memberId, member.id));
 	const companyIds = memberCompanies.map((c) => c.companyId);
 	if (companyIds.length === 0)
-		return { savedToDate: 0, series: [], tools: [], totalHours: 0, hoursThisMonth: 0 };
+		return { savedToDate: 0, series: [], tools: [], totalHours: 0, hoursThisMonth: 0, deliverablesCompleted: 0, updatesPosted: 0, prsReviewed: 0, hasVisibleSavings: false };
 
 	const toolRows = await db
 		.select()
 		.from(tools)
-		.where(inArray(tools.companyId, companyIds))
+		.where(and(inArray(tools.companyId, companyIds), eq(tools.clientVisible, true)))
 		.orderBy(asc(tools.cutoverDate)); // ASC: nulls last → replaced tools first, planned at the end
 
 	const projectRows = await db
@@ -169,7 +173,38 @@ export const getClientValueQuery = query(async () => {
 					.select({ hours: timeEntries.hours, entryDate: timeEntries.entryDate })
 					.from(timeEntries)
 					.where(inArray(timeEntries.projectId, projectIds))
-			: [];
+				: [];
+
+	// Proof-of-work counters — counts the system tracks automatically, so
+	// the client page never has to claim a value it can't show.
+	const [completedRows, updateRows, prRows] = await Promise.all([
+		projectIds.length > 0
+			? db
+					.select({ id: deliverables.id })
+					.from(deliverables)
+					.where(
+						and(
+							inArray(deliverables.projectId, projectIds),
+							eq(deliverables.status, "completed"),
+						),
+					)
+			: [],
+		projectIds.length > 0
+			? db
+					.select({ id: deliverableUpdates.id })
+					.from(deliverableUpdates)
+					.innerJoin(deliverables, eq(deliverables.id, deliverableUpdates.deliverableId))
+					.where(inArray(deliverables.projectId, projectIds))
+			: [],
+		db
+			.select({ id: reviewerReviews.id })
+			.from(reviewerReviews)
+			.innerJoin(
+				reviewerInstallations,
+				eq(reviewerInstallations.installationId, reviewerReviews.installationId),
+			)
+			.where(inArray(reviewerInstallations.companyId, companyIds)),
+	]);
 
 	const now = new Date();
 	const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -186,8 +221,87 @@ export const getClientValueQuery = query(async () => {
 		hoursThisMonth: entryRows
 			.filter((e) => new Date(e.entryDate) >= monthStart)
 			.reduce((s, e) => s + e.hours, 0),
+		deliverablesCompleted: completedRows.length,
+		updatesPosted: updateRows.length,
+		prsReviewed: prRows.length,
+		hasVisibleSavings: toolRows.some(
+			(t) => t.cutoverDate && new Date(t.cutoverDate) <= now,
+		),
 	};
 }, "client-value");
+
+/** One project the member's companies own, with its deliverables (each
+ *  with its update timeline and logged hours). The membership join IS the
+ *  authorization — an off-company or unknown id redirects to the overview.
+ *  Returns null only when the redirect didn't throw (never in practice). */
+export const getClientProjectQuery = query(async (projectId: string) => {
+	"use server";
+	const member = await getClient();
+	if (!member) throw redirect("/portal/login");
+
+	const memberCompanies = await db
+		.select({ companyId: clientCompanyMembers.companyId })
+		.from(clientCompanyMembers)
+		.where(eq(clientCompanyMembers.memberId, member.id));
+	const companyIds = memberCompanies.map((c) => c.companyId);
+
+	const [project] = await db
+		.select({ ...getTableColumns(projects), companyName: companies.name })
+		.from(projects)
+		.innerJoin(companies, eq(companies.id, projects.companyId))
+		.where(
+			and(
+				eq(projects.id, projectId),
+				inArray(projects.companyId, companyIds.length > 0 ? companyIds : ["00000000-0000-0000-0000-000000000000"]),
+			),
+		)
+		.limit(1);
+	if (!project) throw redirect("/portal");
+
+	const dels = await db
+		.select()
+		.from(deliverables)
+		.where(eq(deliverables.projectId, projectId))
+		.orderBy(deliverables.sortOrder);
+
+	const delIds = dels.map((d) => d.id);
+	const [updates, hourRows] = await Promise.all([
+		delIds.length > 0
+			? db
+					.select()
+					.from(deliverableUpdates)
+					.where(inArray(deliverableUpdates.deliverableId, delIds))
+					.orderBy(asc(deliverableUpdates.createdAt))
+			: Promise.resolve([] as (typeof deliverableUpdates.$inferSelect)[]),
+		delIds.length > 0
+			? db
+					.select({ deliverableId: timeEntries.deliverableId, hours: timeEntries.hours })
+					.from(timeEntries)
+					.where(inArray(timeEntries.deliverableId, delIds))
+			: Promise.resolve([] as { deliverableId: string | null; hours: number }[]),
+	]);
+
+	const updatesByDeliverable = new Map<string, (typeof deliverableUpdates.$inferSelect)[]>();
+	for (const u of updates) {
+		const arr = updatesByDeliverable.get(u.deliverableId) ?? [];
+		arr.push(u);
+		updatesByDeliverable.set(u.deliverableId, arr);
+	}
+	const hoursByDeliverable = new Map<string, number>();
+	for (const h of hourRows) {
+		if (!h.deliverableId) continue;
+		hoursByDeliverable.set(h.deliverableId, (hoursByDeliverable.get(h.deliverableId) ?? 0) + h.hours);
+	}
+
+	return {
+		project,
+		deliverables: dels.map((d) => ({
+			...d,
+			updates: updatesByDeliverable.get(d.id) ?? [],
+			hours: hoursByDeliverable.get(d.id) ?? 0,
+		})),
+	};
+}, "client-project");
 
 export interface SearchHit {
 	id: string;
