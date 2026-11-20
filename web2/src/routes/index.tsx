@@ -84,6 +84,7 @@ export function Site(props: { heroVideo: string | null }) {
   const last = () => index() === MESSAGES.length - 1
 
   onSettled(() => {
+    if (typeof window === "undefined") return; // onSettled runs on the server too
     const onScroll = () =>
       setIndex(
         Math.max(
@@ -96,7 +97,8 @@ export function Site(props: { heroVideo: string | null }) {
       )
     onScroll()
     window.addEventListener("scroll", onScroll, { passive: true })
-    onCleanup(() => window.removeEventListener("scroll", onScroll))
+    // solid 2: onCleanup is forbidden inside onSettled — return the cleanup
+    return () => window.removeEventListener("scroll", onScroll)
   })
 
   const step = () =>

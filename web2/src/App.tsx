@@ -1,4 +1,5 @@
 import { Title } from "@solidjs/meta";
+import "./app.css";
 import { Loading } from "solid-js";
 import { paths, Router } from "./router";
 

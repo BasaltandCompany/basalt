@@ -71,6 +71,7 @@ export default function Waveform(props: WaveformProps) {
 	}
 
 	onSettled(() => {
+		if (typeof window === "undefined") return; // onSettled runs on the server too
 		const a = props.audio;
 		if (a) {
 			a.addEventListener("timeupdate", () => setPlayhead(a.currentTime * 1000));

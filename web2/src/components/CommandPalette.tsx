@@ -89,6 +89,7 @@ export default function CommandPalette() {
 	};
 
 	onSettled(() => {
+		if (typeof window === "undefined") return; // onSettled runs on the server too
 		let gTimer: ReturnType<typeof setTimeout> | undefined;
 		const handler = (e: KeyboardEvent) => {
 			const target = e.target as HTMLElement;

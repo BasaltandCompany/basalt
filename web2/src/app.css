@@ -2,16 +2,10 @@
 @import "@fontsource-variable/bodoni-moda/opsz.css";
 @import "tailwindcss";
 @import "tw-animate-css";
-/* ink palette + token mappings live in the @basaltac/ui package — shared with every product */
-@import "@basaltac/ui/theme.css";
+/* ink palette + token mappings live in the @basaltac/ui2 package — shared with every product */
+@import "@basaltac/ui2/theme.css";
 
-/* feedback-widget ships pre-bundled zinc utilities — v4 needs an explicit source */
-@source "../node_modules/@aspectrr/feedback-widget/dist";
-
-/* @basaltac/ui utilities (size-4, h-10, …) live outside web/src — without this
-   source, every class used only in the ui package is missing from the build */
-@source "../../packages/ui/src";
-
+/* feedback-widget is stubbed (solid-1 build) — no styles needed */
 @theme inline {
     --font-sans: 'Geist Variable', sans-serif;
 	--color-signal: #C8102E;

@@ -207,6 +207,7 @@ export const DocEditor = (props: { id: string; doc: NonNullable<Awaited<ReturnTy
 		layoutTimer = setTimeout(runLayout, editing() ? 150 : 200);
 	};
 	onSettled(() => {
+		if (typeof window === "undefined") return; // onSettled runs on the server too
 		const onResize = () => scheduleLayout();
 		window.addEventListener("resize", onResize);
 		// fonts can shift metrics after first paint

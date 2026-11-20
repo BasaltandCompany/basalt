@@ -13,6 +13,7 @@ export default function Newsletter() {
 	const issues = createMemo(() => getDispatchIssuesQuery());
 
 	onSettled(() => {
+		if (typeof window === "undefined") return; // onSettled runs on the server too
 		// traffic source on newsletter landing (marketing PostHog project)
 		const ph = window.posthog;
 		if (ph) {

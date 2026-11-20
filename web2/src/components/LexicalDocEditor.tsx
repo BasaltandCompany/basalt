@@ -136,6 +136,7 @@ export default function LexicalDocEditor(props: {
 	let insertMentionFn: ((hit: ComponentSearchHit) => void) | undefined;
 
 	onSettled(() => {
+		if (typeof window === "undefined") return; // onSettled runs on the server too
 		const ed = createEditor({
 			namespace: "madcactus-docs",
 			nodes: DOC_NODES,

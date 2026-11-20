@@ -657,6 +657,7 @@ export default function AdminEmail() {
 	// ── hotkeys ──
 	let searchEl: HTMLInputElement | undefined;
 	onSettled(() => {
+		if (typeof window === "undefined") return; // onSettled runs on the server too
 		const handler = async (e: KeyboardEvent) => {
 			const target = e.target as HTMLElement;
 			const typing = ["INPUT", "TEXTAREA"].includes(target.tagName) || target.isContentEditable;

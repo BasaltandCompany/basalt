@@ -23,6 +23,7 @@ export default function ClientLogin() {
 	// it. Capture it here, then strip the URL so a refresh returns to the plain
 	// sign-in form (re-click the email link to re-enter setup).
 	onSettled(() => {
+		if (typeof window === "undefined") return; // onSettled runs on the server too
 		const hash = new URLSearchParams(window.location.hash.slice(1));
 		const query = new URLSearchParams(window.location.search);
 		if (hash.get("type") === "invite" && hash.get("access_token"))

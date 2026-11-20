@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import "dotenv/config";
 import { fileRoutes } from "filesystem-routing/vite";
 import solid from "@solidjs/vite-plugin";
+import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 
 export default defineConfig({
@@ -12,6 +13,7 @@ export default defineConfig({
 		// fileRoutes BEFORE solid(): the start-mode scan resolves
 		// virtual:file-routes while walking src, so the virtual module must
 		// already be resolvable when solid's scanner runs.
+		tailwindcss(),
 		fileRoutes({ httpMethods: true, types: true }),
 		solid({
 			start: {

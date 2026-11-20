@@ -3,6 +3,7 @@
 const HERO_KEY = "basalt.heroVideo"
 
 export function initHeroVideo(): string | null {
+  if (typeof localStorage === "undefined") return null; // SSR: onSettled runs on the server too
   if (!localStorage.getItem("basalt.heroVideoMigrated")) {
     localStorage.setItem("basalt.heroVideoMigrated", "1")
     localStorage.removeItem(HERO_KEY)

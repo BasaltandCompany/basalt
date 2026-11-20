@@ -57,6 +57,7 @@ const Layout: ParentComponent<{ user?: { id?: string; email?: string } | null }>
 	const [mobileOpen, setMobileOpen] = createSignal(false);
 	const [mounted, setMounted] = createSignal(false);
 	onSettled(() => {
+		if (typeof window === "undefined") return; // onSettled runs on the server too
 		setCollapsed(localStorage.getItem("sidebar-collapsed") === "1");
 		setMobileOpen(localStorage.getItem("sidebar-mobile-open") === "1");
 		setMounted(true);

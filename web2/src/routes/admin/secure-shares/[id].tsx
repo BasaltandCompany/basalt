@@ -31,6 +31,7 @@ export default function SecureShareDetail() {
 		armTimer();
 	}
 	onSettled(() => {
+		if (typeof window === "undefined") return; // onSettled runs on the server too
 		armTimer();
 		for (const ev of ["pointermove", "pointerdown", "keydown"]) document.addEventListener(ev, wake);
 	});

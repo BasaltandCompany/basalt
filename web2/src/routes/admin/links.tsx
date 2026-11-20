@@ -30,6 +30,7 @@ export default function AdminLinks() {
 		}
 	}
 	onSettled(() => {
+		if (typeof window === "undefined") return; // onSettled runs on the server too
 		void refresh();
 		// last-used builder values — next post only needs a new campaign. The
 		// form lives inside the create dialog now; find it via its dest field.
