@@ -25,6 +25,7 @@ import {
 	tools,
 	reviewerInstallations,
 	reviewerReviews,
+	securityReports,
 } from "~/db/schema";
 import type { DocumentType, QuoteStatus } from "~/db/schema";
 import { computeQuoteTotals, composeQuoteMarkdown } from "~/lib/quotes";
@@ -229,6 +230,34 @@ export const getClientValueQuery = query(async () => {
 		),
 	};
 }, "client-value");
+
+/** Weekly security reports for the member's companies (newest first), from the
+ *  security-review skill pipeline. Rows are inserted service-side; the HTML/PDF
+ *  bytes live in the private security-reports bucket, served via signed URLs
+ *  through /api/security-report after the path-prefix company check. */
+export const getClientSecurityQuery = query(async () => {
+	"use server";
+	const member = await getClient();
+	if (!member) throw redirect("/portal/login");
+
+	const memberCompanies = await db
+		.select({ companyId: clientCompanyMembers.companyId, companyName: companies.name })
+		.from(clientCompanyMembers)
+		.innerJoin(companies, eq(companies.id, clientCompanyMembers.companyId))
+		.where(eq(clientCompanyMembers.memberId, member.id));
+
+	const companyIds = memberCompanies.map((c) => c.companyId);
+	if (companyIds.length === 0) return { reports: [] };
+
+	const reports = await db
+		.select({ ...getTableColumns(securityReports), companyName: companies.name })
+		.from(securityReports)
+		.innerJoin(companies, eq(companies.id, securityReports.companyId))
+		.where(inArray(securityReports.companyId, companyIds))
+		.orderBy(desc(securityReports.weekOf));
+
+	return { reports };
+}, "client-security");
 
 /** One project the member's companies own, with its deliverables (each
  *  with its update timeline and logged hours). The membership join IS the
