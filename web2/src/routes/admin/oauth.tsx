@@ -1,5 +1,6 @@
 import { Title } from "@solidjs/meta";
 import { createMemo } from "solid-js";
+import { useAction } from "@solidjs/router";
 import { For, Show, Loading, createSignal } from "solid-js";
 import CreateDialog, { type CreateResult } from "~/components/CreateDialog";
 import ConfirmButton from "~/components/ConfirmButton";
@@ -20,8 +21,8 @@ type AppCreatedResult = { clientId?: string; clientSecret?: string | null; error
 export default function AdminOAuth() {
 	const user = createMemo(() => getUserQuery(), { deferStream: true });
 	const apps = createMemo(() => getOAuthAppsQuery(), { deferStream: true });
-	const createApp = createOAuthAppAction;
-	const deleteApp = deleteOAuthAppAction;
+	const createApp = useAction(createOAuthAppAction);
+	const deleteApp = useAction(deleteOAuthAppAction);
 
 	async function handleDelete(clientId: string) {
 		const fd = new FormData();

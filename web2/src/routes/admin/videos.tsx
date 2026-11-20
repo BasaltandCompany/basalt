@@ -1,5 +1,6 @@
 import { Title } from "@solidjs/meta";
 import { createMemo } from "solid-js";
+import { useAction } from "@solidjs/router";
 import { For, Show, Loading, createSignal } from "solid-js";
 import CreateDialog from "~/components/CreateDialog";
 import Layout from "~/components/Layout";
@@ -71,7 +72,7 @@ export default function AdminVideos() {
 	const user = createMemo(() => getUserQuery(), { deferStream: true });
 	const outreach = createMemo(() => getOutreachQuery(), { deferStream: true });
 	const videoRows = createMemo(() => getVideosQuery(), { deferStream: true });
-	const saveVideo = setOutreachVideoAction;
+	const saveVideo = useAction(setOutreachVideoAction);
 	// Progress text renders inside the submit button while it's truthy.
 	const [busy, setBusy] = createSignal("");
 

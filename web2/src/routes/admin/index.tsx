@@ -1,5 +1,6 @@
 import { Title } from "@solidjs/meta";
 import { createMemo } from "solid-js";
+import { useAction } from "@solidjs/router";
 import { For, Show, Loading, createSignal } from "solid-js";
 import Layout from "~/components/Layout";
 import ConfirmButton from "~/components/ConfirmButton";
@@ -74,8 +75,8 @@ export default function Home() {
 	const user = createMemo(() => getUserQuery(), { deferStream: true });
 	const data = createMemo(() => getDashboardQuery(), { deferStream: true });
 	const overview = createMemo(() => getOverviewQuery(), { deferStream: true });
-	const createEntry = createTimeEntryAction;
-	const deleteEntry = deleteTimeEntryAction;
+	const createEntry = useAction(createTimeEntryAction);
+	const deleteEntry = useAction(deleteTimeEntryAction);
 	const [entryError, setEntryError] = createSignal("");
 	// Guard + in-flight indicator: a second click while the action runs must
 	// not submit a duplicate entry.

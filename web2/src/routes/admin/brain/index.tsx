@@ -1,5 +1,5 @@
 import { Title } from "@solidjs/meta";
-import { revalidate } from "@solidjs/router";
+import { revalidate, useAction } from "@solidjs/router";
 import { createMemo } from "solid-js";
 import { For, Show, Loading, createSignal } from "solid-js";
 import Layout from "~/components/Layout";
@@ -26,8 +26,8 @@ export default function AdminBrain() {
 	const facts = createMemo(() => getRecentFactsQuery(), { deferStream: true });
 	const pages = createMemo(() => getBrainPagesQuery(), { deferStream: true });
 
-	const runCycle = runBrainCycleAction;
-	const closeLoop = closeLoopAction;
+	const runCycle = useAction(runBrainCycleAction);
+	const closeLoop = useAction(closeLoopAction);
 	const [busy, setBusy] = createSignal("");
 	const [status, setStatus] = createSignal("");
 

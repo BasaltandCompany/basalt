@@ -4,6 +4,7 @@
 // prospect row.
 import { Title } from "@solidjs/meta";
 import { createMemo } from "solid-js";
+import { useAction } from "@solidjs/router";
 import { For, Show } from "solid-js";
 import Layout from "~/components/Layout";
 import { getBrainRequestsQuery, setBrainRequestStatusAction, linkBrainRequestToProspectAction } from "~/lib/admin-queries";
@@ -14,8 +15,8 @@ const STATUSES = ["new", "building", "delivered", "declined"] as const;
 
 export default function BrainRequests() {
 	const requests = createMemo(() => getBrainRequestsQuery(), { deferStream: true });
-	const setStatus = setBrainRequestStatusAction;
-	const linkProspect = linkBrainRequestToProspectAction;
+	const setStatus = useAction(setBrainRequestStatusAction);
+	const linkProspect = useAction(linkBrainRequestToProspectAction);
 
 	return (
 		<Layout>

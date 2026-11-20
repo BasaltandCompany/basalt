@@ -1,5 +1,5 @@
 import { Title } from "@solidjs/meta";
-import { useParams } from "@solidjs/router";
+import { useParams, useAction } from "@solidjs/router";
 import { createMemo } from "solid-js";
 import { For, Show, createSignal } from "solid-js";
 import PortalLayout from "~/components/PortalLayout";
@@ -10,7 +10,7 @@ export default function PortalQuoteDetail() {
 	const params = useParams();
 	const user = createMemo(() => getClientUserQuery(), { deferStream: true });
 	const quote = createMemo(() => getClientQuoteQuery(params.id ?? ""), { deferStream: true });
-	const sign = signQuoteAction;
+	const sign = useAction(signQuoteAction);
 	const [busy, setBusy] = createSignal(false);
 	const [error, setError] = createSignal("");
 

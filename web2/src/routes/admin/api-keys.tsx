@@ -1,5 +1,6 @@
 import { Title } from "@solidjs/meta";
 import { createMemo } from "solid-js";
+import { useAction } from "@solidjs/router";
 import { For, Show, Loading, createSignal } from "solid-js";
 import CreateDialog, { type CreateResult } from "~/components/CreateDialog";
 import Layout from "~/components/Layout";
@@ -17,8 +18,8 @@ import { Button, Card } from "@basaltac/ui2";
 export default function AdminApiKeys() {
 	const user = createMemo(() => getUserQuery(), { deferStream: true });
 	const keys = createMemo(() => getAdminApiKeysQuery(), { deferStream: true });
-	const createKey = createAdminApiKeyAction;
-	const revokeKey = revokeAdminApiKeyAction;
+	const createKey = useAction(createAdminApiKeyAction);
+	const revokeKey = useAction(revokeAdminApiKeyAction);
 
 	async function handleRevoke(id: string) {
 		const fd = new FormData();

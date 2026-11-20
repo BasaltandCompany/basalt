@@ -1,6 +1,6 @@
 import { Title } from "@solidjs/meta";
 import { createMemo } from "solid-js";
-import { revalidate } from "@solidjs/router";
+import { revalidate, useAction } from "@solidjs/router";
 import { For, Show, createSignal } from "solid-js";
 import CreateDialog, { type CreateResult } from "~/components/CreateDialog";
 import PortalLayout from "~/components/PortalLayout";
@@ -18,8 +18,8 @@ export default function PortalApiKeys() {
 	const keys = createMemo(() => getClientApiKeysQuery(), {
 		deferStream: true,
 	});
-	const createKey = createApiKeyAction;
-	const revokeKey = revokeApiKeyAction;
+	const createKey = useAction(createApiKeyAction);
+	const revokeKey = useAction(revokeApiKeyAction);
 
 	const [copied, setCopied] = createSignal(false);
 

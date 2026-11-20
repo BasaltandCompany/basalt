@@ -1,5 +1,6 @@
 import { Title } from "@solidjs/meta";
 import { createMemo } from "solid-js";
+import { useAction } from "@solidjs/router";
 import { For, Show, Loading, createSignal } from "solid-js";
 import CreateDialog from "~/components/CreateDialog";
 import Layout from "~/components/Layout";
@@ -210,7 +211,7 @@ function TemplatesPanel(props: {
 }
 
 function CampaignRow(props: { company: CampaignCompanyWithStats; store: CampaignStore }) {
-	const remove = deleteCampaignCompanyAction;
+	const remove = useAction(deleteCampaignCompanyAction);
 	const st = props.store;
 	const row = () => st.rows()[props.company.id];
 	const saveText = () => st.saveState()[`r:${props.company.id}`];
@@ -297,8 +298,8 @@ function CampaignRow(props: { company: CampaignCompanyWithStats; store: Campaign
 }
 
 function Campaign(props: { campaign: CampaignData; store: CampaignStore }) {
-	const addCampaignCompany = addCampaignCompanyAction;
-	const removeCampaign = deleteCampaignAction;
+	const addCampaignCompany = useAction(addCampaignCompanyAction);
+	const removeCampaign = useAction(deleteCampaignAction);
 	const st = props.store;
 	const c = () => props.campaign;
 	const name = () => st.meta()[c().id]?.name ?? c().name;
@@ -433,10 +434,10 @@ function Campaign(props: { campaign: CampaignData; store: CampaignStore }) {
 export default function AdminCampaigns() {
 	const user = createMemo(() => getUserQuery(), { deferStream: true });
 	const campaigns = createMemo(() => getCampaignsQuery(), { deferStream: true });
-	const createCampaign = createCampaignAction;
-	const updateCampaign = updateCampaignAction;
-	const saveTemplates = setCampaignTemplatesAction;
-	const updateCompany = updateCampaignCompanyAction;
+	const createCampaign = useAction(createCampaignAction);
+	const updateCampaign = useAction(updateCampaignAction);
+	const saveTemplates = useAction(setCampaignTemplatesAction);
+	const updateCompany = useAction(updateCampaignCompanyAction);
 
 	// page-level autosave state — see CampaignStore comment for why this
 	// cannot live inside the cards

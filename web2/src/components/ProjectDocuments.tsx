@@ -1,4 +1,5 @@
 import { createMemo } from "solid-js";
+import { useAction } from "@solidjs/router";
 import { For, Show, Loading, createSignal } from "solid-js";
 import ConfirmButton from "~/components/ConfirmButton";
 import {
@@ -20,8 +21,8 @@ export default function ProjectDocuments(props: {
 	const docs = createMemo(() => getDocumentsQuery(props.projectId), {
 		deferStream: true,
 	});
-	const addDocLink = createDocumentLinkAction;
-	const deleteDoc = deleteDocumentAction;
+	const addDocLink = useAction(createDocumentLinkAction);
+	const deleteDoc = useAction(deleteDocumentAction);
 
 	const [activeForm, setActiveForm] = createSignal<FormMode | null>(null);
 	const toggle = (mode: FormMode) =>

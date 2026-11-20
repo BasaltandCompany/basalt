@@ -1,5 +1,6 @@
 import { Title } from "@solidjs/meta";
 import { createMemo, For, Show, Loading, createSignal } from "solid-js";
+import { useAction } from "@solidjs/router";
 
 import CreateDialog from "~/components/CreateDialog";
 import Layout from "~/components/Layout";
@@ -24,7 +25,7 @@ export default function Projects() {
 	const companies = createMemo(() => getCompaniesForSelectQuery(), {
 		deferStream: true,
 	});
-	const createProject = createProjectAction;
+	const createProject = useAction(createProjectAction);
 	const [engagementType, setEngagementType] = createSignal("hourly");
 
 	const isHourly = createMemo(() => engagementType() !== "project");

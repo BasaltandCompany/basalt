@@ -1,6 +1,6 @@
 import { Title } from "@solidjs/meta";
 import { createMemo } from "solid-js";
-import { useNavigate, useParams } from "@solidjs/router";
+import { useNavigate, useParams, useAction } from "@solidjs/router";
 import { For, Show, Loading, createSignal } from "solid-js";
 import CreateDialog from "~/components/CreateDialog";
 import Layout from "~/components/Layout";
@@ -55,13 +55,13 @@ export default function ProjectDetail() {
 	const companies = createMemo(() => getCompaniesForSelectQuery(), { deferStream: true });
 	const projectQuotes = createMemo(() => getProjectQuotesQuery(params.id!), { deferStream: true });
 	const allQuotes = createMemo(() => getQuotesQuery(), { deferStream: true });
-	const createEntry = createTimeEntryAction;
-	const deleteEntry = deleteTimeEntryAction;
-	const deleteDeliverable = deleteDeliverableAction;
-	const createDeliverable = createDeliverableAction;
-	const updateProject = updateProjectAction;
-	const updateQuoteMeta = updateQuoteMetaAction;
-	const importQuote = importQuoteToProjectAction;
+	const createEntry = useAction(createTimeEntryAction);
+	const deleteEntry = useAction(deleteTimeEntryAction);
+	const deleteDeliverable = useAction(deleteDeliverableAction);
+	const createDeliverable = useAction(createDeliverableAction);
+	const updateProject = useAction(updateProjectAction);
+	const updateQuoteMeta = useAction(updateQuoteMetaAction);
+	const importQuote = useAction(importQuoteToProjectAction);
 	const statusForms: Record<string, HTMLFormElement> = {};
 	const [error, setError] = createSignal("");
 	// Guard + in-flight indicator: a second click while the action runs must

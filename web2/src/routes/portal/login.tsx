@@ -1,6 +1,7 @@
 import { Title } from "@solidjs/meta";
 
 import { Show, createSignal, onSettled } from "solid-js";
+import { useAction } from "@solidjs/router";
 import {
 	clientLoginAction,
 	setInvitePasswordAction,
@@ -9,8 +10,8 @@ import { Button, Card } from "@basaltac/ui2";
 import Brand from "~/components/Brand";
 
 export default function ClientLogin() {
-	const login = clientLoginAction;
-	const setPassword = setInvitePasswordAction;
+	const login = useAction(clientLoginAction);
+	const setPassword = useAction(setInvitePasswordAction);
 	const [error, setError] = createSignal("");
 	const [invite, setInvite] = createSignal<{
 		accessToken?: string;

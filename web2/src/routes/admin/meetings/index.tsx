@@ -1,5 +1,6 @@
 import { Title } from "@solidjs/meta";
 import { createMemo } from "solid-js";
+import { useAction } from "@solidjs/router";
 import { For, Show, Loading } from "solid-js";
 import Layout from "~/components/Layout";
 import ConfirmButton from "~/components/ConfirmButton";
@@ -14,7 +15,7 @@ import { Card } from "@basaltac/ui2";
 export default function MeetingDrafts() {
 	const user = createMemo(() => getUserQuery(), { deferStream: true });
 	const drafts = createMemo(() => getMeetingDraftsQuery(), { deferStream: true });
-	const deleteDoc = deleteDocumentAction;
+	const deleteDoc = useAction(deleteDocumentAction);
 
 	return (
 		<Layout user={user()}>

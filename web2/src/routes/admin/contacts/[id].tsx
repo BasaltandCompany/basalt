@@ -1,5 +1,5 @@
 import { Title } from "@solidjs/meta";
-import { useParams, revalidate } from "@solidjs/router";
+import { useParams, revalidate, useAction } from "@solidjs/router";
 import { createMemo, For, Show, Loading, createSignal } from "solid-js";
 import type { JSX } from "@solidjs/web";
 
@@ -28,10 +28,10 @@ export default function PersonProfile() {
 	const person = createMemo(() => getPersonQuery(memberId()), { deferStream: true });
 	const companies = createMemo(() => getCompaniesQuery(), { deferStream: true });
 
-	const addEmail = addPersonEmailAction;
-	const removeEmail = removePersonEmailAction;
-	const linkCompany = linkPersonCompanyAction;
-	const unlinkCompany = unlinkPersonCompanyAction;
+	const addEmail = useAction(addPersonEmailAction);
+	const removeEmail = useAction(removePersonEmailAction);
+	const linkCompany = useAction(linkPersonCompanyAction);
+	const unlinkCompany = useAction(unlinkPersonCompanyAction);
 	const [error, setError] = createSignal("");
 
 	const unlinkedCompanies = () =>

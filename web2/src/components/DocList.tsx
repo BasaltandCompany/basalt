@@ -1,5 +1,5 @@
 import { createMemo } from "solid-js";
-import { useNavigate } from "@solidjs/router";
+import { useNavigate, useAction } from "@solidjs/router";
 import { For, Show, Loading, createSignal } from "solid-js";
 import CreateDialog from "~/components/CreateDialog";
 import { getDocsQuery, createDocAction, getIssueStatsQuery, addIssueLearningAction } from "~/lib/docs-queries";
@@ -15,7 +15,7 @@ export default function DocList(props: {
 }) {
 	const docs = createMemo(() => getDocsQuery(), { deferStream: true });
 	const stats = createMemo(() => getIssueStatsQuery(), { deferStream: true });
-	const create = createDocAction;
+	const create = useAction(createDocAction);
 	const navigate = useNavigate();
 	const [genre, setGenre] = createSignal("");
 
@@ -105,7 +105,7 @@ export default function DocList(props: {
 // Topic-tagged lesson from a sent issue's numbers — feeds the next draft via
 // get_voice_lessons(topic=…). Kept tiny: one input + topic select.
 function AddLearning(props: { docId: string }) {
-	const add = addIssueLearningAction;
+	const add = useAction(addIssueLearningAction);
 	const [msg, setMsg] = createSignal("");
 	return (
 		<details style={{ "margin-top": "6px" }}>

@@ -1,5 +1,5 @@
 import { Title } from "@solidjs/meta";
-import { useParams } from "@solidjs/router";
+import { useParams, useAction } from "@solidjs/router";
 import { createMemo, For, Show, createSignal } from "solid-js";
 import type { JSX } from "@solidjs/web";
 
@@ -50,8 +50,8 @@ function ItemRows(props: {
 	subtotal: number;
 	totalLabel: string;
 }) {
-	const save = upsertQuoteItemAction;
-	const remove = deleteQuoteItemAction;
+	const save = useAction(upsertQuoteItemAction);
+	const remove = useAction(deleteQuoteItemAction);
 	const [busy, setBusy] = createSignal(false);
 
 	async function submit(e: SubmitEvent, action: (fd: FormData) => Promise<unknown>) {
@@ -125,8 +125,8 @@ export default function AdminQuoteDetail() {
 	const user = createMemo(() => getUserQuery(), { deferStream: true });
 	const quote = createMemo(() => getQuoteQuery(params.id ?? ""), { deferStream: true });
 	const projects = createMemo(() => getProjectsForSelectQuery(), { deferStream: true });
-	const setStatus = setQuoteStatusAction;
-	const saveMeta = updateQuoteMetaAction;
+	const setStatus = useAction(setQuoteStatusAction);
+	const saveMeta = useAction(updateQuoteMetaAction);
 
 	async function changeStatus(status: string) {
 		const fd = new FormData();

@@ -1,5 +1,6 @@
 import { Title } from "@solidjs/meta";
 import { createMemo } from "solid-js";
+import { useAction } from "@solidjs/router";
 import { For, Show, Loading } from "solid-js";
 import ConfirmButton from "~/components/ConfirmButton";
 import Layout from "~/components/Layout";
@@ -19,7 +20,7 @@ export default function AdminGithub() {
 	const user = createMemo(() => getUserQuery(), { deferStream: true });
 	const installations = createMemo(() => getGithubInstallationsQuery(), { deferStream: true });
 	const identities = createMemo(() => getGithubIdentitiesQuery(), { deferStream: true });
-	const unlink = unlinkGithubIdentityAction;
+	const unlink = useAction(unlinkGithubIdentityAction);
 
 	async function handleUnlink(githubId: number) {
 		const fd = new FormData();

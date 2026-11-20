@@ -1,6 +1,6 @@
 import { Title } from "@solidjs/meta";
 import { createMemo, For, Show, Loading, createSignal } from "solid-js";
-import { useNavigate } from "@solidjs/router";
+import { useNavigate, useAction } from "@solidjs/router";
 
 import CreateDialog from "~/components/CreateDialog";
 import Layout from "~/components/Layout";
@@ -117,7 +117,7 @@ function DigestSection(props: { brainUrl: string }) {
 
 function ActivityDetails(props: { prospect: OutreachProspect }) {
 	const activity = createMemo(() => getBrainActivityQuery(props.prospect.id));
-	const reset = resetBrainActivityAction;
+	const reset = useAction(resetBrainActivityAction);
 	const [resetMsg, setResetMsg] = createSignal("");
 	async function handleReset() {
 		if (
@@ -243,7 +243,7 @@ function brainHref(p: OutreachProspect): string {
 function EmailSection(props: { prospect: OutreachProspect }) {
 	const p = () => props.prospect;
 	const data = createMemo(() => getProspectEmailCardQuery(p().id));
-	const setContact = setOutreachContactAction;
+	const setContact = useAction(setOutreachContactAction);
 	const navigate = useNavigate();
 	const [linkMsg, setLinkMsg] = createSignal("");
 	async function linkAddress(addr: string) {
@@ -374,13 +374,13 @@ function BoardCard(props: {
 		campaigns?: { id: string; name: string }[];
 	}) {
 	const p = () => props.prospect;
-	const setStage = setOutreachStageAction;
-	const setIcp = setOutreachIcpAction;
-	const setBrain = setOutreachBrainAction;
-	const setVideo = setOutreachVideoAction;
-	const setNextAction = setOutreachNextActionAction;
-	const setContact = setOutreachContactAction;
-	const setCampaign = setProspectCampaignAction;
+	const setStage = useAction(setOutreachStageAction);
+	const setIcp = useAction(setOutreachIcpAction);
+	const setBrain = useAction(setOutreachBrainAction);
+	const setVideo = useAction(setOutreachVideoAction);
+	const setNextAction = useAction(setOutreachNextActionAction);
+	const setContact = useAction(setOutreachContactAction);
+	const setCampaign = useAction(setProspectCampaignAction);
 	const [editing, setEditing] = createSignal(false);
 	const [error, setError] = createSignal("");
 	const [dragging, setDragging] = createSignal(false);
@@ -730,7 +730,7 @@ function BoardCard(props: {
 
 function Board() {
 	const outreach = createMemo(() => getOutreachQuery(), { deferStream: true });
-	const setStage = setOutreachStageAction;
+	const setStage = useAction(setOutreachStageAction);
 	const [hoverStage, setHoverStage] = createSignal<string | undefined>();
 	const [error, setError] = createSignal("");
 	// ponytail: optimistic stage override stays in place after a successful
@@ -845,7 +845,7 @@ function Board() {
 
 export default function AdminOutreach() {
 	const user = createMemo(() => getUserQuery(), { deferStream: true });
-	const createProspect = createOutreachAction;
+	const createProspect = useAction(createOutreachAction);
 
 	return (
 		<Layout user={user()}>

@@ -1,5 +1,5 @@
 import { Title } from "@solidjs/meta";
-import { useParams, revalidate } from "@solidjs/router";
+import { useParams, revalidate, useAction } from "@solidjs/router";
 import { createMemo } from "solid-js";
 import { For, Show, Loading, createSignal } from "solid-js";
 import CreateDialog from "~/components/CreateDialog";
@@ -60,12 +60,12 @@ export default function CompanyDetail() {
 	const companyProjects = () =>
 		(projects() ?? []).filter((p) => p.companyId === companyId());
 
-	const createMember = createMemberAction;
-	const linkMember = linkMemberAction;
-	const removeMember = removeMemberAction;
-	const resendInvite = resendInviteAction;
-	const addInvoice = createInvoiceAction;
-	const saveAliases = updateCompanyAliasesAction;
+	const createMember = useAction(createMemberAction);
+	const linkMember = useAction(linkMemberAction);
+	const removeMember = useAction(removeMemberAction);
+	const resendInvite = useAction(resendInviteAction);
+	const addInvoice = useAction(createInvoiceAction);
+	const saveAliases = useAction(updateCompanyAliasesAction);
 
 	const [showInvForm, setShowInvForm] = createSignal<string | null>(null);
 	const [error, setError] = createSignal("");
@@ -75,9 +75,9 @@ export default function CompanyDetail() {
 	const reviewerUsage = createMemo(() => getCompanyReviewerUsageQuery(companyId()), { deferStream: true });
 	const companyReviews = createMemo(() => getReviewerReviewsQuery(companyId()), { deferStream: true });
 	const companyValue = createMemo(() => getCompanyValueQuery(companyId()), { deferStream: true });
-	const addTool = createToolAction;
-	const updateTool = updateToolAction;
-	const deleteTool = deleteToolAction;
+	const addTool = useAction(createToolAction);
+	const updateTool = useAction(updateToolAction);
+	const deleteTool = useAction(deleteToolAction);
 
 	const referer = () => `/admin/companies/${companyId()}`;
 	const today = new Date().toISOString().slice(0, 10);
@@ -465,7 +465,7 @@ function CompanyProjectSection(props: {
 	onInvoice: (e: Event) => void;
 }) {
 	const invoices = createMemo(() => getInvoicesQuery(props.proj.id), { deferStream: true });
-	const deleteInvoice = deleteInvoiceAction;
+	const deleteInvoice = useAction(deleteInvoiceAction);
 
 	return (
 		<Card style={{ "margin-bottom": "16px", padding: "24px" }}>

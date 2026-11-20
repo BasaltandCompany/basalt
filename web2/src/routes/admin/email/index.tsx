@@ -1,6 +1,6 @@
 import { Title } from "@solidjs/meta";
 import { createMemo, For, Show, createSignal, createEffect, onSettled, onCleanup, untrack } from "solid-js";
-import { revalidate, useSearchParams } from "@solidjs/router";
+import { revalidate, useSearchParams, useAction } from "@solidjs/router";
 
 import Layout from "~/components/Layout";
 import { VoiceLintPanel } from "~/components/VoiceLintPanel";
@@ -82,7 +82,7 @@ export default function AdminEmail() {
 	const setFolder = (f: "inbox" | "drafts" | "outbox" | "sent") => setSearchParams({ folder: f === "inbox" ? undefined : f });
 	const activeQ = () => (typeof searchParams.q === "string" && searchParams.q ? searchParams.q : undefined);
 	const inbox = createMemo(() => getInboxQuery({ q: activeQ() }), { deferStream: true });
-	const sync = syncEmailAction;
+	const sync = useAction(syncEmailAction);
 
 	const [q, setQ] = createSignal(String(searchParams.q ?? ""));
 	const [selected, setSelected] = createSignal<ThreadFull | null>(null);

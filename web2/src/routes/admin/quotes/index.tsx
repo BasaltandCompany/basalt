@@ -1,5 +1,6 @@
 import { Title } from "@solidjs/meta";
 import { createMemo } from "solid-js";
+import { useAction } from "@solidjs/router";
 import { For, Show } from "solid-js";
 import Layout from "~/components/Layout";
 import CreateDialog from "~/components/CreateDialog";
@@ -18,7 +19,7 @@ const statusBadge: Record<string, string> = {
 export default function AdminQuotes() {
 	const user = createMemo(() => getUserQuery(), { deferStream: true });
 	const quotes = createMemo(() => getQuotesQuery(), { deferStream: true });
-	const createQuote = createQuoteAction;
+	const createQuote = useAction(createQuoteAction);
 	const companies = createMemo(() => getCompaniesForSelectQuery(), { deferStream: true });
 	const projects = createMemo(() => getProjectsForSelectQuery(), { deferStream: true });
 

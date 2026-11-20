@@ -1,5 +1,6 @@
 import { Title } from "@solidjs/meta";
 import { createMemo } from "solid-js";
+import { useAction } from "@solidjs/router";
 import { For, Show, Loading } from "solid-js";
 import CreateDialog from "~/components/CreateDialog";
 import Layout from "~/components/Layout";
@@ -11,7 +12,7 @@ export default function People() {
 	const user = createMemo(() => getUserQuery(), { deferStream: true });
 	const people = createMemo(() => getPeopleQuery(), { deferStream: true });
 	const companies = createMemo(() => getCompaniesQuery(), { deferStream: true });
-	const createPerson = createPersonAction;
+	const createPerson = useAction(createPersonAction);
 
 	return (
 		<Layout user={user()}>

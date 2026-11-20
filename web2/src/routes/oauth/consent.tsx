@@ -1,5 +1,5 @@
 import { Title } from "@solidjs/meta";
-import { useSearchParams } from "@solidjs/router";
+import { useSearchParams, useAction } from "@solidjs/router";
 import { createMemo } from "solid-js";
 import { For, Show, createEffect, createSignal } from "solid-js";
 import { Button, Card } from "@basaltac/ui2";
@@ -27,9 +27,9 @@ export default function OAuthConsent() {
 	const authorizationId = () => String(searchParams.authorization_id ?? "");
 	const consent = createMemo(() => getConsentQuery(authorizationId()), { deferStream: true });
 
-	const login = oauthLoginAction;
-	const approve = approveConsentAction;
-	const deny = denyConsentAction;
+	const login = useAction(oauthLoginAction);
+	const approve = useAction(approveConsentAction);
+	const deny = useAction(denyConsentAction);
 	const [error, setError] = createSignal("");
 	const [pending, setPending] = createSignal("");
 

@@ -1,5 +1,5 @@
 import { Title } from "@solidjs/meta";
-import { useSearchParams } from "@solidjs/router";
+import { useSearchParams, useAction } from "@solidjs/router";
 import { createMemo } from "solid-js";
 import { Show, Loading } from "solid-js";
 import Layout from "~/components/Layout";
@@ -32,7 +32,7 @@ export default function GithubLink() {
 		const p = preview();
 		return p?.status === "ready" ? p : undefined;
 	};
-	const link = linkGithubIdentityAction;
+	const link = useAction(linkGithubIdentityAction);
 
 	async function handleLink(e: Event) {
 		e.preventDefault();

@@ -1,6 +1,6 @@
 import { Title } from "@solidjs/meta";
 import { createMemo } from "solid-js";
-import { useNavigate, useParams } from "@solidjs/router";
+import { useNavigate, useParams, useAction } from "@solidjs/router";
 import { For, Show, Loading, createEffect, createSignal } from "solid-js";
 import Layout from "~/components/Layout";
 import Waveform from "~/components/Waveform";
@@ -38,8 +38,8 @@ export default function MeetingEditor() {
 	const projects = createMemo(() => getProjectsForSelectQuery(), {
 		deferStream: true,
 	});
-	const saveDraft = saveMeetingDraftAction;
-	const publish = publishMeetingAction;
+	const saveDraft = useAction(saveMeetingDraftAction);
+	const publish = useAction(publishMeetingAction);
 
 	const [blocks, setBlocks] = createSignal<EditableBlock[]>([]);
 	const [title, setTitle] = createSignal("");

@@ -1,4 +1,4 @@
-import { useLocation } from "@solidjs/router";
+import { useLocation, useAction } from "@solidjs/router";
 import { createMemo } from "solid-js";
 import { For, Show, createSignal, onCleanup } from "solid-js";
 import {
@@ -29,9 +29,9 @@ function fmtElapsed(ms: number): string {
 export default function Timer() {
 	const timer = createMemo(() => getTimerQuery());
 	const projects = createMemo(() => getProjectsQuery());
-	const start = startTimerAction;
-	const stop = stopTimerAction;
-	const discard = discardTimerAction;
+	const start = useAction(startTimerAction);
+	const stop = useAction(stopTimerAction);
+	const discard = useAction(discardTimerAction);
 	const location = useLocation();
 
 	// ponytail: 1s interval re-render for the live readout. Fine for one

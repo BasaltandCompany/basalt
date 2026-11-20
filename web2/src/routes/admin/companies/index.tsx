@@ -1,5 +1,6 @@
 import { Title } from "@solidjs/meta";
 import { createMemo } from "solid-js";
+import { useAction } from "@solidjs/router";
 import { For, Show, Loading, createSignal } from "solid-js";
 import CreateDialog from "~/components/CreateDialog";
 import Layout from "~/components/Layout";
@@ -27,10 +28,10 @@ export default function Companies() {
 	// Resend only while the invite is pending (member never signed in).
 	const invitePending = (email: string) =>
 		!(signedInEmails() ?? []).includes(email);
-	const createCompany = createCompanyAction;
-	const resendInvite = resendInviteAction;
-	const toggleActive = toggleMemberActiveAction;
-	const linkMember = linkMemberAction;
+	const createCompany = useAction(createCompanyAction);
+	const resendInvite = useAction(resendInviteAction);
+	const toggleActive = useAction(toggleMemberActiveAction);
+	const linkMember = useAction(linkMemberAction);
 
 	const [error, setError] = createSignal("");
 	const [success, setSuccess] = createSignal("");
