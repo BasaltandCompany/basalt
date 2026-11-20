@@ -127,11 +127,14 @@ export default function AdminQuoteDetail() {
 	const projects = createMemo(() => getProjectsForSelectQuery(), { deferStream: true });
 	const setStatus = useAction(setQuoteStatusAction);
 	const saveMeta = useAction(updateQuoteMetaAction);
+	// draft → sent can email stakeholders (server default is on; unchecked sends "0")
+	const [notifyStakeholders, setNotifyStakeholders] = createSignal(true);
 
 	async function changeStatus(status: string) {
 		const fd = new FormData();
 		fd.set("id", params.id ?? "");
 		fd.set("status", status);
+		fd.set("notify", notifyStakeholders() ? "1" : "0");
 		const res = (await setStatus(fd)) as { error?: string; success?: string };
 		if (res?.error) toast(res.error, "error");
 		else if (res?.success) toast(res.success, "success");
@@ -159,7 +162,13 @@ export default function AdminQuoteDetail() {
 									{" · "}
 									<span class={`badge ${statusBadge[q().status] ?? "badge-paused"}`}>{q().status}</span>
 								</p>
-								<div style={{ display: "flex", gap: "8px" }}>
+								<div style={{ display: "flex", gap: "8px", "align-items": "center" }}>
+									<Show when={q().status === "draft"}>
+										<label class="muted" style={{ display: "inline-flex", gap: "6px", "align-items": "center", "font-size": "12px", cursor: "pointer" }}>
+											<input type="checkbox" checked={notifyStakeholders()} onInput={(e) => setNotifyStakeholders(e.currentTarget.checked)} style={{ width: "auto" }} />
+											Email stakeholders
+										</label>
+									</Show>
 									<Show when={q().status !== "sent"}>
 										<Button size="sm" onClick={() => changeStatus("sent")}>Mark sent</Button>
 									</Show>
