@@ -28,6 +28,14 @@ else
 	DEV_DATABASE_URL="$DB_URL" ./scripts/pull-env.sh "$ARG"
 fi
 
+# Docker daemon (OrbStack) must be up before `supabase start` — start it if not.
+if ! docker info >/dev/null 2>&1; then
+	echo "→ Docker daemon not running — starting OrbStack"
+	command -v orb >/dev/null 2>&1 && orb start || open -a OrbStack || open -a Docker
+	for _ in $(seq 30); do docker info >/dev/null 2>&1 && break; sleep 1; done
+	docker info >/dev/null 2>&1 || { echo "Docker daemon did not come up within 30s — start OrbStack manually and re-run."; exit 1; }
+fi
+
 echo "→ local Supabase stack (auth+storage :54321, Postgres :54322, Studio :54323)"
 supabase start >/dev/null
 docker inspect "$SB_DB" >/dev/null 2>&1 || { echo "container $SB_DB not found — did supabase/config.toml's project id change?"; exit 1; }
