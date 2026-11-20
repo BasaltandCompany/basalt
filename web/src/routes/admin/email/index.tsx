@@ -116,7 +116,7 @@ export default function AdminEmail() {
 	};
 	// draftId tracks the outbox row created by a Send click, so a lint-blocked
 	// retry (or Send anyway) updates that same draft instead of duplicating one
-	const [compose, setCompose] = createSignal<{ to: string; cc?: string; bcc?: string; subject: string; body: string; threadId?: string; draftId?: string } | null>(null);
+	const [compose, setCompose] = createSignal<{ to: string; cc?: string; bcc?: string; subject: string; body: string; signatureText?: string; threadId?: string; draftId?: string } | null>(null);
 	// Cc/Bcc inputs stay hidden until toggled (or already filled) — Gmail pattern
 	const [showCcBcc, setShowCcBcc] = createSignal(false);
 	// attachments: compose-side files ride client-side until the draft row exists;
@@ -153,7 +153,7 @@ export default function AdminEmail() {
 	const [visibleCount, setVisibleCount] = createSignal(50);
 	const [editBody, setEditBody] = createSignal<Record<string, string>>({});
 	// locally edited to/subject — shown until the next list revalidate
-	const [editMeta, setEditMeta] = createSignal<Record<string, { to?: string; subject?: string; cc?: string; bcc?: string; signature?: string }>>({});
+	const [editMeta, setEditMeta] = createSignal<Record<string, { to?: string; subject?: string; cc?: string; bcc?: string; signature?: string; signatureText?: string }>>({});
 	const [sendStatus, setSendStatus] = createSignal("");
 	const [connecting, setConnecting] = createSignal(false);
 	// per-draft CRDT history (Drafts tab); clicking a draft row opens the
@@ -182,7 +182,7 @@ export default function AdminEmail() {
 	// per-draft remote-sync handles (set by the overlay, consumed by the
 	// autosave PUT: markSynced makes saved fields clean so future agent edits
 	// flow through again)
-	const draftSyncMark: Record<string, ((field: string, v: string) => void) | undefined> = {};
+	const draftSyncMark: Record<string, ((field: string, v: string, version?: number) => void) | undefined> = {};
 	// "agent edited X while you were editing" note in the draft overlay
 	const [agentNote, setAgentNote] = createSignal<string | null>(null);
 	let agentNoteTimer: ReturnType<typeof setTimeout> | undefined;
@@ -445,7 +445,7 @@ export default function AdminEmail() {
 
 	// draft autosave — debounced PUT for body/to/subject; body is CRDT-tracked
 	// server-side (hunks into the Loro snapshot, coalesced version rows)
-	const editDraft = (outboxId: string, patch: { body?: string; to?: string; subject?: string; cc?: string; bcc?: string; signature?: string }) => {
+	const editDraft = (outboxId: string, patch: { body?: string; to?: string; subject?: string; cc?: string; bcc?: string; signature?: string; signatureText?: string }) => {
 		if (patch.body !== undefined) {
 			setEditBody({ ...editBody(), [outboxId]: patch.body });
 			lintDraft(outboxId, patch.body);
@@ -464,14 +464,18 @@ export default function AdminEmail() {
 			if (m?.cc !== undefined) payload.cc = m.cc;
 			if (m?.bcc !== undefined) payload.bcc = m.bcc;
 			if (m?.signature !== undefined) payload.signature = m.signature;
+			if (m?.signatureText !== undefined) payload.signatureText = m.signatureText;
 			const res = await fetch(`/api/email/drafts/${outboxId}`, {
 				method: "PUT",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(payload),
 			});
 			if (res.ok) {
-				// saved fields are clean now — future agent edits apply live again
-				for (const [k, v] of Object.entries(payload)) draftSyncMark[outboxId]?.(k, v);
+				// saved fields are clean now — future agent edits apply live again.
+				// The response carries the row version; marking it makes the sync
+				// ignore stale-poll rows that raced this save (the old→new flash).
+				const { version } = (await res.json().catch(() => ({}))) as { version?: number | null };
+				for (const [k, v] of Object.entries(payload)) draftSyncMark[outboxId]?.(k, v, version ?? undefined);
 				setDraftSaveState({ ...draftSaveState(), [outboxId]: `saved ${new Date().toLocaleTimeString()}` });
 				if (openDraftHistory() === outboxId) {
 					const r = await fetch(`/api/email/drafts/${outboxId}?versions=1`);
@@ -1226,8 +1230,15 @@ export default function AdminEmail() {
 					// /api/changes revalidate and apply here in place — without clobbering
 					// unsaved local edits (createRemoteSync keeps per-field sync state)
 					const liveDraft = () => inbox()?.drafts.find((x) => x.id === d.id);
-					const setMetaField = (field: "subject" | "to" | "cc" | "bcc" | "signature", v: string) =>
+					const setMetaField = (field: "subject" | "to" | "cc" | "bcc" | "signature" | "signatureText", v: string) =>
 						setEditMeta({ ...editMeta(), [d.id]: { ...editMeta()[d.id], [field]: v } });
+					// per-draft footer editing: an override replaces the branded variant for
+					// this send only; empty/absent = auto. The edit box seeds with whatever
+					// will actually send today, so the preview is WYSIWYG.
+					const [editingFooter, setEditingFooter] = createSignal(false);
+					const footerOverride = () => (editMeta()[d.id]?.signatureText ?? d.signatureText ?? "").trim();
+					const footerVariant = () => (editMeta()[d.id]?.signature || (d.campaignCompanyId ? "plain" : "full")) as "full" | "plain";
+					const footerSeed = () => footerOverride() || SIGNATURES[footerVariant()].plain;
 					const note = (msg: string) => {
 						clearTimeout(agentNoteTimer);
 						setAgentNote(msg);
@@ -1241,9 +1252,10 @@ export default function AdminEmail() {
 						cc: createRemoteSync({ remote: () => liveDraft()?.ccEmail ?? d.ccEmail ?? "", local: () => editMeta()[d.id]?.cc ?? d.ccEmail ?? "", setLocal: (v) => setMetaField("cc", v), onApplied: () => applied("cc"), onConflict: () => kept("cc") }),
 						bcc: createRemoteSync({ remote: () => liveDraft()?.bccEmail ?? d.bccEmail ?? "", local: () => editMeta()[d.id]?.bcc ?? d.bccEmail ?? "", setLocal: (v) => setMetaField("bcc", v), onApplied: () => applied("bcc"), onConflict: () => kept("bcc") }),
 						signature: createRemoteSync({ remote: () => liveDraft()?.signature ?? d.signature ?? "", local: () => editMeta()[d.id]?.signature ?? d.signature ?? "", setLocal: (v) => setMetaField("signature", v), onApplied: () => applied("footer"), onConflict: () => kept("footer") }),
-						body: createRemoteSync({ remote: () => liveDraft()?.body ?? d.body, local: () => editBody()[d.id] ?? d.body, setLocal: (v) => setEditBody({ ...editBody(), [d.id]: v }), onApplied: () => applied("body"), onConflict: () => kept("body") }),
+						signatureText: createRemoteSync({ remote: () => liveDraft()?.signatureText ?? d.signatureText ?? "", local: () => editMeta()[d.id]?.signatureText ?? d.signatureText ?? "", setLocal: (v) => setMetaField("signatureText", v), onApplied: () => applied("footer"), onConflict: () => kept("footer") }),
+						body: createRemoteSync({ remote: () => liveDraft()?.body ?? d.body, remoteVersion: () => liveDraft()?.version, local: () => editBody()[d.id] ?? d.body, setLocal: (v) => setEditBody({ ...editBody(), [d.id]: v }), onApplied: () => applied("body"), onConflict: () => kept("body") }),
 					};
-					draftSyncMark[d.id] = (field, v) => syncs[field as keyof typeof syncs]?.markSynced(v);
+					draftSyncMark[d.id] = (field, v, version) => syncs[field as keyof typeof syncs]?.markSynced(v, version);
 					onCleanup(() => {
 						delete draftSyncMark[d.id];
 					});
@@ -1282,41 +1294,73 @@ export default function AdminEmail() {
 								onInput={(e) => editDraft(d.id, { subject: e.currentTarget.value })}
 								style={{ width: "100%", "margin-bottom": "8px", padding: "8px", border: "1px solid rgba(0,0,0,0.12)" }}
 							/>
-							<label style={{ display: "flex", "align-items": "center", gap: "6px", "margin-bottom": "8px", "font-size": "12px", color: "#6b6455" }}>
-								Footer
-								<select
-									value={editMeta()[d.id]?.signature ?? d.signature ?? ""}
-									onChange={(e) => editDraft(d.id, { signature: e.currentTarget.value })}
-									style={{ padding: "4px", border: "1px solid rgba(0,0,0,0.12)" }}
-								>
-									<option value="">Auto ({d.campaignCompanyId ? "plain" : "full"})</option>
-									<option value="full">Full signature</option>
-									<option value="plain">Plain (Collin)</option>
-									<option value="none">None</option>
-								</select>
-							</label>
-							<LintedTextarea
-								ariaLabel="Draft body"
-								value={editBody()[d.id] ?? d.body}
-								violations={draftLint()[d.id]?.violations ?? []}
-								onInput={(v) => editDraft(d.id, { body: v })}
-								rows={12}
-							/>
-							<VoiceLintPanel result={draftLint()[d.id] ?? null} stale={lintStale()[d.id]} />
-							{/* footer is appended at send time — preview the EXACT variant that will land:
-							    full renders the branded HTML block (the plain-text version read like no footer at all) */}
-							<Show when={(editMeta()[d.id]?.signature ?? d.signature ?? "") !== "none"} fallback={<div class="muted" style={{ "font-size": "11px", margin: "0 0 8px", color: "#8a8375" }}>— No footer (None selected) —</div>}>
+							{/* the email as it will send: body + footer on ONE surface (no white
+							    card). The footer preview is what actually lands: a per-draft
+							    override when set, else the branded variant. Voice lint sits
+							    underneath the whole thing. */}
+							<div style={{ border: "1px solid rgba(0,0,0,0.12)", "border-radius": "4px", "margin-bottom": "8px", overflow: "hidden" }}>
+								<LintedTextarea
+									ariaLabel="Draft body"
+									value={editBody()[d.id] ?? d.body}
+									violations={draftLint()[d.id]?.violations ?? []}
+									onInput={(v) => editDraft(d.id, { body: v })}
+									rows={12}
+									embedded
+								/>
 								<Show
-									when={(editMeta()[d.id]?.signature || (d.campaignCompanyId ? "plain" : "full")) === "full"}
-									fallback={
-										<pre class="muted" style={{ "font-size": "11px", "white-space": "pre-wrap", margin: "0 0 8px", "font-family": "inherit", color: "#8a8375", border: "1px dashed rgba(0,0,0,0.15)", padding: "8px", "border-radius": "4px" }}>{`— Footer added on send (plain) —\n${SIGNATURES.plain.plain}`}</pre>
-									}
+									when={(editMeta()[d.id]?.signature ?? d.signature ?? "") !== "none"}
+									fallback={<div class="muted" style={{ "font-size": "11px", padding: "8px", "border-top": "1px solid rgba(0,0,0,0.12)", color: "#8a8375" }}>No footer (None selected)</div>}
 								>
-									<div class="muted" style={{ "font-size": "11px", margin: "0 0 4px", color: "#8a8375" }}>— Footer added on send (full) —</div>
-									{/* SIGNATURES.full.html is our own static markup — safe for innerHTML */}
-									<div style={{ margin: "0 0 8px", border: "1px dashed rgba(0,0,0,0.15)", padding: "8px", "border-radius": "4px", background: "#faf9f6" }} innerHTML={SIGNATURES.full.html} />
+									<div style={{ "border-top": "1px solid rgba(0,0,0,0.12)", "margin-top": "-1px" }}>
+										<div style={{ display: "flex", "align-items": "center", gap: "8px", padding: "6px 8px", "margin-top": "-1px" }}>
+											<span class="muted" style={{ "font-size": "11px", color: "#8a8375" }}>Footer</span>
+											<select
+												value={editMeta()[d.id]?.signature ?? d.signature ?? ""}
+												onChange={(e) => editDraft(d.id, { signature: e.currentTarget.value })}
+												style={{ padding: "2px 4px", border: "1px solid rgba(0,0,0,0.12)", "font-size": "11px" }}
+											>
+												<option value="">Auto ({d.campaignCompanyId ? "plain" : "full"})</option>
+												<option value="full">Full signature</option>
+												<option value="plain">Plain (Collin)</option>
+												<option value="none">None</option>
+											</select>
+											<div style={{ flex: 1 }} />
+											<Show when={footerOverride()} fallback={
+												<Show when={!editingFooter()}><button type="button" class="muted" style={{ "font-size": "11px", background: "none", border: "0", cursor: "pointer", color: "#6b6455", "text-decoration": "underline", padding: "0" }} onClick={() => setEditingFooter(true)}>Edit footer</button></Show>
+											}>
+												<button type="button" class="muted" style={{ "font-size": "11px", background: "none", border: "0", cursor: "pointer", color: "#6b6455", "text-decoration": "underline", padding: "0" }} onClick={() => editDraft(d.id, { signatureText: "" })}>Reset to auto</button>
+											</Show>
+										</div>
+										<Show
+											when={editingFooter()}
+											fallback={
+												<Show when={footerOverride()} fallback={
+													<>
+														{/* branded variants: full is our own static markup — safe for innerHTML.
+														    .email-footer-preview adapts its light-theme text colors to this
+														dark surface (app.css) */}
+														<Show when={footerVariant() === "full"} fallback={<pre class="muted email-footer-preview" style={{ "font-size": "12px", "white-space": "pre-wrap", margin: "0", padding: "8px", "font-family": "inherit", color: "#8a8375" }}>{SIGNATURES.plain.plain}</pre>}>
+															<div class="email-footer-preview" innerHTML={SIGNATURES.full.html} />
+														</Show>
+													</>
+												}>
+													{/* override preview = exactly what sends (resolveFooter escapes this same text) */}
+													<div style={{ padding: "8px", "font-size": "12px", "line-height": "1.5", "font-family": "inherit", "white-space": "pre-wrap", color: "#d8d2c4" }}>{footerOverride()}</div>
+												</Show>
+											}
+										>
+											<textarea
+												aria-label="Footer text"
+												value={footerSeed()}
+												onInput={(e) => editDraft(d.id, { signatureText: e.currentTarget.value })}
+												rows={5}
+												style={{ width: "100%", padding: "8px", border: "0", "border-top": "1px solid rgba(0,0,0,0.12)", "font-family": "inherit", "font-size": "12px", "line-height": "1.5", "box-sizing": "border-box", resize: "vertical", display: "block", background: "transparent", color: "inherit" }}
+											/>
+										</Show>
+									</div>
 								</Show>
-							</Show>
+							</div>
+							<VoiceLintPanel result={draftLint()[d.id] ?? null} stale={lintStale()[d.id]} />
 							<div style={{ display: "flex", gap: "6px", "flex-wrap": "wrap", "align-items": "center", margin: "8px 0" }}>
 								{/* attachments ride the live row — frozen d would hide uploads that land via revalidate */}
 								<For each={inbox()?.drafts.find((x) => x.id === d.id)?.attachments ?? []}>
@@ -1453,19 +1497,43 @@ export default function AdminEmail() {
 							onInput={(e) => setCompose({ ...compose()!, subject: e.currentTarget.value })}
 							style={{ width: "100%", "margin-bottom": "8px", padding: "8px", border: "1px solid rgba(0,0,0,0.12)" }}
 						/>
-						<textarea
-							aria-label="Message body"
-							placeholder="Your message…"
-							value={compose()!.body}
-							onInput={(e) => setCompose({ ...compose()!, body: e.currentTarget.value })}
-							rows={8}
-							ref={(el) => setTimeout(() => el.focus())}
-							style={{ width: "100%", "margin-bottom": "8px", padding: "8px", border: "1px solid rgba(0,0,0,0.12)", "font-family": "inherit", "font-size": "14px", "line-height": "1.5", "box-sizing": "border-box", resize: "vertical", display: "block" }}
-						/>
-						{/* footer is appended at send time — preview it where it will land */}
-						<div class="muted" style={{ "font-size": "11px", margin: "0 0 4px", color: "#8a8375" }}>— Footer added on send —</div>
-						{/* SIGNATURES.full.html is our own static markup — safe for innerHTML */}
-						<div style={{ margin: "0 0 8px", border: "1px dashed rgba(0,0,0,0.15)", padding: "8px", "border-radius": "4px", background: "#faf9f6" }} innerHTML={SIGNATURES.full.html} />
+						{/* the email as it will send: body + footer on ONE surface; an edited
+						    footer rides the draft creation and sends verbatim (resolveFooter) */}
+						<div style={{ border: "1px solid rgba(0,0,0,0.12)", "border-radius": "4px", "margin-bottom": "8px", overflow: "hidden" }}>
+							<textarea
+								aria-label="Message body"
+								placeholder="Your message…"
+								value={compose()!.body}
+								onInput={(e) => setCompose({ ...compose()!, body: e.currentTarget.value })}
+								rows={8}
+								ref={(el) => setTimeout(() => el.focus())}
+								style={{ width: "100%", padding: "8px", border: "none", "font-family": "inherit", "font-size": "14px", "line-height": "1.5", "box-sizing": "border-box", resize: "vertical", display: "block" }}
+							/>
+							<div style={{ "border-top": "1px solid rgba(0,0,0,0.12)", "margin-top": "-1px" }}>
+								<div style={{ display: "flex", "align-items": "center", gap: "8px", padding: "6px 8px" }}>
+									<span class="muted" style={{ "font-size": "11px", color: "#8a8375" }}>Footer</span>
+									<div style={{ flex: 1 }} />
+									<Show when={compose()!.signatureText?.trim()} fallback={
+										<button type="button" class="muted" style={{ "font-size": "11px", background: "none", border: "0", cursor: "pointer", color: "#6b6455", "text-decoration": "underline", padding: "0" }} onClick={() => setCompose({ ...compose()!, signatureText: SIGNATURES.full.plain })}>Edit footer</button>
+									}>
+										<button type="button" class="muted" style={{ "font-size": "11px", background: "none", border: "0", cursor: "pointer", color: "#6b6455", "text-decoration": "underline", padding: "0" }} onClick={() => setCompose({ ...compose()!, signatureText: "" })}>Reset to auto</button>
+									</Show>
+								</div>
+								{/* SIGNATURES.full.html is our own static markup — safe for innerHTML;
+								    .email-footer-preview adapts its light colors to this surface */}
+								<Show when={compose()!.signatureText?.trim()} fallback={
+									<div class="email-footer-preview" innerHTML={SIGNATURES.full.html} />
+								}>
+									<textarea
+										aria-label="Footer text"
+										value={compose()!.signatureText ?? ""}
+										onInput={(e) => setCompose({ ...compose()!, signatureText: e.currentTarget.value })}
+										rows={5}
+										style={{ width: "100%", padding: "8px", border: "0", "border-top": "1px solid rgba(0,0,0,0.12)", "font-family": "inherit", "font-size": "12px", "line-height": "1.5", "box-sizing": "border-box", resize: "vertical", display: "block", background: "transparent", color: "inherit" }}
+									/>
+								</Show>
+							</div>
+						</div>
 						<Show when={composeFiles().length}>
 							<div style={{ display: "flex", gap: "6px", "flex-wrap": "wrap", "margin-bottom": "8px" }}>
 								<For each={composeFiles()}>

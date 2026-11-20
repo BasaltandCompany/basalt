@@ -109,6 +109,12 @@ describe("buildMime", () => {
 		expect(mime).toContain("cpfeifer@basalt.ac");
 		expect(mime).toContain("confidential");
 		expect(mime).toContain("--_basalt_sig--");
+		// regression: the alternative header is emitted ONCE — a duplicate lands in
+		// the body as preamble and strict clients (Spark) render the footer blank
+		expect(mime.match(/Content-Type: multipart\/alternative/g)).toHaveLength(1);
+		// body starts directly at the first boundary, no stray lines before it
+		expect(mime.indexOf("--_basalt_sig")).toBeGreaterThan(mime.indexOf("\r\n\r\n"));
+		expect(mime.split("\r\n\r\n")[1]?.startsWith("--_basalt_sig\r\n")).toBe(true);
 	});
 	test("plain signature → just Collin, no logo or disclaimer", () => {
 		const mime = buildMime({ to: "a@b.c", subject: "Hi", body: "quick note", signature: "plain" });
@@ -117,6 +123,19 @@ describe("buildMime", () => {
 		expect(mime).toContain(">Collin</div>");
 		expect(mime).not.toContain("logo-email.png");
 		expect(mime).not.toContain("confidential");
+	});
+	test("per-draft footer override replaces both parts, variant None still bare", () => {
+		const mime = buildMime({ to: "a@b.c", subject: "Hi", body: "body", signature: "full", signatureText: "Collin Pfeifer\nTechnology · Basalt & Company" });
+		expect(mime).toContain("body\n\nCollin Pfeifer\nTechnology · Basalt & Company");
+		expect(mime).toContain("Collin Pfeifer<br>Technology · Basalt &amp; Company");
+		expect(mime).not.toContain("logo-email.png");
+		expect(mime).not.toContain("confidential");
+		// None wins over any override — no footer at all
+		const bare = buildMime({ to: "a@b.c", subject: "Hi", body: "b", signatureText: "x" });
+		expect(bare).not.toContain("multipart");
+		// blank/whitespace override falls back to the branded variant
+		const branded = buildMime({ to: "a@b.c", subject: "Hi", body: "b", signature: "full", signatureText: "   " });
+		expect(branded).toContain("logo-email.png");
 	});
 
 	// ── attachments ──

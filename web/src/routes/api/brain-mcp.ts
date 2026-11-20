@@ -694,6 +694,7 @@ chat_uuid: { type: "string" },
 				campaign_company_id: { type: "string", description: "campaign_companies id — links this send to its campaign company for Gmail-grounded stats (list_campaigns has ids)" },
 				campaign_step: { type: "number", description: "which touch of the campaign sequence this email is (1-based)" },
 				signature: { type: "string", enum: ["full", "plain", "none"], description: "outbound footer: full (branded), plain (just 'Collin'), none. Omit = auto: campaign drafts get plain, everything else full" },
+				signature_text: { type: "string", description: "verbatim footer text overriding the branded variant (the human may edit this in the composer; preserve an existing draft's signature_text on revise unless asked)" },
 				attachments: { type: "array", items: { type: "string" }, description: "absolute server-local file paths to attach (works on create AND draft_id revisions; ≤20MB each, ≤24MB total)" },
 			},
 			required: ["to", "subject", "body"],
@@ -1906,6 +1907,7 @@ export async function POST(event: APIEvent) {
 								...(campaignCompanyId ? { campaignCompanyId, campaignStep } : {}),
 								...(attPaths ? { attachments: attPaths } : {}),
 								...(toolArgs.signature ? { signature: toolArgs.signature as "full" | "plain" | "none" } : {}),
+								...(typeof toolArgs.signature_text === "string" && toolArgs.signature_text ? { signatureText: toolArgs.signature_text } : {}),
 							});
 							result = upd;
 							if (!(upd && typeof upd === "object" && "outboxId" in upd)) break;
@@ -1923,6 +1925,7 @@ export async function POST(event: APIEvent) {
 							...(campaignCompanyId ? { campaignCompanyId, campaignStep } : {}),
 							...(attPaths ? { attachments: attPaths } : {}),
 							...(toolArgs.signature ? { signature: toolArgs.signature as "full" | "plain" | "none" } : {}),
+							...(typeof toolArgs.signature_text === "string" && toolArgs.signature_text ? { signatureText: toolArgs.signature_text } : {}),
 						});
 						noteRead(readSession, `email-draft:${created.outboxId}`);
 						result = created;
