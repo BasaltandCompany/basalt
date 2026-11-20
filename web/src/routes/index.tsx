@@ -32,25 +32,24 @@ const MESSAGES: Message[] = [
     ],
   },
   {
-    title: "Proven in production.",
-    proof: [
+    title: "Start with the goody bag. Free.",
+    body:
+      "Free tools to run your company with AI — plus the steps to set them up, 3 months of Claude, and your AI game plan.",
+    tools: [
       {
-        client: "A public university",
-        stat: "2.75x",
-        line: "revenue per work-hour, with AI agents running their outbound and a third of their time back.",
+        name: "Basalt PR Reviewer",
+        line: "Every pull request gets a code and security review before a human sees it. Install once, done.",
       },
       {
-        client: "A data privacy provider",
-        stat: "+200%",
-        line: "response rates from the cold-outreach dashboard, plus coding-agent training and prospect identification that grew sales and outreach.",
+        name: "Basalt security scanner",
+        line: "A weekly report on how safe your company is. Plain words, in your inbox. Coming soon.",
+      },
+      {
+        name: "Basalt Software Factory",
+        line: "Build and ship your own software. One-stop deploys to Fly, Railway, or Render.",
       },
     ],
-  },
-  {
-    title: "Get your AI game plan. Free.",
-    body:
-      "Tell us what your business does and where the work piles up. Collin sends back where AI pays off first, how to build it, the exact prompts, and 3 months of Claude to run it.",
-    cta: { href: "/gift", label: "Claim your game plan" },
+    cta: { href: "/gift", label: "Claim the goody bag" },
   },
 ]
 
@@ -59,6 +58,7 @@ type Message = {
   body?: string
   link?: { href: string; label: string }
   proof?: { client: string; stat: string; line: string }[]
+  tools?: { name: string; line: string }[]
   cta?: { href: string; label: string }
 }
 
@@ -123,26 +123,11 @@ export function Site(props: { heroVideo: string | null }) {
                 autoplay
                 loop
                 playsinline
-                class="absolute inset-0 h-full w-full object-cover opacity-40"
+                class="absolute inset-0 h-full w-full object-cover opacity-25"
               />
-              <div class="absolute inset-0 bg-gradient-to-b from-background/85 via-background/55 to-background" />
+              <div class="absolute inset-0 bg-gradient-to-b from-background/85 via-background/65 to-background" />
             </>
           )}
-        </Show>
-        <Show when={!props.heroVideo}>
-          <div class="lava-glow absolute inset-x-0 bottom-0 h-72" aria-hidden="true" />
-          <svg
-            class="absolute bottom-0 left-0 h-40 w-full"
-            viewBox="0 0 1200 160"
-            preserveAspectRatio="none"
-          >
-            <g fill="#050505">
-              <rect x="0" y="148" width="1200" height="12" />
-              <rect x="170" y="66" width="170" height="94" />
-              <rect x="515" y="14" width="190" height="146" />
-              <rect x="880" y="92" width="165" height="68" />
-            </g>
-          </svg>
         </Show>
       </div>
 
@@ -162,7 +147,7 @@ export function Site(props: { heroVideo: string | null }) {
         </p>
       </div>
 
-      {/* ── Scroll track: invisible distance, four screens ──────── */}
+      {/* ── Scroll track: invisible distance, three screens ────── */}
       <div aria-hidden="true">
         {MESSAGES.map(() => (
           <div class="h-svh snap-start" />
@@ -223,6 +208,20 @@ export function Site(props: { heroVideo: string | null }) {
               </div>
             )}
           </Show>
+          <Show when={msg.tools}>
+            {(tools) => (
+              <div class="mt-5 space-y-5">
+                <For each={tools()}>
+                  {(t) => (
+                    <div>
+                      <p class="font-sans text-xs uppercase tracking-[0.25em] text-muted-foreground">{t.name}</p>
+                      <p class="mt-1 max-w-lg font-sans text-sm leading-relaxed text-foreground/80">{t.line}</p>
+                    </div>
+                  )}
+                </For>
+              </div>
+            )}
+          </Show>
           <div class="pointer-events-auto mt-6 flex items-center gap-8">
             <Show
               when={msg.cta}
@@ -259,7 +258,7 @@ export function Site(props: { heroVideo: string | null }) {
 
 export default function Home() {
   // localStorage read must stay client-side — render-time access throws SSR.
-  // The lava-glow fallback renders server-side; the video pops in after mount.
+  // Nothing renders in the stage until the video resolves — no fallback flash.
   const [heroVideo, setHeroVideo] = createSignal<string | null>(null)
   onSettled(() => { setHeroVideo(initHeroVideo()); })
   return <Site heroVideo={heroVideo()} />
