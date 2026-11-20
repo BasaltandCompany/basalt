@@ -1,3 +1,4 @@
+import type { ClassValue } from "clsx"
 import type { ValidComponent } from "@solidjs/web"
 import { splitProps } from "../../solid2-compat"
 
@@ -7,7 +8,7 @@ import * as SeparatorPrimitive from "@kobalte/core/separator"
 import { cn } from "../../lib/utils"
 
 type SeparatorRootProps<T extends ValidComponent = "hr"> =
-  SeparatorPrimitive.SeparatorRootProps<T> & { class?: string | undefined }
+  SeparatorPrimitive.SeparatorRootProps<T> & { class?: ClassValue | undefined }
 
 const Separator = <T extends ValidComponent = "hr">(
   props: PolymorphicProps<T, SeparatorRootProps<T>>

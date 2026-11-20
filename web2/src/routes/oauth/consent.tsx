@@ -44,10 +44,12 @@ export default function OAuthConsent() {
 
 	// Repeat sign-ins where the user already granted: the server skipped consent
 	// and handed us the redirect with the code — just continue it.
-	createEffect(() => {
-		const s = consent();
-		if (s?.status === "continue") window.location.assign(s.redirectUrl);
-	});
+	createEffect(
+		() => consent(),
+		(s) => {
+			if (s?.status === "continue") window.location.assign(s.redirectUrl);
+		},
+	);
 
 	async function handleSubmit(e: Event) {
 		e.preventDefault();

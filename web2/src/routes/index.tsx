@@ -259,6 +259,6 @@ export default function Home() {
   // localStorage read must stay client-side — render-time access throws SSR.
   // The lava-glow fallback renders server-side; the video pops in after mount.
   const [heroVideo, setHeroVideo] = createSignal<string | null>(null)
-  onSettled(() => setHeroVideo(initHeroVideo()))
+  onSettled(() => { setHeroVideo(initHeroVideo()); })
   return <Site heroVideo={heroVideo()} />
 }

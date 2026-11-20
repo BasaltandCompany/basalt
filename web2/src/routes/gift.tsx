@@ -101,12 +101,15 @@ export default function GiftLanding() {
 					<form
 						onSubmit={submit}
 						class="mt-10 space-y-6"
-						noValidate={false}
-						onFocusIn={() => {
-							if (!formStarted) {
-								formStarted = true
-								window.posthog?.capture("gift_form_start")
-							}
+						novalidate={false}
+						ref={(el) => {
+							// focusin isn't in solid's event map — attach natively.
+							el.addEventListener("focusin", () => {
+								if (!formStarted) {
+									formStarted = true;
+									window.posthog?.capture("gift_form_start");
+								}
+							});
 						}}
 					>
 						{/* honeypot — hidden from humans, bots fill it and get a silent ok */}

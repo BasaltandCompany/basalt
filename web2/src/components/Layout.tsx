@@ -1,5 +1,5 @@
 import { createMemo } from "solid-js";
-import { clientOnly } from "@solidjs/start";
+import { useLocation } from "@solidjs/router";
 import { For, ParentComponent, Show, createEffect, createSignal, onSettled } from "solid-js";
 import Timer from "~/components/Timer";
 import Brand from "~/components/Brand";
@@ -48,6 +48,7 @@ const NavIcon: ParentComponent<{ d: string }> = (p) => (
 );
 
 const Layout: ParentComponent<{ user?: { id?: string; email?: string } | null }> = (props) => {
+	const loc = useLocation();
 	const dueOutreach = createMemo(() => getDueOutreachCountQuery(), { deferStream: true });
 	useLiveQueries(); // poll /api/changes → revalidate() so agent edits appear without refresh
 	// ponytail: sidebar state loads after mount — SSR always renders expanded, so
@@ -77,14 +78,14 @@ const Layout: ParentComponent<{ user?: { id?: string; email?: string } | null }>
 	}
 
 	return (
-		<div class="layout" class={{ collapsed: collapsed(), "mobile-open": mobileOpen() }}>
+		<div class={["layout", { collapsed: collapsed(), "mobile-open": mobileOpen() }]}>
 			<CommandPalette />
 			<div class="mobile-topbar">
 				<button
 					type="button"
 					class="mobile-menu"
 					aria-label={mobileOpen() ? "Close menu" : "Open menu"}
-					aria-expanded={mobileOpen()}
+					aria-expanded={mobileOpen() ? "true" : "false"}
 					onClick={() => setMobile(!mobileOpen())}
 				>
 					<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
@@ -99,7 +100,7 @@ const Layout: ParentComponent<{ user?: { id?: string; email?: string } | null }>
 					type="button"
 					class="sidebar-collapse"
 					title={collapsed() ? "Expand sidebar" : "Collapse sidebar"}
-					aria-expanded={!collapsed()}
+					aria-expanded={!collapsed() ? "true" : "false"}
 					onClick={toggleCollapsed}
 				>
 					{collapsed() ? "›" : "‹"}
@@ -112,10 +113,9 @@ const Layout: ParentComponent<{ user?: { id?: string; email?: string } | null }>
 				<nav class="sidebar-nav">
 					<For each={links}>
 						{(link) => (
-							<a 								href={link.href}
-								end={link.href === "/admin"}
-								class="nav-link"
-								activeClass="active"
+							<a
+							href={link.href}
+							class={["nav-link", { active: link.href === "/admin" ? loc.pathname === "/admin" : loc.pathname.startsWith(link.href) }]}
 							title={link.label}
 							onClick={() => setMobile(false)} // drawer closes on navigation
 							>

@@ -48,7 +48,7 @@ export default function PortalQuoteDetail() {
 										name="signer_name"
 										placeholder={`Full legal name (e.g. ${q().memberName})`}
 										required
-										minLength={3}
+										minlength={3}
 										style={{ flex: "1", "min-width": "220px" }}
 									/>
 									<Button type="submit" disabled={busy()}>{busy() ? "Signing…" : "Sign to accept"}</Button>

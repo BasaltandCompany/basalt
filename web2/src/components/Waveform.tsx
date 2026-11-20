@@ -82,17 +82,18 @@ export default function Waveform(props: WaveformProps) {
 	onCleanup(() => setPlaying(false));
 
 	// redraw on data/selection changes + keep canvas sized to its box
-	createEffect(() => {
-		props.peaks;
-		props.regions();
-		sel();
-		if (canvas) {
-			const box = canvas.parentElement!;
-			canvas.width = box.clientWidth;
-			canvas.height = H;
-		}
-		draw();
-	});
+	// Solid 2: compute tracks the inputs, effect does the imperative redraw.
+	createEffect(
+		() => [props.peaks, props.regions(), sel()] as const,
+		() => {
+			if (canvas) {
+				const box = canvas.parentElement!;
+				canvas.width = box.clientWidth;
+				canvas.height = H;
+			}
+			draw();
+		},
+	);
 
 	function pos(e: MouseEvent): number | null {
 		const cv = canvas;

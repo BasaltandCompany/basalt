@@ -1,3 +1,4 @@
+import type { ClassValue } from "clsx"
 import type { ValidComponent } from "@solidjs/web"
 import { type Component } from "solid-js";
 import { splitProps } from "../../solid2-compat"
@@ -14,7 +15,7 @@ const Tooltip: Component<TooltipPrimitive.TooltipRootProps> = (props) => {
 }
 
 type TooltipContentProps<T extends ValidComponent = "div"> =
-  TooltipPrimitive.TooltipContentProps<T> & { class?: string | undefined }
+  TooltipPrimitive.TooltipContentProps<T> & { class?: ClassValue | undefined }
 
 const TooltipContent = <T extends ValidComponent = "div">(
   props: PolymorphicProps<T, TooltipContentProps<T>>

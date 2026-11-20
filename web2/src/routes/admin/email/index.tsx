@@ -14,7 +14,7 @@ import {
 } from "~/lib/email-queries";
 import type { EmailThread, EmailMessage, EmailOutbox } from "~/db/schema";
 import { SIGNATURES } from "~/lib/email-signature";
-import { Button } from "@basaltac/ui2";
+import { Button, buttonVariants } from "@basaltac/ui2";
 
 type DraftVersionRow = { id: string; version: number; author: string; createdAt: string; updatedAt: string };
 type DraftDiffPart = { added?: boolean; removed?: boolean; value: string };
@@ -169,9 +169,12 @@ export default function AdminEmail() {
 		const row = inbox()?.drafts.find((x) => x.id === openDraft());
 		return row && prev?.id === row.id ? prev : row;
 	});
-	createEffect(() => {
-		if (openDraft() && !inbox()?.drafts.find((x) => x.id === openDraft())) setOpenDraft(null);
-	});
+	createEffect(
+		() => [openDraft(), inbox()?.drafts] as const,
+		([id, drafts]) => {
+			if (id && !drafts?.find((x) => x.id === id)) setOpenDraft(null);
+		},
+	);
 	const [openDraftHistory, setOpenDraftHistory] = createSignal<string | null>(null);
 	const [draftVersions, setDraftVersions] = createSignal<Record<string, DraftVersionRow[]>>({});
 	const [draftDiff, setDraftDiff] = createSignal<{ id: string; parts: DraftDiffPart[] | null } | null>(null);
@@ -206,11 +209,14 @@ export default function AdminEmail() {
 	// opening a draft lints its current body once (edits re-lint via editDraft).
 	// lintDraft is untracked: it reads lintStale() inside setLintStale — tracked,
 	// that self-write re-queues this effect forever (stack overflow on open).
-	createEffect(() => {
-		const id = openDraft();
-		if (!id || draftLint()[id] !== undefined) return;
-		untrack(() => lintDraft(id, editBody()[id] ?? inbox()?.drafts.find((d) => d.id === id)?.body ?? ""));
-	});
+	createEffect(
+		() => ({ id: openDraft(), lint: draftLint()[openDraft() ?? ""], body: editBody()[openDraft() ?? ""] }),
+		(v) => {
+			const id = v.id;
+			if (!id || v.lint !== undefined) return;
+			untrack(() => lintDraft(id, v.body ?? inbox()?.drafts.find((d) => d.id === id)?.body ?? ""));
+		},
+	);
 
 	// Linear/Superhuman trick: the pane paints from an in-memory thread cache
 	// and neighbors are prefetched after each move — j/k almost always hits
@@ -828,11 +834,14 @@ export default function AdminEmail() {
 		onCleanup(() => window.removeEventListener("keydown", handler));
 	});
 
-	createEffect(() => {
-		// OAuth callback lands here with ?connected=1 — strip it so a later
-		// manual ?connected doesn't retrigger
-		if (searchParams.connected) window.location.replace("/admin/email");
-	});
+	createEffect(
+		() => searchParams.connected,
+		(connected) => {
+			// OAuth callback lands here with ?connected=1 — strip it so a later
+			// manual ?connected does not retrigger
+			if (connected) window.location.replace("/admin/email");
+		},
+	);
 
 	// getInboxQuery syncs in the background (fire-and-forget) so this page must
 	// poll until the rows land — otherwise a fresh connect renders an empty inbox
@@ -858,11 +867,14 @@ export default function AdminEmail() {
 		onCleanup(() => clearInterval(timer));
 	});
 
-	createEffect(() => {
-		// j/k inside theater repaints the overlay in place — restart every
-		// thread change at the top so the read always starts at the newest
-		if (theater() && selected()) document.querySelector<HTMLElement>("[data-theater-scroll]")?.scrollTo({ top: 0 });
-	});
+	createEffect(
+		() => [theater(), selected()] as const,
+		([theaterOpen, sel]) => {
+			// j/k inside theater repaints the overlay in place — restart every
+			// thread change at the top so the read always starts at the newest
+			if (theaterOpen && sel) document.querySelector<HTMLElement>("[data-theater-scroll]")?.scrollTo({ top: 0 });
+		},
+	);
 
 	return (
 		<Layout>
@@ -877,9 +889,14 @@ export default function AdminEmail() {
 				<div style={{ flex: 1 }} />
 				<Show when={sendStatus()}><span class="muted" style={{ "font-size": "13px" }}>{sendStatus()}</span></Show>
 				<Show when={!status()} fallback={<Button variant="outline" size="sm" type="button"  onClick={() => sync()}>Sync</Button>}>
-					<Button as="a" variant="outline" size="sm" aria-busy={connecting()} href="/api/email/oauth" onClick={() => setConnecting(true)}>
-						{connecting() ? "Connecting…" : "Connect Gmail"}
-					</Button>
+				<a
+					class={buttonVariants({ variant: "outline", size: "sm" })}
+					aria-busy={connecting() ? "true" : "false"}
+					href="/api/email/oauth"
+					onClick={() => setConnecting(true)}
+				>
+					{connecting() ? "Connecting…" : "Connect Gmail"}
+				</a>
 				</Show>
 			</div>
 			<p class="page-subtitle">
@@ -1064,7 +1081,7 @@ export default function AdminEmail() {
 										transition: "background 120ms",
 									}}
 									onClick={() => loadThread(t, i())}
-									onpointerover={() => prefetch(t)}
+									onPointerOver={() => prefetch(t)}
 								>
 									<div style={{ display: "flex", gap: "10px", "align-items": "baseline" }}>
 										<Show when={isUnread(t)}><span style={{ color: "var(--foreground)" }}>●</span></Show>
@@ -1375,7 +1392,7 @@ export default function AdminEmail() {
 											{(v) => (
 												<button type="button" class="doc-history-row" onClick={() => void showDraftDiff(d.id, v.version)}>
 													<span class="doc-history-ver">v{v.version}</span>
-													<span class="doc-history-author" class={{ agent: v.author === "agent" }}>{v.author}</span>
+													<span class={["doc-history-author", { agent: v.author === "agent" }]}>{v.author}</span>
 													<span class="muted">{new Date(v.updatedAt).toLocaleString()}</span>
 												</button>
 											)}

@@ -23,9 +23,13 @@ export default function DropPage() {
 	// document.title explicitly once the resource resolves.
 	const title = () =>
 		meta() ? `${meta()!.title} — Secure upload` : "Not found — Basalt";
-	createEffect(() => {
-		document.title = title();
-	});
+	// Solid 2: compute tracks, effect writes.
+	createEffect(
+		() => title(),
+		(t) => {
+			document.title = t;
+		},
+	);
 
 	async function submit(e: SubmitEvent) {
 		e.preventDefault();

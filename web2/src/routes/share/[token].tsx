@@ -49,9 +49,13 @@ export default function SharedDoc() {
 	// Hydration never re-applies solid-meta's reactive text to the SSR'd
 	// element, so drive document.title explicitly once the resource resolves.
 	const title = () => (doc() ? `${doc()!.title} — Basalt` : "Not found — Basalt");
-	createEffect(() => {
-		document.title = title();
-	});
+	// Solid 2: compute tracks, effect writes.
+	createEffect(
+		() => title(),
+		(t) => {
+			document.title = t;
+		},
+	);
 
 	return (
 		<div class="flex min-h-screen flex-col bg-background text-foreground">

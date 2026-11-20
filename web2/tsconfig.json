@@ -2,7 +2,6 @@
 	"compilerOptions": {
 		"jsx": "preserve",
 		"jsxImportSource": "@solidjs/web",
-		"target": "ESNext",
 		"allowSyntheticDefaultImports": true,
 		"esModuleInterop": true,
 		"isolatedModules": true,
@@ -14,8 +13,10 @@
 		"types": ["vite/client", "bun", "node"],
 		"paths": {
 			"~/*": ["./src/*"],
-			"@/*": ["./src/*"]
+			"@/*": ["./src/*"],
+			"@basaltac/ui2": ["../packages/ui2/src/index.ts"],
+			"@basaltac/ui2/*": ["../packages/ui2/src/components/ui/*.tsx"]
 		}
 	},
-	"include": ["src", "vite.config.ts", "file-routes.d.ts"]
+	"include": ["src", "vite.config.ts", "file-routes.d.ts", "../packages/ui2/src"]
 }

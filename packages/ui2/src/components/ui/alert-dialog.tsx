@@ -1,3 +1,4 @@
+import type { ClassValue } from "clsx"
 import type { ValidComponent } from "@solidjs/web";
 import type { JSX } from "@solidjs/web"
 import { splitProps } from "../../solid2-compat"
@@ -14,7 +15,7 @@ const AlertDialogPortal = AlertDialogPrimitive.Portal
 
 type AlertDialogOverlayProps<T extends ValidComponent = "div"> =
   AlertDialogPrimitive.AlertDialogOverlayProps<T> & {
-    class?: string | undefined
+    class?: ClassValue | undefined
   }
 
 const AlertDialogOverlay = <T extends ValidComponent = "div">(
@@ -34,7 +35,7 @@ const AlertDialogOverlay = <T extends ValidComponent = "div">(
 
 type AlertDialogContentProps<T extends ValidComponent = "div"> =
   AlertDialogPrimitive.AlertDialogContentProps<T> & {
-    class?: string | undefined
+    class?: ClassValue | undefined
     children?: JSX.Element
   }
 
@@ -76,7 +77,7 @@ const AlertDialogContent = <T extends ValidComponent = "div">(
 
 type AlertDialogTitleProps<T extends ValidComponent = "h2"> =
   AlertDialogPrimitive.AlertDialogTitleProps<T> & {
-    class?: string | undefined
+    class?: ClassValue | undefined
   }
 
 const AlertDialogTitle = <T extends ValidComponent = "h2">(
@@ -88,7 +89,7 @@ const AlertDialogTitle = <T extends ValidComponent = "h2">(
 
 type AlertDialogDescriptionProps<T extends ValidComponent = "p"> =
   AlertDialogPrimitive.AlertDialogDescriptionProps<T> & {
-    class?: string | undefined
+    class?: ClassValue | undefined
   }
 
 const AlertDialogDescription = <T extends ValidComponent = "p">(
@@ -104,13 +105,13 @@ const AlertDialogDescription = <T extends ValidComponent = "p">(
 }
 
 // React shadcn layout parts: plain themed divs.
-const AlertDialogHeader = (props: { class?: string; children?: JSX.Element }) => (
+const AlertDialogHeader = (props: { class?: ClassValue; children?: JSX.Element }) => (
   <div class={cn("flex flex-col space-y-2 text-center sm:text-left", props.class)}>
     {props.children}
   </div>
 )
 
-const AlertDialogFooter = (props: { class?: string; children?: JSX.Element }) => (
+const AlertDialogFooter = (props: { class?: ClassValue; children?: JSX.Element }) => (
   <div
     class={cn("flex flex-col-reverse gap-2 sm:flex-row sm:justify-end", props.class)}
   >
@@ -137,7 +138,7 @@ export {
 // CloseButton wearing the matching button variant.
 type AlertDialogCloseProps<T extends ValidComponent = "button"> =
   AlertDialogPrimitive.AlertDialogCloseButtonProps<T> & {
-    class?: string | undefined
+    class?: ClassValue | undefined
     children?: JSX.Element
   }
 

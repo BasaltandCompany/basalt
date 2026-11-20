@@ -554,9 +554,8 @@ function BoardCard(props: {
 
 	return (
 		<div
-			class="board-card"
+			class={["board-card", { dragging: dragging() }]}
 			ref={cardRef}
-			class={{ dragging: dragging() }}
 			style={{ "border-color": props.overdue ? "var(--red)" : undefined }}
 			onPointerDown={onPointerDown}
 		>
@@ -810,9 +809,8 @@ function Board() {
 						<For each={columns()}>
 							{(col) => (
 								<div
-									class="board-col"
-										data-stage={col.stage}
-									class={{ "drag-over": hoverStage() === col.stage }}
+									class={["board-col", { "drag-over": hoverStage() === col.stage }]}
+									data-stage={col.stage}
 								>
 									<div class="board-col-head">
 										<span class="dot" style={{ background: STAGE_COLOR[col.stage] }} />

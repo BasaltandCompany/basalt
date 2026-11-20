@@ -1,3 +1,4 @@
+import type { ClassValue } from "clsx"
 import type { Component } from "solid-js";
 import type { ValidComponent } from "@solidjs/web"
 import { splitProps } from "../../solid2-compat"
@@ -14,7 +15,7 @@ const Popover: Component<PopoverPrimitive.PopoverRootProps> = (props) => {
 }
 
 type PopoverContentProps<T extends ValidComponent = "div"> =
-  PopoverPrimitive.PopoverContentProps<T> & { class?: string | undefined }
+  PopoverPrimitive.PopoverContentProps<T> & { class?: ClassValue | undefined }
 
 const PopoverContent = <T extends ValidComponent = "div">(
   props: PolymorphicProps<T, PopoverContentProps<T>>

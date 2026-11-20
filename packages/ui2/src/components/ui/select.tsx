@@ -1,3 +1,4 @@
+import type { ClassValue } from "clsx"
 import type { ValidComponent } from "@solidjs/web";
 import type { JSX } from "@solidjs/web"
 import { splitProps } from "../../solid2-compat"
@@ -14,7 +15,7 @@ const SelectHiddenSelect = SelectPrimitive.HiddenSelect
 
 type SelectTriggerProps<T extends ValidComponent = "button"> =
   SelectPrimitive.SelectTriggerProps<T> & {
-    class?: string | undefined
+    class?: ClassValue | undefined
     children?: JSX.Element
   }
 
@@ -50,7 +51,7 @@ const SelectTrigger = <T extends ValidComponent = "button">(
 }
 
 type SelectContentProps<T extends ValidComponent = "div"> =
-  SelectPrimitive.SelectContentProps<T> & { class?: string | undefined }
+  SelectPrimitive.SelectContentProps<T> & { class?: ClassValue | undefined }
 
 const SelectContent = <T extends ValidComponent = "div">(
   props: PolymorphicProps<T, SelectContentProps<T>>
@@ -72,7 +73,7 @@ const SelectContent = <T extends ValidComponent = "div">(
 }
 
 type SelectItemProps<T extends ValidComponent = "li"> = SelectPrimitive.SelectItemProps<T> & {
-  class?: string | undefined
+  class?: ClassValue | undefined
   children?: JSX.Element
 }
 
@@ -125,7 +126,7 @@ const labelVariants = cva(
 )
 
 type SelectLabelProps<T extends ValidComponent = "label"> = SelectPrimitive.SelectLabelProps<T> & {
-  class?: string | undefined
+  class?: ClassValue | undefined
 }
 
 const SelectLabel = <T extends ValidComponent = "label">(
@@ -137,7 +138,7 @@ const SelectLabel = <T extends ValidComponent = "label">(
 
 // Alpha de-genericized the form-control description/error types (no T param).
 type SelectDescriptionProps = SelectPrimitive.SelectDescriptionProps & {
-	class?: string | undefined
+	class?: ClassValue | undefined
 }
 
 const SelectDescription = (props: PolymorphicProps<"div", SelectDescriptionProps>) => {
@@ -151,7 +152,7 @@ const SelectDescription = (props: PolymorphicProps<"div", SelectDescriptionProps
 }
 
 type SelectErrorMessageProps = SelectPrimitive.SelectErrorMessageProps & {
-	class?: string | undefined
+	class?: ClassValue | undefined
 }
 
 const SelectErrorMessage = (props: PolymorphicProps<"div", SelectErrorMessageProps>) => {

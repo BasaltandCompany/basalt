@@ -702,12 +702,11 @@ export const DocEditor = (props: { id: string; doc: NonNullable<Awaited<ReturnTy
 								{(v) => (
 									<button
 										type="button"
-										class="doc-history-row"
-										class={{ active: sel() === v.version }}
+										class={["doc-history-row", { active: sel() === v.version }]}
 										onClick={() => void openVersion(v.version)}
 									>
 										<span class="doc-history-ver">v{v.version}</span>
-										<span class="doc-history-author" class={{ agent: v.author === "agent" }}>
+										<span class={["doc-history-author", { agent: v.author === "agent" }]}>
 											{v.author}
 										</span>
 										<span class="muted">{new Date(v.updatedAt).toLocaleString()}</span>

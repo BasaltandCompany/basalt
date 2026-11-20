@@ -276,10 +276,12 @@ export default function LexicalDocEditor(props: {
 		const onWinResize = () => scheduleLintPaint();
 		window.addEventListener("resize", onWinResize);
 		// violations prop changes repaint (rAF: let the render settle first)
-		createEffect(() => {
-			void props.violations?.length;
-			requestAnimationFrame(paintLint);
-		});
+		createEffect(
+			() => props.violations?.length,
+			() => {
+				requestAnimationFrame(paintLint);
+			},
+		);
 
 		const currentMd = () => {
 			let md = "";
@@ -295,13 +297,15 @@ export default function LexicalDocEditor(props: {
 		// seed + react to markdown prop changes; skip when the change came from
 		// our own typing (md equals what's already in the editor) so we never
 		// clobber the user's in-flight edits
-		createEffect(() => {
-			const md = props.markdown;
-			if (md === currentMd()) return;
-			ed.update(() => {
-				$convertFromMarkdownString(normalizeDocMarkdown(md), DOC_TRANSFORMERS);
-			});
-		});
+		createEffect(
+			() => ({ md: props.markdown, cur: currentMd() }),
+			(v) => {
+				if (v.md === v.cur) return;
+				ed.update(() => {
+					$convertFromMarkdownString(normalizeDocMarkdown(v.md), DOC_TRANSFORMERS);
+				});
+			},
+		);
 
 		// ── @-mention picker ─────────────────────────────────────────
 		// typing "@query" before the caret opens a registry-backed typeahead;
@@ -338,10 +342,11 @@ export default function LexicalDocEditor(props: {
 			else closePicker();
 		};
 		let pickerFetchTimer: ReturnType<typeof setTimeout> | undefined;
-		createEffect(() => {
-			const p = picker();
-			if (!p) return;
-			clearTimeout(pickerFetchTimer);
+		createEffect(
+			() => picker(),
+			(p) => {
+				if (!p) return;
+				clearTimeout(pickerFetchTimer);
 			pickerFetchTimer = setTimeout(async () => {
 				if (!p.q) return;
 				try {
@@ -357,7 +362,8 @@ export default function LexicalDocEditor(props: {
 					/* offline/search error — picker just stays empty */
 				}
 			}, 180);
-		});
+			},
+		);
 		/** insert a chip, splicing the "@query" trigger text out of its node */
 		const insertMention = (hit: ComponentSearchHit) => {
 			const p = picker();
@@ -784,8 +790,7 @@ export default function LexicalDocEditor(props: {
 			<div ref={lintOverlay} class="lint-overlay" aria-hidden="true" />
 			<div
 				ref={host}
-				class="doc-editor"
-				class={{ readonly: !!props.readOnly }}
+				class={["doc-editor", { readonly: !!props.readOnly }]}
 				onBlur={() => props.onBlur?.()}
 				// Lexical toggles contenteditable itself only on setEditable() CHANGES —
 				// the app owns the initial attribute, and a missing/false one leaves the
