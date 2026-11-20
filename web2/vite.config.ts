@@ -1,3 +1,7 @@
+// Vite's SSR module runner doesn't inherit bun's auto-.env loading; this
+// populates process.env for dev/preview. Production reads real env vars
+// and this line is a no-op when no .env file exists.
+import "dotenv/config";
 import { fileURLToPath } from "node:url";
 import { fileRoutes } from "filesystem-routing/vite";
 import solid from "@solidjs/vite-plugin";

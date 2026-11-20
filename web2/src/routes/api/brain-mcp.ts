@@ -1,0 +1,2846 @@
+import type { APIEvent } from "filesystem-routing/api";
+import { eq, and, desc, inArray, sql, ilike, lte, isNotNull } from "drizzle-orm";
+import { hashKey } from "~/lib/crypto";
+import { supabaseService } from "~/lib/supabase";
+import { db } from "~/db";
+import { apiKeys, companies, outreachProspects, OUTREACH_STAGES, campaigns, campaignCompanies, videos, funnels, funnelRuns, funnelItems, funnelStageResults, funnelSchedules } from "~/db/schema";
+import { brainQuery, entityFacts } from "~/lib/brain/search";
+import { brainJobs, docs, shortLinks, quotes, quoteItems, clientMembers, clientMemberEmails, emailMessages, emailThreads, emailAccounts } from "~/db/schema";
+import { getPersonDossier } from "~/lib/people";
+import { fetchAttachment } from "~/lib/gmail";
+import { computeQuoteTotals } from "~/lib/quotes";
+import { getProjectActuals } from "~/lib/quote-actuals";
+import { agentWrite, createDoc, getDoc, getDocVersionDiff, listDocVersions, listDocs, renameDoc, setDocAppendix } from "~/lib/docs";
+import { getVoiceLessons, hasRecentLessonReview, lintGateError, lintVoiceText, listKnownGenres, recordLessonReview, topLessonsForText } from "~/lib/voice-lint-db";
+import { docSurface, type VoiceScope } from "~/lib/voice-lint";
+import { searchWorkspace, recentActivity } from "~/lib/brain/workspace-search";
+import { randomKey, shortLinkBase, TARGET_RE } from "~/lib/short-links";
+import { maybeRunCycle } from "~/lib/brain/distill";
+import { listComponentTypes, getComponent, resolveCard, searchAll, linksFor, loadRow } from "~/registry/registry";
+import { linkComponents, listLinks, UnknownKindError } from "~/lib/entity-links";
+import { nameKey, noteRead, requireRead, sessionKey } from "~/lib/read-gate";
+import { createVideo, setProspectVideo } from "~/lib/videos";
+import { createFunnel, createFunnelRun, importRunItems, recordStageVerdict } from "~/lib/funnels";
+import { runStageBatch } from "~/lib/funnel-stages";
+import { cookieDead, scrapeCompanyPage, ScrapeFailed } from "~/lib/importyeti-scrape";
+
+
+/**
+ * MCP Server — Basalt Company Brain (internal agents)
+ *
+ * Same stateless JSON-RPC shape as /api/mcp, but scoped to the firm:
+ * admin (memberless) API keys only. Serves the generated company/client
+ * memory and search over workspace + gbrain.
+ *
+ * Endpoint: POST /api/brain-mcp
+ * Auth: Authorization: Bearer mc_<admin-key>  (memberless key)
+ */
+
+const PROTOCOL_VERSION = "2025-06-18";
+
+// ── Follow-up cadences: days from each send to the next ────────────
+// rung-1 (findings ladder): day-0 → +5d → +12d → done (deltas 5, 7)
+// rung-2 (post-Loom):       day-0 → +4d → +8d  → done (deltas 4, 4)
+// After the last step next_send_at goes null — sequence complete.
+const CADENCES: Record<string, number[]> = {
+	"rung-1": [5, 7],
+	"rung-2": [4, 4],
+};
+// board stages that kill a sequence — replied or gone
+const DEAD_STAGES = new Set(["replied", "meeting", "won", "shutdown"]);
+
+function json(body: unknown, status = 200) {
+	return new Response(JSON.stringify(body), {
+		status,
+		headers: {
+			"Content-Type": "application/json",
+			"Access-Control-Allow-Origin": "*",
+		},
+	});
+}
+
+function rpcResponse(id: string | number | null, result: unknown) {
+	return json({ jsonrpc: "2.0", id, result });
+}
+
+type ParsedQuoteItem = {
+	group: "required" | "optional";
+	name: string;
+	detail: string | null;
+	hours: number;
+	unitRate: number;
+	sortOrder: number;
+};
+
+function parseQuoteItem(raw: Record<string, unknown>, i: number): ParsedQuoteItem {
+	return {
+		group: raw.group === "optional" ? "optional" : "required",
+		name: String(raw.name ?? `Line ${i + 1}`),
+		detail: raw.detail ? String(raw.detail) : null,
+		hours: Number(raw.hours) || 0,
+		unitRate: Number(raw.rate) || 0,
+		sortOrder: i,
+	};
+}
+
+/** BCW-shaped narrative skeleton when create_quote omits markdown — Collin
+ *  (or a later update_quote) fills the sections with real prose. */
+function skeletonQuoteMarkdown(items: ParsedQuoteItem[]): string {
+	const hasOptional = items.some((i) => i.group === "optional");
+	return [
+		"## What we are building",
+		"",
+		"<one paragraph: what this engagement delivers, in the client's words>",
+		"",
+		"## Why this structure",
+		"",
+			`Fixed-price quote: ${items.filter((i) => i.group === "required").length} required lines${hasOptional ? " plus optional add-ons you can choose" : ""}. Every line purchased is verified working before it counts as delivered.`,
+		"",
+		"## What is not included",
+		"",
+		"- <exclusions>",
+		"",
+		"## What the client provides",
+		"",
+		"- <access, approvals, reviews>",
+		"",
+		"## Timeline",
+		"",
+		"<weeks per phase, milestones>",
+		"",
+		"## Payment",
+		"",
+		"<milestones, due days, late terms>",
+	].join("\n");
+}
+
+function rpcError(id: string | number | null, code: number, message: string) {
+	return json({ jsonrpc: "2.0", id, error: { code, message } });
+}
+
+async function authenticate(request: Request): Promise<boolean> {
+	const auth = request.headers.get("authorization");
+	if (!auth?.startsWith("Bearer ")) return false;
+	const rawKey = auth.slice(7);
+	if (!rawKey.startsWith("mc_")) return false;
+
+	const [keyRow] = await db
+		.select({ id: apiKeys.id, memberId: apiKeys.memberId })
+		.from(apiKeys)
+		.where(and(eq(apiKeys.keyHash, hashKey(rawKey)), sql`${apiKeys.revokedAt} IS NULL`))
+		.limit(1);
+	// brain access is internal: memberless (admin) keys only
+	return !!keyRow && keyRow.memberId === null;
+}
+
+const SURFACES = ["email", "docs", "post", "newsletter"] as const;
+
+/** scope args from a tool call — invalid surface/genre ignored, not fatal */
+function toolScope(toolArgs: Record<string, unknown>): VoiceScope | undefined {
+	const surface = SURFACES.includes(toolArgs.surface as (typeof SURFACES)[number]) ? String(toolArgs.surface) : undefined;
+	const genre = toolArgs.genre ? String(toolArgs.genre).trim().toLowerCase() : undefined;
+	return surface ? { surface, genre: genre ?? null } : undefined;
+}
+
+/** Genre vocabulary gate: agents must REUSE an existing genre or explicitly
+ *  mint a new one (confirm_new_genre=true). Without the gate, typo'd
+ *  near-duplicates ("promo" vs "marketing") fragment the voice scopes into
+ *  islands that lint nothing together. */
+async function gateGenre(
+	toolArgs: Record<string, unknown>,
+): Promise<{ error: string; known_genres: string[] } | { genre: string | null }> {
+	const raw = toolArgs.genre;
+	if (raw === undefined || raw === null || String(raw).trim() === "") return { genre: null };
+	const g = String(raw).trim().toLowerCase();
+	if (toolArgs.confirm_new_genre === true) return { genre: g };
+	const known = await listKnownGenres();
+	if (known.includes(g)) return { genre: g };
+	return {
+		error: `genre "${g}" is not in the vocabulary. REUSE a known_genre if one fits (preferred), or re-call with confirm_new_genre=true to mint "${g}" deliberately.`,
+		known_genres: known,
+	};
+}
+
+/** Lessons-for-text gate (the "auto-no"): an agent's first attempt at a write
+ *  bounces with the voice lessons ranked for exactly that text — the lessons
+ *  arrive when they matter, next to the draft, not as a pre-read blob. Sign-off
+ *  is lessons_applied=true on the resubmit. Pulling get_voice_lessons this hour
+ *  (lessons_reviewed + chat_uuid) also passes — both paths put lessons in
+ *  context before text lands. */
+async function gateLessonsForText(
+	toolArgs: Record<string, unknown>,
+	text: string,
+	scope: VoiceScope,
+): Promise<
+	| { ok: true }
+	| { ok: false; blocked: "lessons_for_text"; lessons: Awaited<ReturnType<typeof topLessonsForText>>; error: string }
+> {
+	const chatUuid = toolArgs.chat_uuid ? String(toolArgs.chat_uuid).trim() : "";
+	if (toolArgs.lessons_applied === true) return { ok: true };
+	if (toolArgs.lessons_reviewed === true && chatUuid && (await hasRecentLessonReview(chatUuid))) return { ok: true };
+	return {
+		ok: false as const,
+		blocked: "lessons_for_text" as const,
+		lessons: await topLessonsForText(text, scope),
+		error:
+			"blocked (auto-no): these are Collin's voice lessons ranked for YOUR text — apply the relevant ones, rewrite what they change, then resubmit with lessons_applied=true. Lint rejections also carry the lesson behind each violated rule.",
+	};
+}
+
+async function resolveClient(name: string) {
+	const [company] = await db
+		.select({ id: companies.id, name: companies.name })
+		.from(companies)
+		.where(
+			sql`${companies.name} ILIKE ${"%" + name + "%"} OR coalesce(${companies.aliases},'') ILIKE ${"%" + name + "%"}`,
+		)
+		.limit(1);
+	return company ?? null;
+}
+
+// OAuth apps live in Supabase Auth admin (not our Postgres) — see oauth-queries.ts.
+const OAUTH_AUTH_METHODS = ["none", "client_secret_basic", "client_secret_post"] as const;
+type OAuthAuthMethod = (typeof OAUTH_AUTH_METHODS)[number];
+
+/** redirect_uris from tool args → string[] (each must parse as a URL) or null. */
+function oauthRedirectUris(raw: unknown): string[] | null {
+	const uris = Array.isArray(raw) ? raw.map((u) => String(u).trim()).filter(Boolean) : [];
+	if (uris.length === 0) return null;
+	for (const uri of uris) {
+		try {
+			new URL(uri);
+		} catch {
+			return null;
+		}
+	}
+	return uris;
+}
+
+function oauthAuthMethod(raw: unknown): OAuthAuthMethod | null {
+	const m = String(raw ?? "none");
+	return (OAUTH_AUTH_METHODS as readonly string[]).includes(m) ? (m as OAuthAuthMethod) : null;
+}
+
+// ── Tool definitions ───────────────────────────────────────────────
+
+const TOOLS = [
+	{
+		name: "query",
+		description:
+			"CALL THIS FIRST in every session. Search the company brain: distilled entity pages, facts, conclusions, and open loops (who owes what, unanswered threads). Prefer this over re-deriving context from raw records.",
+		inputSchema: {
+			type: "object",
+			properties: { query: { type: "string" } },
+			required: ["query"],
+		},
+	},
+	{
+		name: "get_entity",
+		description:
+			"Full brain dossier for one client/company: distilled brief, durable facts, conclusions, open loops, and recent timeline. Use for any client-specific question.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				client: { type: "string", description: "Client name (fuzzy match, aliases work)" },
+			},
+			required: ["client"],
+		},
+	},
+	{
+		name: "list_open_loops",
+		description:
+			"Open commitments and unanswered threads across all clients — what is waiting on whom.",
+		inputSchema: { type: "object", properties: {} },
+	},
+	{
+		name: "run_brain_cycle",
+		description:
+			"Start a brain refresh cycle (sync entities, detect loops, extract facts, consolidate takes) in the background. Returns { id } immediately — poll get_brain_cycle with it until status is done.",
+		inputSchema: { type: "object", properties: {} },
+	},
+	{
+		name: "get_brain_cycle",
+		description:
+			"Status of a brain cycle run: pass the id from run_brain_cycle, or call with no args for the 10 most recent runs.",
+		inputSchema: {
+			type: "object",
+			properties: { id: { type: "string", description: "run id from run_brain_cycle" } },
+		},
+	},
+	{
+		name: "search_workspace",
+		description:
+			"Full-text search across synced email, documents, and projects. Use after the memory tools for recent specifics.",
+		inputSchema: {
+			type: "object",
+			properties: { query: { type: "string" } },
+			required: ["query"],
+		},
+	},
+	{
+		name: "get_recent_activity",
+		description: "What changed recently across the workspace: email/doc counts, latest emails and docs, active projects, open deliverables.",
+		inputSchema: {
+			type: "object",
+			properties: { days: { type: "number", description: "lookback window, default 14" } },
+		},
+	},
+	{
+		name: "list_clients",
+		description: "List all client companies (for resolving get_entity arguments).",
+		inputSchema: { type: "object", properties: {} },
+	},
+	// ── Outreach prospects (brain wiring) ──
+	{
+		name: "list_outreach",
+		description:
+			"List outreach prospects with their brain wiring: brain_url, activity key, and video_url. Use to check which prospect a brain belongs to, to read the current activity key before updating it, or to see which prospects have outreach videos linked.",
+		inputSchema: { type: "object", properties: {} },
+	},
+	{
+		name: "set_outreach_brain",
+		description:
+			'Create or update an outreach prospect\'s brain wiring. Matches by company (case-insensitive; creates the prospect if unknown). Set brain_url (e.g. https://<name>.madcactus.org) and brain_activity_key (the brain\'s ACTIVITY_KEY) so the dashboard can pull /activity. Set video_url to the CAP share link once the outreach video is recorded (the dashboard then serves the tracked /v/:id email link). Omit brain_activity_key / video_url to leave them unchanged. Omit stage to leave it unchanged; stages: ' + OUTREACH_STAGES.join(" → ") + ". The ICP fit fields are research facts (region, revenue_band, tech_team). ai_interest fills ONLY from observed behavior (gate fired → high; click without return → some; sequence ended silent → none) — never guess it. icpApproved is UI-only: the human approves fit. Read-before-write gate: updating an EXISTING prospect requires a prior list_outreach or get_component(kind=\"prospect\") read this session; creating a new prospect is unrestricted (chat_uuid scopes the ledger).",
+		inputSchema: {
+			type: "object",
+			properties: {
+				company: { type: "string", description: "prospect company name (matched case-insensitively)" },
+				brain_url: { type: "string" },
+				brain_activity_key: { type: "string", description: "omit to leave the existing key unchanged" },
+				video_url: { type: "string", description: "CAP share URL for the outreach video; empty string clears it" },
+				video_description: { type: "string", description: "what the video shows / why it exists; shown in the dashboard" },
+				stage: { type: "string", enum: [...OUTREACH_STAGES], description: "omit to leave unchanged" },
+				contact_name: { type: "string" },
+				email: { type: "string" },
+				notes: { type: "string" },
+				region: { type: "string", description: "ICP fit: e.g. Indiana / Midwest" },
+				revenue_band: { type: "string", description: "ICP fit: e.g. $30-70M" },
+				tech_team: { type: "string", enum: ["unknown", "none", "small", "large"] },
+				ai_interest: { type: "string", enum: ["unknown", "none", "some", "high"], description: "behavior only: gate fired → high; click no return → some; silent → none" },
+				source_note: { type: "string", description: "where the row came from + which finding elicited any response" },
+				chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" },
+			},
+			required: ["company"],
+		},
+	},
+	// ── Campaigns (email sequences) ──
+	{
+		name: "create_campaign",
+		description: "Create an outreach campaign (a named email-sequence container). Companies attach with add_campaign_company.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				name: { type: "string" },
+				description: { type: "string" },
+			},
+			required: ["name"],
+		},
+	},
+	{
+		name: "add_campaign_company",
+		description:
+			"Add or update a company in a campaign's target list. Resolves the campaign by campaign_id, or lazily creates it by campaign_name. Upserts on (campaign, company). sequence_step starts at 1; set next_send_at to when the first email should go and next_email_note to what it should say (the finding). Read-before-write gate: for an existing campaign, call list_campaigns or campaign_stats first (chat_uuid scopes the ledger); lazily-created campaigns are exempt.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				campaign_id: { type: "string" },
+				campaign_name: { type: "string", description: "resolved case-insensitively; created if unknown" },
+				company_name: { type: "string" },
+				contact_email: { type: "string" },
+				next_send_at: { type: "string", description: "ISO timestamp; empty string clears it" },
+				next_email_note: { type: "string", description: "what the next email should say — the finding for this touch" },
+				chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" },
+			},
+			required: ["company_name"],
+		},
+	},
+	{
+		name: "list_campaigns",
+		description:
+			"Campaigns with their frozen templates (subject+body per touch, on the campaign — never a doc) and their target companies (step, next_send_at, note) with each company's linked CRM board stage.",
+		inputSchema: { type: "object", properties: {} },
+	},
+	{
+		name: "set_campaign_templates",
+		description:
+			"Set a campaign's full email sequence — the frozen copy lives ON the campaign. touches: [{step, subject, body}] with {{slots}} for the per-company fill (first_name, company, watch_sentence, finding_1..3, link, owner_role). EVERY body is voice-linted (surface=email) before persisting; any avoid-violation rejects the whole call with per-touch violations — nothing is saved partially. Replaces the campaign's templates wholesale. Read-before-write gate: call list_campaigns or campaign_stats first (chat_uuid scopes the ledger).",
+		inputSchema: {
+			type: "object",
+			properties: {
+				campaign_id: { type: "string" },
+				campaign_name: { type: "string", description: "resolved case-insensitively" },
+				touches: {
+					type: "array",
+					items: {
+						type: "object",
+						properties: {
+							step: { type: "number", description: "1-based sequence position" },
+							subject: { type: "string" },
+							body: { type: "string" },
+						},
+							required: ["step", "subject", "body"],
+					},
+				},
+				chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" },
+			},
+			required: ["touches"],
+		},
+	},
+	{
+		name: "campaign_stats",
+		description:
+			"Gmail-grounded per-campaign stats: for each company — sends, first/last sent, replied, reply count, last reply snippet — plus totals (companies touched, emails sent, companies replied, reply rate) and per-touch reply counts. Replies are counted from synced inbound messages from the exact contact after the first linked send; no stage flags. Omit campaign args for all campaigns.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				campaign_id: { type: "string" },
+				campaign_name: { type: "string", description: "resolved case-insensitively" },
+			},
+		},
+	},
+	{
+		name: "get_due_follow_ups",
+		description:
+			"Campaign companies whose next_send_at is now or past — the daily send queue. Excludes companies whose board stage is replied/meeting/won/shutdown. Each row: campaign, company, contact email, step, note.",
+		inputSchema: { type: "object", properties: {} },
+	},
+	{
+		name: "mark_campaign_email_sent",
+		description:
+			'Record that this company\'s step-N email went out and schedule the next. Advances sequence_step; next_send_at = sent_at + cadence delta. cadence "rung-1" (findings ladder): day-0 → +5d → +12d, done after step 3. cadence "rung-2" (post-Loom): day-0 → +4d → +8d, done after step 3. After the last step next_send_at goes null — sequence complete (then newsletter_subscribe applies). Optionally set next_email_note for the next touch. Read-before-write gate: the row must have been read this session — list_campaigns or get_due_follow_ups (chat_uuid scopes the ledger).',
+		inputSchema: {
+			type: "object",
+			properties: {
+				id: { type: "string", description: "campaign_companies id" },
+				campaign_name: { type: "string" },
+				company_name: { type: "string" },
+				cadence: { type: "string", enum: ["rung-1", "rung-2"], description: "default rung-1" },
+				sent_at: { type: "string", description: "ISO timestamp, default now" },
+					next_email_note: { type: "string", description: "omit to leave unchanged" },
+				chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" },
+			},
+		},
+	},
+	{
+		name: "stop_campaign_company",
+		description:
+			"Kill a company's sequence: next_send_at → null, note prefixed STOPPED:<reason>. Use on reply, bounce, or gate-fired escalation. Read-before-write gate: the row must have been read this session — list_campaigns or get_due_follow_ups (chat_uuid scopes the ledger).",
+		inputSchema: {
+			type: "object",
+			properties: {
+				id: { type: "string" },
+				campaign_name: { type: "string" },
+				company_name: { type: "string" },
+				reason: { type: "string" },
+				chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" },
+			},
+		},
+	},
+	{
+		name: "newsletter_subscribe",
+		description:
+			"Add an email to The Basalt Dispatch (Resend contact, Basalt Dispatch segment) — the nurture handoff when a rung-1 sequence completes. The shutdown email discloses the add; Resend's unsubscribe is honored.",
+		inputSchema: {
+			type: "object",
+			properties: { email: { type: "string" } },
+			required: ["email"],
+		},
+	},
+	// ── Voice ──
+	{
+		name: "get_voice_lessons",
+		description:
+			"Collin's voice lessons derived from his real edits. REQUIRED before any doc write: pass chat_uuid (your session id) — doc writes (write_doc/create_doc/create_post/create_newsletter) are REJECTED unless this was called with the same chat_uuid within the last hour AND the write carries lessons_reviewed=true. Also pass surface (email|docs|post|newsletter) and genre to get the rules that apply to exactly what you're writing plus the global ones. Returns the top 10 by confidence — the write-time auto-no returns lessons ranked for your specific text instead. known_genres lists the genre vocabulary — REUSE an existing genre instead of inventing near-duplicates.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				limit: { type: "number", description: "max lessons returned, default 25" },
+				surface: { type: "string", enum: ["email", "docs", "post", "newsletter"], description: "what you are writing — scopes the lessons" },
+				genre: { type: "string", description: "freeform subtype within the surface, e.g. marketing|informational|casual — match an existing genre spelling" },
+				topic: { type: "string", enum: ["subject", "cta"], description: "fetch only subject- or CTA-learnings — REQUIRED before drafting a newsletter subject or CTA copy" },
+				chat_uuid: { type: "string", description: "Your session id — records the lessons review that doc writes gate on. Pass it every time." },
+			},
+		},
+	},
+	{
+		name: "lint_voice_text",
+		description:
+			"Check text against Collin's voice patterns BEFORE landing it via write_doc or create_email_draft. Pass surface/genre matching what the text is (post, newsletter, email, plain doc) so only the rules learned for that kind apply. Returns avoid-violations with the rule and fix example — fix them first; writes return the same lint back.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				text: { type: "string" },
+				surface: { type: "string", enum: ["email", "docs", "post", "newsletter"] },
+				genre: { type: "string" },
+			},
+			required: ["text"],
+		},
+	},
+	{
+		name: "lint_voice_check",
+		description:
+			"One-off voice check for ANY text — no doc, no write, no gates. Returns the avoid-violations (with rule + fix example) AND the top 10 voice lessons ranked for exactly this text. The loop: call this, fix what the violations and lessons flag, call again, and only use the text elsewhere once it comes back clean. Same judgment a write-time auto-no gives, available standalone. Requires surface (email|docs|post|newsletter) so the right rules apply.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				text: { type: "string" },
+				surface: { type: "string", enum: ["email", "docs", "post", "newsletter"], description: "what the text is — scopes rules and lessons" },
+				genre: { type: "string", description: "freeform subtype, match an existing genre spelling" },
+			},
+			required: ["text", "surface"],
+		},
+	},
+	// ── Docs ──
+	{
+		name: "create_doc",
+		description:
+			"Create a plain internal markdown doc (kind=null — NOT a post/newsletter; use create_post/create_newsletter for those) and return its id. doc ids are UUIDs — use this when list_docs has no fitting doc before write_doc. The body is voice-linted BEFORE creation: any avoid-violation REJECTS the call — fix the flagged text and resubmit (no override; if a rule is wrong, tell Collin to disable it). First write attempt auto-no's: the call bounces with the top voice lessons ranked for YOUR text — apply them, then resubmit with lessons_applied=true. Alternatively pass lessons_reviewed=true after get_voice_lessons with your chat_uuid (within 1h).",
+		inputSchema: {
+			type: "object",
+			properties: {
+				title: { type: "string" },
+				markdown: { type: "string", description: "Optional initial body — must pass voice lint (zero avoid-violations) or the call is rejected." },
+				genre: { type: "string", description: "Freeform subtype (marketing|informational|…) — scopes the voice rules. MUST be an existing genre from get_voice_lessons known_genres; new ones need confirm_new_genre=true." },
+				confirm_new_genre: { type: "boolean", description: "Set true only when no existing genre fits — mints this genre into the vocabulary." },
+				lessons_applied: { type: "boolean", description: "true = you read the lessons returned by the auto-no (or get_voice_lessons) and this text applies them. Required on resubmit." },
+lessons_reviewed: { type: "boolean", description: "true = you called get_voice_lessons with this chat_uuid, read the lessons, and this text follows them. Required." },
+				chat_uuid: { type: "string", description: "Your session id — must match the chat_uuid used for get_voice_lessons." },
+			},
+			required: ["title", "lessons_reviewed", "chat_uuid"],
+		},
+	},
+	{
+		name: "create_post",
+		description:
+			"Create a LinkedIn post draft (kind=post). Read get_voice_lessons with surface=post and your chat_uuid first. HARD GATES: the call is REJECTED if the body has any avoid-violation (fix and resubmit — no override). First write attempt auto-no's: the call bounces with the top voice lessons ranked for YOUR text — apply them, then resubmit with lessons_applied=true. Collin previews, edits, and schedules it in the dashboard; you never schedule or publish. Drafts only.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				title: { type: "string", description: "Internal title — the post body is the markdown." },
+				markdown: { type: "string", description: "Post body — plain markdown, no headings; it renders as LinkedIn text. Must pass voice lint (zero avoid-violations)." },
+				genre: { type: "string", description: "Freeform subtype, e.g. marketing|casual|story — MUST reuse an existing genre from get_voice_lessons known_genres; new ones need confirm_new_genre=true." },
+				confirm_new_genre: { type: "boolean", description: "Set true only when no existing genre fits — mints this genre into the vocabulary." },
+				lessons_applied: { type: "boolean", description: "true = you read the lessons returned by the auto-no (or get_voice_lessons) and this text applies them. Required on resubmit." },
+lessons_reviewed: { type: "boolean", description: "true = you called get_voice_lessons with this chat_uuid, read the lessons, and this text follows them. Required." },
+				chat_uuid: { type: "string", description: "Your session id — must match the chat_uuid used for get_voice_lessons." },
+			},
+			required: ["title", "markdown", "lessons_reviewed", "chat_uuid"],
+		},
+	},
+	{
+		name: "create_newsletter",
+		description:
+			"Create a Basalt Dispatch newsletter issue draft (kind=newsletter). The doc title IS the email subject — set a real subject as the title (or refine it after with set_newsletter_subject). Read get_voice_lessons with surface=newsletter and your chat_uuid first — fetch topic=subject AND topic=cta lessons too (subject and CTA have their own learnings). HARD GATES: the call is REJECTED if the body has any avoid-violation (fix and resubmit — no override). First write attempt auto-no's: the call bounces with the top voice lessons ranked for YOUR text — apply them, then resubmit with lessons_applied=true. Channel CTA copy goes through set_channel_appendix (never in the body markdown). Collin previews (email + web), edits, and schedules it; you never send. Drafts only.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				title: { type: "string", description: "The email subject / issue headline — doubles as the subject line" },
+				markdown: { type: "string", description: "Issue body prose — no Subject: line, no CTA block (use set_channel_appendix). Must pass voice lint (zero avoid-violations)." },
+				genre: { type: "string", description: "Freeform subtype, e.g. marketing|informational — MUST reuse an existing genre from get_voice_lessons known_genres; new ones need confirm_new_genre=true." },
+				confirm_new_genre: { type: "boolean", description: "Set true only when no existing genre fits — mints this genre into the vocabulary." },
+				lessons_applied: { type: "boolean", description: "true = you read the lessons returned by the auto-no (or get_voice_lessons) and this text applies them. Required on resubmit." },
+lessons_reviewed: { type: "boolean", description: "true = you called get_voice_lessons with this chat_uuid, read the lessons, and this text follows them. Required." },
+				chat_uuid: { type: "string", description: "Your session id — must match the chat_uuid used for get_voice_lessons." },
+			},
+			required: ["title", "markdown", "lessons_reviewed", "chat_uuid"],
+		},
+	},
+	{
+		name: "set_newsletter_subject",
+		description:
+			'Set the subject line of a newsletter issue (kind=newsletter). The doc title IS the subject — this renames the doc, and the same text becomes the email subject and the web headline. Never put the subject in the body markdown. Runs Collin\'s voice lint on the subject and returns warnings (advisory — the subject lands regardless); fix flagged wording before or after, Collin reviews in the dashboard. Read-before-write gate: call get_doc(doc_id) first (chat_uuid scopes the ledger).',
+		inputSchema: {
+			type: "object",
+			properties: {
+				doc_id: { type: "string" },
+				subject: { type: "string", description: "The email subject line / issue title" },
+				chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" },
+			},
+			required: ["doc_id", "subject"],
+		},
+	},
+	{
+		name: "set_channel_appendix",
+		description:
+			'Set the AFTER-THE-BODY copy (CTA block) of a newsletter issue for one channel — channel: "email" or "web". This is the ONLY place channel-specific copy goes; never write channel CTAs into the body markdown. New issues already carry the default /brain CTA here — overwrite it only when Collin asks for different copy. Runs Collin\'s voice lint (surface=newsletter) and returns warnings (advisory — the copy lands regardless). Read-before-write gate: call get_doc(doc_id) first (chat_uuid scopes the ledger).',
+		inputSchema: {
+			type: "object",
+			properties: {
+				doc_id: { type: "string" },
+				channel: { type: "string", enum: ["email", "web"] },
+				content: { type: "string", description: "markdown rendered after the issue body" },
+				chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" },
+			},
+			required: ["doc_id", "channel", "content"],
+		},
+	},
+	{
+		name: "list_docs",
+		description:
+			"List markdown docs (id, title, kind, genre, status, version, updatedAt). status=draft means an agent write awaits human review. Pass kind=post|newsletter|docs (docs = plain) to filter.",
+		inputSchema: {
+			type: "object",
+			properties: { kind: { type: "string", enum: ["post", "newsletter", "docs"] } },
+		},
+	},
+	{
+		name: "get_doc",
+		description:
+			"Get a doc's current markdown. (Collin's voice rules are NOT docs anymore — they live in the brain: query/get_entity surfaces lessons derived from his real edits.)",
+		inputSchema: {
+			type: "object",
+			properties: { doc_id: { type: "string" } },
+			required: ["doc_id"],
+		},
+	},
+	{
+		name: "write_doc",
+		description:
+			"Write into a markdown doc as an attributed agent edit. mode: append (default) adds a section; replace rewrites the body. HARD GATES: the write is REJECTED (nothing lands) if the text has any avoid-violation — fix and resubmit; no override exists, if a rule is wrong tell Collin to disable it — First write attempt auto-no's: the call bounces with the top voice lessons ranked for YOUR text — apply them, then resubmit with lessons_applied=true. On success the write lands as an agent version and re-opens the doc for human review (status=draft). Pass genre to tag/retag the doc (marketing|informational|casual…) so its edits teach and lint under the right scope — reuse an existing genre from get_voice_lessons known_genres. Read-before-write gate: call get_doc(doc_id) first (chat_uuid scopes the ledger).",
+		inputSchema: {
+			type: "object",
+			properties: {
+				doc_id: { type: "string" },
+				content: { type: "string", description: "Must pass voice lint (zero avoid-violations scoped to the doc's kind+genre) or the write is rejected." },
+				chat_uuid: { type: "string", description: "Your session id — must match the chat_uuid used for get_voice_lessons." },
+				lessons_applied: { type: "boolean", description: "true = you read the lessons returned by the auto-no (or get_voice_lessons) and this text applies them. Required on resubmit." },
+lessons_reviewed: { type: "boolean", description: "true = you called get_voice_lessons with this chat_uuid, read the lessons, and this text follows them. Required." },
+				mode: { type: "string", enum: ["append", "replace"] },
+				genre: { type: "string", description: "Tag/retag the doc — scopes which voice rules lint it and which lessons its edits teach. MUST reuse an existing genre; new ones need confirm_new_genre=true." },
+				confirm_new_genre: { type: "boolean", description: "Set true only when no existing genre fits — mints this genre into the vocabulary." },
+			},
+			required: ["doc_id", "content", "lessons_reviewed", "chat_uuid"],
+		},
+	},
+	{
+		name: "list_doc_versions",
+		description:
+			"Version history of a doc (version number, author agent|human, timestamps) — how humans edited what agents wrote.",
+		inputSchema: {
+			type: "object",
+			properties: { doc_id: { type: "string" } },
+			required: ["doc_id"],
+		},
+	},
+	{
+		name: "get_doc_diff",
+		description:
+			"Word-level diff of one doc version vs the previous — exactly what the human changed in an agent write. Returns {parts:[{value, added?, removed?}]}.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				doc_id: { type: "string" },
+				version: { type: "number", description: "version number from list_doc_versions" },
+			},
+			required: ["doc_id", "version"],
+		},
+	},
+	// ── Short links ──
+	{
+		name: "create_short_link",
+		description:
+			"Create a tracked short link /l/<slug> that 302s to target and counts every human click (bots/prefetchers are filtered) — click-through tracking for social posts, lead magnets, etc. Put UTM params in target; the shared link stays clean. The slug is a generated unguessable key (never chosen) — call list_short_links first to see existing links, or to report CTR per link/post. Pass doc_id when the link ships inside a specific post/newsletter — that ties clicks to the doc for conversion attribution. Returns the ready-to-share url.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				target: { type: "string", description: "Destination URL, must start with http(s):// — UTM params go here" },
+				doc_id: { type: "string", description: "Optional: docs.id of the post/newsletter this link ships in — attaches the link for per-doc click attribution" },
+			},
+			required: ["target"],
+		},
+	},
+	{
+		name: "list_short_links",
+		description:
+			"All short links with click counts (human clicks only) and the attached post/newsletter when set, most-clicked first. Read before create_short_link to check for an existing slug, or to report CTR per link/post.",
+		inputSchema: { type: "object", properties: {} },
+	},
+	// ── Email ──
+	{
+		name: "list_emails",
+		description:
+			"List recent inbox threads (or search with q using Gmail search syntax like 'from:eric newer_than:30d'). Read before writing cold emails or follow-ups.",
+		inputSchema: {
+			type: "object",
+			properties: { q: { type: "string" }, limit: { type: "number" } },
+		},
+	},
+	{
+		name: "get_email",
+		description: "Read a full thread (all messages, plain text bodies).",
+		inputSchema: {
+			type: "object",
+			properties: { thread_id: { type: "string", description: "emailThreads row id from list_emails" } },
+			required: ["thread_id"],
+		},
+	},
+	{
+		name: "create_email_draft",
+		description:
+			"Create an email for Collin to review in the dashboard Drafts tab. Read get_voice_lessons FIRST and pre-check with lint_voice_text (surface=email). HARD GATE: any avoid-violation REJECTS the call before anything is saved — fix the flagged text and resubmit; nothing lands until it's clean. First write attempt auto-no's: the call bounces with the top voice lessons ranked for YOUR text — apply them, then resubmit with lessons_applied=true. To revise a draft you already created, pass its draft_id (same fields) instead of creating a new one. NEVER hand-write a sign-off (Thanks,/Best,/— Collin) at the end of the body — the footer/signature is appended at send time from the signature field, and a hand-written one lands doubled above it; end the body on your last content line. The human sends by default; pass send_at (ISO) to schedule auto-send via the outbox ticker — the voice gate applies either way. Pass chat_uuid = your session id for provenance. Attachments: pass absolute server-local file paths; each caps at 20MB, total at ~24MB (Gmail's send limit). Read-before-write gate: revising via draft_id requires a prior get_component(kind=\"email-draft\", id) read — it returns the full draft (complete body) — new drafts are unrestricted (chat_uuid scopes the ledger).",
+		inputSchema: {
+			type: "object",
+			properties: {
+				to: { type: "string" },
+				cc: { type: "string", description: "comma-separated Cc addresses" },
+				bcc: { type: "string", description: "comma-separated Bcc addresses" },
+				subject: { type: "string" },
+				body: { type: "string" },
+				draft_id: { type: "string", description: "outbox id from a previous create_email_draft — updates that draft in place instead of creating a new one" },
+				lessons_applied: { type: "boolean", description: "true = you read the lessons returned by the auto-no (or get_voice_lessons) and this text applies them. Required on resubmit." },
+chat_uuid: { type: "string" },
+				thread_id: { type: "string", description: "set for replies" },
+				send_at: { type: "string", description: "ISO timestamp — schedules the draft for auto-send via the outbox ticker; omit for a plain draft" },
+				campaign_company_id: { type: "string", description: "campaign_companies id — links this send to its campaign company for Gmail-grounded stats (list_campaigns has ids)" },
+				campaign_step: { type: "number", description: "which touch of the campaign sequence this email is (1-based)" },
+				signature: { type: "string", enum: ["full", "plain", "none"], description: "outbound footer: full (branded), plain (just 'Collin'), none. Omit = auto: campaign drafts get plain, everything else full" },
+				attachments: { type: "array", items: { type: "string" }, description: "absolute server-local file paths to attach (works on create AND draft_id revisions; ≤20MB each, ≤24MB total)" },
+			},
+			required: ["to", "subject", "body"],
+		},
+	},
+	// ── Components (registry-driven generic tools) ──
+	{
+		name: "list_component_types",
+		description:
+		"THE MAP OF THE BUSINESS. Every first-class component (company, contact, project, doc, email-thread, email-draft, campaign, prospect, video, meeting, short-link, invoice, deliverable, quote) with a teaching description of what it IS. Call this before hand-rolling any tool or query — components are addressable as {kind, id} everywhere: get_component, search_components, link_components, @[kind:id] mentions in docs.",
+		inputSchema: { type: "object", properties: {} },
+	},
+	{
+		name: "get_component",
+		description:
+			"Card + row + links for one component (kind, id from list_component_types/search_components). Links include BOTH directions of entity_links AND declared FK ownership (project→company, video→prospect, …) — backlinks are complete without any agent effort.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				kind: { type: "string", description: "component kind — list_component_types" },
+				id: { type: "string", description: "row id (uuid, or slug for short-link)" },
+			},
+			required: ["kind", "id"],
+		},
+	},
+	{
+		name: "get_person",
+		description:
+			"Everything about one person: all their email addresses, recent email to/from any of them (with attachment names), their companies, projects, quotes, invoices, deliverables, outreach lifecycle stage, meetings, docs that mention them, and the brain dossier (facts, open loops, timeline). Resolve by id or fuzzy name/email. Use this for any 'what do we know about Eric' question — do NOT hand-roll per-table queries.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				name: { type: "string", description: "person name or an email address — fuzzy over contact names, exact over addresses" },
+				id: { type: "string", description: "contact uuid (from search_components/get_component)" },
+			},
+		},
+	},
+	{
+		name: "get_email_attachment",
+		description:
+			"Fetch an email attachment's BYTES on demand — sync stores metadata only (nothing on disk), so this is the one path to the content. Pass message_id + attachment_id from get_person recent_email or get_component('contact'). Returns base64 content + filename/size/type. Use it when you actually need the file (a signed PDF, a spreadsheet).",
+		inputSchema: {
+			type: "object",
+			properties: {
+				message_id: { type: "string", description: "email_messages.id (uuid)" },
+				attachment_id: { type: "string", description: "Gmail attachmentId from the message's attachments metadata" },
+			},
+			required: ["message_id", "attachment_id"],
+		},
+	},
+	{
+		name: "search_components",
+		description:
+			"Search every registered component at once (titles, subtitles, searchable columns). Returns kind+id+title hits — feed ids into get_component. workspace-search stays for raw brain retrieval; this is the component-level finder.",
+		inputSchema: {
+			type: "object",
+			properties: { q: { type: "string" } },
+			required: ["q"],
+		},
+	},
+	{
+		name: "link_components",
+		description:
+			"Cross-reference two components (from → to). Ownership NEVER goes here — real FKs own rows; this records references/mentions (e.g. video relates-to prospect, doc mentions company). Idempotent. Read-before-write gate: get_component on BOTH endpoints first — search_components and list_links hits also register (chat_uuid scopes the ledger).",
+		inputSchema: {
+			type: "object",
+			properties: {
+				from_kind: { type: "string" },
+				from_id: { type: "string" },
+				to_kind: { type: "string" },
+				to_id: { type: "string" },
+				link_type: { type: "string", description: "default 'references'" },
+				context: { type: "string", description: "why this link exists" },
+				chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" },
+			},
+			required: ["from_kind", "from_id", "to_kind", "to_id"],
+		},
+	},
+	{
+		name: "list_links",
+		description: "All links for one component with resolved cards — entity_links both directions plus declared FK owners/children.",
+		inputSchema: {
+			type: "object",
+			properties: { kind: { type: "string" }, id: { type: "string" } },
+			required: ["kind", "id"],
+		},
+	},
+	{
+		name: "create_video",
+		description:
+			"Record an outreach video (CAP share link or mp4 URL) as a first-class video component. Pass prospect (company name, fuzzy — created if unknown) to own it; the tracked email link is /v/<video-id>. Watch telemetry lands on the video row automatically.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				url: { type: "string", description: "CAP share URL or direct .mp4 URL" },
+				title: { type: "string", description: "what the video is; defaults to 'Outreach video — <company>'" },
+				description: { type: "string", description: "what it shows / why it exists" },
+				prospect: { type: "string", description: "prospect company name (matched case-insensitively; created if unknown)" },
+				prospect_id: { type: "string", description: "outreach_prospects id, alternative to prospect" },
+			},
+			required: ["url"],
+		},
+	},
+	{
+		name: "create_quote",
+		description:
+			"Create a fixed-price QUOTE DRAFT (the BCW Forms quote is the canonical shape). items[] are priced line items split required/optional — per-group subtotals render as 'Base subtotal' and 'Everything-in total', and detail is the rich per-line prose (what it covers). markdown is the narrative body (what we are building / guarantee / exclusions / client provides / timeline / payment) stored as a docs row and voice-linted like create_doc: the first attempt auto-no's with lessons ranked for YOUR text, resubmit with lessons_applied=true. Companies must already exist (never auto-creates a client on a financial doc). DRAFTS ONLY: you cannot send/accept/reject — Collin sends from the dashboard, the client signs in the portal. Returns quote id, doc id, computed totals.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				company: { type: "string", description: "company name, matched case-insensitively against existing clients" },
+				company_id: { type: "string", description: "companies id, alternative to company" },
+				project_id: { type: "string", description: "projects id — links the quote so project_actuals variance shows" },
+				title: { type: "string" },
+				items: {
+					type: "array",
+					minItems: 1,
+					items: {
+						type: "object",
+						properties: {
+							name: { type: "string", description: "the Part label / workstream" },
+							detail: { type: "string", description: "what this line covers — the rich prose the client reads" },
+							hours: { type: "number", description: "estimated hours (price = hours × rate)" },
+							rate: { type: "number", description: "hourly rate for this line" },
+							group: { type: "string", enum: ["required", "optional"], description: "default required" },
+						},
+						required: ["name"],
+					},
+				},
+				markdown: { type: "string", description: "narrative body markdown; a BCW-shaped skeleton is generated if omitted" },
+				valid_days: { type: "number", description: "default 30 — 'Quote valid: N days' header line" },
+				quoted_cap_hours: { type: "number", description: "optional hour cap (CDL-style)" },
+				genre: { type: "string", description: "voice scope for the body; default 'quote'" },
+				chat_uuid: { type: "string", description: "your session id — required for the voice gates" },
+				lessons_applied: { type: "boolean" },
+				lessons_reviewed: { type: "boolean" },
+			},
+			required: ["title", "items", "chat_uuid"],
+		},
+	},
+	{
+		name: "update_quote",
+		description:
+			"Revise a DRAFT quote: replace title and/or items and/or markdown (markdown goes through the same voice gates as write_doc, mode=replace). Rejected once sent/accepted/rejected — quotes are immutable via MCP after send; Collin edits sent quotes in the dashboard. Returns the recomputed totals.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				quote_id: { type: "string" },
+				title: { type: "string" },
+				items: { type: "array", minItems: 1, description: "REPLACES all line items (same shape as create_quote items)" },
+				markdown: { type: "string", description: "REPLACES the narrative body" },
+				genre: { type: "string" },
+				chat_uuid: { type: "string", description: "your session id — required for the voice gates" },
+				lessons_applied: { type: "boolean" },
+				lessons_reviewed: { type: "boolean" },
+			},
+			required: ["quote_id", "chat_uuid"],
+		},
+	},
+	{
+		name: "list_quotes",
+		description:
+			"Quotes with computed totals, newest first. status=accepted gives the signed contracts — the calibration set for estimating new work. status=sent are awaiting client signature.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				status: { type: "string", enum: ["draft", "sent", "accepted", "rejected"] },
+				company_id: { type: "string" },
+				limit: { type: "number", description: "default 50, max 100" },
+			},
+		},
+	},
+	{
+		name: "project_actuals",
+		description:
+			"THE ESTIMATING LOOP for one project: hours logged (total/billable), labor cost (billable × project rate), invoiced (total + by status), the linked quote (required/optional subtotals, everything-in total, quoted hours, cap), and variance (labor cost − quote total; hours vs cap). Call it on similar past projects BEFORE drafting a quote, and after finishing work to see how the estimate held up.",
+		inputSchema: {
+			type: "object",
+			properties: { project_id: { type: "string" } },
+			required: ["project_id"],
+		},
+	},
+	// ── Funnels (read-only stage aggregates + verdict-filtered worklists) ──
+	{
+		name: "funnel_stats",
+		description:
+			"Per-stage pass/fail/unreached counts for one funnel run (defaults to the latest run). THE drop-off table: where ICP companies die between pull and promotion. Pair with list_funnel_items to pull the survivors or fails at any stage.",
+		inputSchema: {
+			type: "object",
+			properties: { run_id: { type: "string", description: "funnel_runs id; omit for the latest run" } },
+		},
+	},
+	{
+		name: "list_funnel_items",
+		description:
+			"Funnel items for one run, filtered by stage verdict — e.g. stage=ai_signal&verdict=fail for the fail pile, verdict=unreached for what hasn't been scored yet. Returns each item's full verdict list with notes. Paginated (limit ≤ 100).",
+		inputSchema: {
+			type: "object",
+			properties: {
+				run_id: { type: "string", description: "funnel_runs id; omit for the latest run" },
+				stage: { type: "string", description: "stage key (funnel_stats has them)" },
+				verdict: { type: "string", enum: ["pass", "fail", "unreached"], description: "unreached = no verdict row for that stage yet" },
+				q: { type: "string", description: "case-insensitive company substring" },
+				limit: { type: "number", description: "default 50, max 100" },
+				offset: { type: "number" },
+			},
+		},
+	},
+	// ── Funnels (write: build and run a funnel without raw REST) ──
+	{
+		name: "create_funnel",
+		description:
+			"Create a funnel (idempotent on name) whose stages clone the ungated freight skeleton (hq_state, ai_signal, headcount, revenue_band, tech_team, ops_trigger, owner_led — all soft, nothing drops a company; an ai_signal pass is the only promotion gate, and ops_trigger + owner_led form the trigger path that promotes an ai_signal fail). Optional extra_stages: [{key, label, gate, method?, position?}] splices custom soft stages in (default after hq_state; method defaults to source) — e.g. the Importers ICP's customs_evidence. Then create_funnel_run → add_funnel_items → run_funnel_stage.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				name: { type: "string", description: "unique funnel name, e.g. 'Legal ICP'" },
+				description: { type: "string" },
+				extra_stages: {
+					type: "array",
+					description: "custom soft stages: {key, label, gate, method (source|api|agent|human, default source), position (insert after this skeleton stage key, default hq_state)}",
+					items: {
+						type: "object",
+						properties: {
+							key: { type: "string" },
+							label: { type: "string" },
+							gate: { type: "string" },
+							method: { type: "string", enum: ["source", "api", "agent", "human"] },
+							position: { type: "string" },
+						},
+						required: ["key", "label", "gate"],
+					},
+				},
+			},
+			required: ["name"],
+		},
+	},
+	{
+		name: "create_funnel_run",
+		description:
+			"Open a run for a funnel (by funnel_name, case-insensitive, or funnel_id). source defaults to 'paste'. Returns the run id that add_funnel_items / run_funnel_stage / funnel_stats consume.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				funnel_name: { type: "string" },
+				funnel_id: { type: "string" },
+				source: { type: "string", enum: ["importyeti", "fmcsa", "paste", "mixed"], description: "default 'paste'" },
+				note: { type: "string", description: "where the pull came from, e.g. 'Best Lawyers pull 2026-10'" },
+			},
+		},
+	},
+	{
+		name: "scrape_funnel_company",
+		description:
+			"Deep-scrape one funnel company's ImportYeti page (free — replaces the 1-credit-per-record API endpoint): suppliers, monthly shipment volumes, recent bills of lading, addresses, and manifest-confidentiality periods, merged into the item's rawData as `scrape`. Runs at gate-fire/promotion only, one company per call (5s pacer, ~5s each). Needs IMPORTYETI_COOKIE set and alive. The slug defaults to the slugified company name — pass slug when that misses (check importyeti.com/company/<slug> by hand). Read-before-write gate: list_funnel_items first (chat_uuid scopes the ledger).",
+		inputSchema: {
+			type: "object",
+			properties: {
+				item_id: { type: "string", description: "funnel item id (list_funnel_items)" },
+				slug: { type: "string", description: "ImportYeti company slug (/company/<slug>); default: slugified company name" },
+				chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" },
+			},
+			required: ["item_id"],
+		},
+	},
+	{
+		name: "add_funnel_items",
+		description:
+			"Import companies into an open run (≤100 per call, deduped per run, already-promoted companies skipped). A state field auto-writes the hq_state verdict. Re-pulls are safe. Read-before-write gate: funnel_stats or list_funnel_items on this run first (chat_uuid scopes the ledger).",
+		inputSchema: {
+			type: "object",
+			properties: {
+				run_id: { type: "string" },
+				items: {
+					type: "array",
+					items: {
+						type: "object",
+						properties: {
+							companyName: { type: "string" },
+							city: { type: "string" },
+							state: { type: "string" },
+							sourceUrl: { type: "string" },
+							sourceKind: { type: "string" },
+							rawData: { type: "object", description: "free-form evidence kept on the item" },
+						},
+						required: ["companyName"],
+					},
+				},
+			},
+			required: ["run_id", "items"],
+		},
+	},
+	{
+		name: "run_funnel_stage",
+		description:
+			"Batch-run an api-method stage (ai_signal, headcount, revenue_band, tech_team, ops_trigger) for queued items through its Prospeo driver — CREDITS. Nothing gates: the queue is simply items without this stage's verdict yet. ai_signal runs the paid enrich + roster first (its cache answers the other stages free). limit bounds the batch; re-calls resume where it stopped. agent-method stages (owner_led) are yours: judge then record_funnel_verdict. Read-before-write gate: funnel_stats or list_funnel_items on this run first (chat_uuid scopes the ledger).",
+		inputSchema: {
+			type: "object",
+			properties: {
+				run_id: { type: "string" },
+				stage: { type: "string", description: "stage key (funnel_stats has them)" },
+				limit: { type: "number", description: "default 50, max 500" },
+				chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" },
+			},
+			required: ["run_id", "stage"],
+		},
+	},
+	{
+		name: "list_funnel_schedules",
+		description:
+			"Every funnel with its automation schedule — enabled is the running switch the scheduler obeys (discovery pulls + daily paid enrichment). Call before/after set_funnel_schedule to see what's running.",
+		inputSchema: { type: "object", properties: {} },
+	},
+	{
+		name: "set_funnel_schedule",
+		description:
+			"Enable or disable a funnel's automation schedule — this IS the running switch for scheduled discovery + paid enrichment (Prospeo credits). Pass funnel_name (case-insensitive) or funnel_id, plus enabled true|false. Disabling stops future scheduler ticks; a batch already in flight finishes. Read-before-write gate: list_funnel_schedules first (chat_uuid scopes the ledger).",
+		inputSchema: {
+			type: "object",
+			properties: {
+				funnel_name: { type: "string" },
+				funnel_id: { type: "string" },
+				enabled: { type: "boolean", description: "true = running, false = stopped" },
+				chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" },
+			},
+			required: ["enabled"],
+		},
+	},
+	{
+		name: "record_funnel_verdict",
+		description:
+			"Record one stage verdict (pass|fail) for a funnel item — the same upsert + promotion path as the REST endpoint. agent/human stages land here; also overrides any auto verdict. Promotion fires when every non-soft stage passes. Read-before-write gate: list_funnel_items first (chat_uuid scopes the ledger).",
+		inputSchema: {
+			type: "object",
+			properties: {
+				item_id: { type: "string" },
+				stage: { type: "string" },
+				verdict: { type: "string", enum: ["pass", "fail"] },
+				note: { type: "string", description: "evidence summary, e.g. 'tier1: 2 employees post AI work'" },
+				evidence_url: { type: "string" },
+				method: { type: "string", enum: ["source", "api", "agent", "human"], description: "default 'human'" },
+				chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" },
+			},
+			required: ["item_id", "stage", "verdict"],
+		},
+	},
+	{
+		name: "list_oauth_apps",
+		description:
+			"List every OAuth client app registered with Supabase Auth (name, client_id, redirect_uris, auth_method). Call first before update_oauth_app — read-before-write gate — and to look up client_ids.",
+		inputSchema: {
+			type: "object",
+			properties: { chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" } },
+		},
+	},
+	{
+		name: "create_oauth_app",
+		description:
+			"Register a new OAuth client app (Supabase Auth): name + redirect_uris (string[]) required; auth_method one of none|client_secret_basic|client_secret_post (default none = public/PKCE). client_secret is returned ONCE in the result — store it immediately.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				name: { type: "string" },
+				redirect_uris: { type: "array", items: { type: "string" }, description: "exact redirect URIs; web = https, mobile apps may use custom schemes" },
+				auth_method: { type: "string", enum: ["none", "client_secret_basic", "client_secret_post"] },
+				chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" },
+			},
+			required: ["name", "redirect_uris"],
+		},
+	},
+	{
+		name: "update_oauth_app",
+		description:
+			"Update an OAuth client: rename it, replace redirect_uris (WHOLE-LIST replace — pass the complete new list, anything omitted is dropped), or change auth_method. Pass client_id + only the fields changing. Read-before-write gate: list_oauth_apps first.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				client_id: { type: "string" },
+				name: { type: "string" },
+				redirect_uris: { type: "array", items: { type: "string" }, description: "complete replacement list" },
+				auth_method: { type: "string", enum: ["none", "client_secret_basic", "client_secret_post"] },
+				chat_uuid: { type: "string", description: "your session id — scopes the read-before-write ledger" },
+			},
+			required: ["client_id"],
+		},
+	},
+
+] as const;
+
+
+/** Resolve a campaign row by id, or case-insensitive name. */
+async function resolveCampaign(
+	toolArgs: Record<string, unknown>,
+): Promise<{ id: string; name: string } | { error: string }> {
+	if (toolArgs.campaign_id) {
+		const [row] = await db
+			.select({ id: campaigns.id, name: campaigns.name })
+			.from(campaigns)
+			.where(eq(campaigns.id, String(toolArgs.campaign_id)))
+			.limit(1);
+		return row ?? { error: "campaign not found — check campaign_id (list_campaigns has ids)" };
+	}
+	if (toolArgs.campaign_name) {
+		const [row] = await db
+			.select({ id: campaigns.id, name: campaigns.name })
+			.from(campaigns)
+			.where(ilike(campaigns.name, String(toolArgs.campaign_name)))
+			.limit(1);
+		return row ?? { error: `campaign "${String(toolArgs.campaign_name)}" not found` };
+	}
+	return { error: "pass campaign_id or campaign_name" };
+}
+
+/** Resolve a campaign_companies row by id, or campaign name + company name. */
+async function resolveCampaignCompany(
+	toolArgs: Record<string, unknown>,
+): Promise<{ id: string; sequenceStep: number } | { error: string }> {
+	if (toolArgs.id) {
+		const [row] = await db
+			.select({ id: campaignCompanies.id, sequenceStep: campaignCompanies.sequenceStep })
+			.from(campaignCompanies)
+			.where(eq(campaignCompanies.id, String(toolArgs.id)))
+			.limit(1);
+		return row ?? { error: "campaign company not found — check id" };
+	}
+	if (toolArgs.campaign_name && toolArgs.company_name) {
+		const [camp] = await db
+			.select({ id: campaigns.id })
+			.from(campaigns)
+			.where(ilike(campaigns.name, String(toolArgs.campaign_name)))
+			.limit(1);
+		if (!camp) return { error: `campaign "${String(toolArgs.campaign_name)}" not found` };
+		const [row] = await db
+			.select({ id: campaignCompanies.id, sequenceStep: campaignCompanies.sequenceStep })
+			.from(campaignCompanies)
+			.where(and(eq(campaignCompanies.campaignId, camp.id), ilike(campaignCompanies.companyName, String(toolArgs.company_name))))
+			.limit(1);
+		return row ?? { error: "campaign company not found — check campaign_name + company_name" };
+	}
+	return { error: "pass id, or campaign_name + company_name" };
+}
+
+// ── HTTP handler ───────────────────────────────────────────────────
+
+export async function POST(event: APIEvent) {
+	if (!(await authenticate(event.request))) {
+		return json(
+			{ jsonrpc: "2.0", id: null, error: { code: -32001, message: "Unauthorized — admin (memberless) API key required" } },
+			401,
+		);
+	}
+
+	let body: { jsonrpc?: string; id?: string | number; method?: string; params?: any };
+	try {
+		body = await event.request.json();
+	} catch {
+		return json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } }, 400);
+	}
+
+	const id = body.id ?? null;
+
+	switch (body.method) {
+		case "initialize":
+			return rpcResponse(id, {
+				protocolVersion: PROTOCOL_VERSION,
+				capabilities: { tools: { listChanged: false } },
+				serverInfo: { name: "madcactus-brain", version: "1.0.0" },
+				instructions:
+					"Quotes are DRAFT-ONLY via MCP: create_quote/update_quote make drafts; Collin sends from the dashboard and clients sign in the portal. Before drafting any quote, call project_actuals on similar past projects to calibrate (hours vs what was quoted). If any tool here fails, misleads you, or could work better in any way, leave feedback via the feedback MCP server (Collin reads every entry) instead of silently working around it.",
+			});
+
+		case "notifications/initialized":
+			return new Response(null, { status: 202 });
+
+		case "tools/list":
+			return rpcResponse(id, { tools: TOOLS });
+
+		case "tools/call": {
+			const toolName = body.params?.name;
+					const toolArgs = body.params?.arguments ?? {};
+					const readSession = sessionKey(toolArgs.chat_uuid);
+			try {
+				let result: unknown;
+				switch (toolName) {
+					case "query":
+						await maybeRunCycle();
+						result = await brainQuery(String(toolArgs.query ?? ""));
+						break;
+					case "get_entity": {
+						await maybeRunCycle();
+						const company = await resolveClient(String(toolArgs.client ?? ""));
+						if (!company) {
+							result = { error: `no client matching "${toolArgs.client}" — call list_clients` };
+							break;
+						}
+						const slug = company.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+						const { brainPages, brainTakes } = await import("~/db/schema");
+						const [page] = await db.select().from(brainPages).where(eq(brainPages.slug, slug)).limit(1);
+						const facts = await entityFacts(slug);
+						const takes = page
+							? await db.select({ claim: brainTakes.claim, weight: brainTakes.weight }).from(brainTakes).where(eq(brainTakes.pageId, page.id))
+							: [];
+						result = {
+							entity: company.name,
+							slug,
+							brief: page?.compiledTruth ?? null,
+							takes,
+							facts: facts.map((f) => ({ fact: f.fact, kind: f.kind, notability: f.notability, confidence: f.confidence })),
+							hint: "Use query for full-text brain search, search_workspace for raw records.",
+						};
+						break;
+					}
+					case "list_open_loops": {
+						const { brainOpenLoops } = await import("~/db/schema");
+						result = await db
+							.select()
+							.from(brainOpenLoops)
+							.where(eq(brainOpenLoops.status, "open"))
+							.orderBy(desc(brainOpenLoops.openedAt))
+							.limit(50);
+						break;
+					}
+					case "run_brain_cycle": {
+						const { startCycle } = await import("~/lib/brain/cycle-runner");
+						result = await startCycle({ slack: true });
+						break;
+					}
+					case "get_brain_cycle": {
+						const cid = toolArgs.id ? String(toolArgs.id) : null;
+						const runs = cid
+							? await db.select().from(brainJobs).where(eq(brainJobs.id, cid)).limit(1)
+							: await db.select().from(brainJobs).where(eq(brainJobs.phase, "cycle")).orderBy(desc(brainJobs.createdAt)).limit(10);
+						result = runs.map((r) => ({ id: r.id, status: r.status, result: r.status === "done" ? r.payload : null, error: r.error, startedAt: r.createdAt }));
+						break;
+					}
+					case "search_workspace":
+						result = await searchWorkspace(String(toolArgs.query ?? ""));
+						break;
+					case "get_recent_activity":
+						result = await recentActivity(Number(toolArgs.days) || 14);
+						break;
+					case "list_clients": {
+						const rows = await db
+							.select({ id: companies.id, name: companies.name, aliases: companies.aliases })
+							.from(companies)
+							.orderBy(companies.name);
+						result = { clients: rows };
+						break;
+					}
+					case "list_outreach": {
+						const rows = await db
+							.select({
+								id: outreachProspects.id,
+								company: outreachProspects.company,
+								stage: outreachProspects.stage,
+								contactName: outreachProspects.contactName,
+								email: outreachProspects.email,
+								brainUrl: outreachProspects.brainUrl,
+								brainActivityKey: outreachProspects.brainActivityKey,
+							})
+							.from(outreachProspects)
+							.orderBy(outreachProspects.company);
+						noteRead(readSession, rows.flatMap((p) => [`prospect:${p.id}`, nameKey("prospect", p.company)]));
+						// videos own the link now — latest video per prospect rides along
+						const vids = await db.select().from(videos).orderBy(desc(videos.createdAt));
+						const latestVideo = new Map<string, (typeof vids)[number]>();
+						for (const v of vids) if (v.prospectId && !latestVideo.has(v.prospectId)) latestVideo.set(v.prospectId, v);
+						result = rows.map((p) => {
+							const v = latestVideo.get(p.id);
+							return {
+								...p,
+								videoId: v?.id ?? null,
+								videoUrl: v?.url ?? null,
+								videoDescription: v?.description ?? null,
+								videoStatus: v?.status ?? null,
+							};
+						});
+						break;
+					}
+					case "set_outreach_brain": {
+						const company = String(toolArgs.company ?? "").trim();
+						if (!company) {
+							result = { error: "company is required" };
+							break;
+						}
+						const brainUrl = String(toolArgs.brain_url ?? "").trim() || null;
+						const activityKey = String(toolArgs.brain_activity_key ?? "").trim();
+						const videoUrl = toolArgs.video_url !== undefined ? String(toolArgs.video_url).trim() || null : null;
+						const videoDescription =
+							toolArgs.video_description !== undefined ? String(toolArgs.video_description).trim() || null : null;
+						let stage: string | null = null;
+						if (toolArgs.stage !== undefined) {
+							stage = String(toolArgs.stage);
+							if (!(OUTREACH_STAGES as readonly string[]).includes(stage)) {
+								result = { error: `unknown stage "${stage}" — valid: ${OUTREACH_STAGES.join(", ")}` };
+								break;
+							}
+						}
+						const [existing] = await db
+							.select({ id: outreachProspects.id })
+							.from(outreachProspects)
+							.where(ilike(outreachProspects.company, company))
+							.limit(1);
+						if (existing) {
+							const rg = requireRead(readSession, [nameKey("prospect", company), `prospect:${existing.id}`], 'call list_outreach, or get_component(kind="prospect")');
+							if (!rg.ok) {
+								result = rg;
+								break;
+							}
+							await db
+								.update(outreachProspects)
+								.set({
+									...(brainUrl !== null ? { brainUrl } : {}),
+									...(activityKey ? { brainActivityKey: activityKey } : {}),
+									...(stage ? { stage } : {}),
+									...(toolArgs.contact_name ? { contactName: String(toolArgs.contact_name) } : {}),
+									...(toolArgs.email ? { email: String(toolArgs.email) } : {}),
+									...(toolArgs.notes ? { notes: String(toolArgs.notes) } : {}),
+									...(toolArgs.region !== undefined ? { region: String(toolArgs.region) } : {}),
+									...(toolArgs.revenue_band !== undefined ? { revenueBand: String(toolArgs.revenue_band) } : {}),
+									...(toolArgs.tech_team !== undefined ? { techTeam: String(toolArgs.tech_team) } : {}),
+									...(toolArgs.ai_interest !== undefined ? { aiInterest: String(toolArgs.ai_interest) } : {}),
+									...(toolArgs.source_note !== undefined ? { sourceNote: String(toolArgs.source_note) } : {}),
+								})
+								.where(eq(outreachProspects.id, existing.id));
+							result = { id: existing.id, company, updated: true };
+						} else {
+							const [created] = await db
+								.insert(outreachProspects)
+								.values({
+									company,
+									brainUrl,
+									brainActivityKey: activityKey || null,
+									...(stage ? { stage } : {}),
+									contactName: toolArgs.contact_name ? String(toolArgs.contact_name) : null,
+									email: toolArgs.email ? String(toolArgs.email) : null,
+									notes: toolArgs.notes ? String(toolArgs.notes) : null,
+									...(toolArgs.region !== undefined ? { region: String(toolArgs.region) } : {}),
+									...(toolArgs.revenue_band !== undefined ? { revenueBand: String(toolArgs.revenue_band) } : {}),
+									...(toolArgs.tech_team !== undefined ? { techTeam: String(toolArgs.tech_team) } : {}),
+									...(toolArgs.ai_interest !== undefined ? { aiInterest: String(toolArgs.ai_interest) } : {}),
+									...(toolArgs.source_note !== undefined ? { sourceNote: String(toolArgs.source_note) } : {}),
+								})
+								.returning({ id: outreachProspects.id });
+							if (videoUrl) {
+								await setProspectVideo(created.id, {
+									url: videoUrl,
+									...(videoDescription !== null ? { description: videoDescription } : {}),
+								});
+							}
+							noteRead(readSession, [`prospect:${created.id}`, nameKey("prospect", company)]);
+							result = { id: created.id, company, created: true };
+						}
+						break;
+					}
+					case "create_campaign": {
+						const name = String(toolArgs.name ?? "").trim();
+						if (!name) {
+							result = { error: "name is required" };
+							break;
+						}
+						const [row] = await db
+							.insert(campaigns)
+							.values({ name, description: toolArgs.description ? String(toolArgs.description) : null })
+							.returning({ id: campaigns.id, name: campaigns.name });
+						noteRead(readSession, `campaign:${row.id}`);
+						result = row;
+						break;
+					}
+					case "add_campaign_company": {
+						const companyName = String(toolArgs.company_name ?? "").trim();
+						if (!companyName) {
+							result = { error: "company_name is required" };
+							break;
+						}
+						let campaignId = toolArgs.campaign_id ? String(toolArgs.campaign_id) : null;
+						let campaignCreatedHere = false;
+						if (!campaignId && toolArgs.campaign_name) {
+							const cname = String(toolArgs.campaign_name).trim();
+							const [existing] = await db.select({ id: campaigns.id }).from(campaigns).where(ilike(campaigns.name, cname)).limit(1);
+							if (existing) {
+								campaignId = existing.id;
+							} else {
+								const [createdCamp] = await db.insert(campaigns).values({ name: cname }).returning({ id: campaigns.id });
+								campaignId = createdCamp.id;
+								campaignCreatedHere = true;
+								noteRead(readSession, `campaign:${campaignId}`); // session created it
+							}
+						}
+						if (!campaignId) {
+							result = { error: "campaign_id or campaign_name is required" };
+							break;
+						}
+						if (!campaignCreatedHere) {
+							const rg = requireRead(readSession, `campaign:${campaignId}`, "call list_campaigns or campaign_stats first");
+							if (!rg.ok) {
+								result = rg;
+								break;
+							}
+						}
+						const nextSendAt = toolArgs.next_send_at !== undefined ? new Date(String(toolArgs.next_send_at)) : undefined;
+						if (nextSendAt && Number.isNaN(nextSendAt.getTime())) {
+							result = { error: "invalid next_send_at" };
+							break;
+						}
+						const [row] = await db
+							.insert(campaignCompanies)
+							.values({
+								campaignId,
+								companyName,
+								contactEmail: toolArgs.contact_email !== undefined ? String(toolArgs.contact_email) || null : null,
+								sequenceStep: 1,
+								nextSendAt: nextSendAt ?? null,
+								nextEmailNote: toolArgs.next_email_note !== undefined ? String(toolArgs.next_email_note) : null,
+							})
+							.onConflictDoUpdate({
+								target: [campaignCompanies.campaignId, campaignCompanies.companyName],
+								set: {
+									...(toolArgs.contact_email !== undefined ? { contactEmail: String(toolArgs.contact_email) || null } : {}),
+								...(nextSendAt !== undefined ? { nextSendAt: nextSendAt ?? null } : {}),
+								...(toolArgs.next_email_note !== undefined ? { nextEmailNote: String(toolArgs.next_email_note) } : {}),
+								},
+							})
+							.returning({ id: campaignCompanies.id, sequenceStep: campaignCompanies.sequenceStep, nextSendAt: campaignCompanies.nextSendAt });
+						result = row;
+						break;
+					}
+					case "list_campaigns": {
+						const campRows = await db.select().from(campaigns).orderBy(campaigns.createdAt);
+						const compRows = await db.select().from(campaignCompanies).orderBy(campaignCompanies.companyName);
+						noteRead(readSession, [...campRows.map((c) => `campaign:${c.id}`), ...compRows.map((x) => `campaign_company:${x.id}`)]);
+						const prospectRows = await db.select({ company: outreachProspects.company, stage: outreachProspects.stage }).from(outreachProspects);
+						const stageByCompany = new Map(prospectRows.map((p) => [p.company.toLowerCase(), p.stage] as const));
+						result = {
+							campaigns: campRows.map((c) => ({
+								...c,
+								companies: compRows
+									.filter((x) => x.campaignId === c.id)
+									.map((x) => ({ ...x, prospectStage: stageByCompany.get(x.companyName.toLowerCase()) ?? null })),
+							})),
+						};
+						break;
+					}
+					case "set_campaign_templates": {
+						const camp = await resolveCampaign(toolArgs);
+						if ("error" in camp) {
+							result = camp;
+							break;
+						}
+						const rg = requireRead(readSession, `campaign:${camp.id}`, "call list_campaigns or campaign_stats first");
+						if (!rg.ok) {
+							result = rg;
+							break;
+						}
+						const rawTouches = Array.isArray(toolArgs.touches) ? toolArgs.touches : [];
+						const touches: { step: number; subject: string; body: string }[] = [];
+						for (const t of rawTouches) {
+							const step = Number((t as Record<string, unknown>).step);
+							const subject = String((t as Record<string, unknown>).subject ?? "").trim();
+							const body = String((t as Record<string, unknown>).body ?? "");
+							if (!Number.isInteger(step) || step < 1) {
+								result = { error: `touch ${touches.length + 1}: step must be a positive integer` };
+								break;
+							}
+							if (!subject || !body.trim()) {
+								result = { error: `touch ${step}: subject and body are required` };
+								break;
+							}
+							touches.push({ step, subject, body });
+					}
+						if (result) break;
+						// voice-lint every body BEFORE persisting: any violation rejects the
+						// whole call — no partial template state
+						const violations: { step: number; violations: Awaited<ReturnType<typeof lintVoiceText>>["violations"] }[] = [];
+						for (const t of touches) {
+							const lint = await lintVoiceText(t.body, { surface: "email" });
+							if (lint.avoidCount > 0) violations.push({ step: t.step, violations: lint.violations });
+						}
+						if (violations.length > 0) {
+							result = { error: `write REJECTED: ${violations.length} touch(es) have avoid-violations. Rewrite the flagged text and resubmit.`, violations };
+							break;
+						}
+						const [updated] = await db
+							.update(campaigns)
+							.set({ templates: touches })
+							.where(eq(campaigns.id, camp.id))
+							.returning({ id: campaigns.id, name: campaigns.name });
+						result = { ...updated, touches: touches.length, saved: true };
+						break;
+					}
+					case "campaign_stats": {
+						let campaignId: string | undefined;
+						if (toolArgs.campaign_id || toolArgs.campaign_name) {
+							const camp = await resolveCampaign(toolArgs);
+							if ("error" in camp) {
+								result = camp;
+								break;
+							}
+							campaignId = camp.id;
+						}
+						const { campaignStats } = await import("~/lib/campaign-stats");
+						const stats = await campaignStats(campaignId);
+						for (const c of stats) {
+							noteRead(readSession, [`campaign:${c.id}`, ...c.companies.map((x) => `campaign_company:${x.id}`)]);
+						}
+						result = { campaigns: stats };
+						break;
+					}
+					case "get_due_follow_ups": {
+						const rows = await db
+							.select({
+								id: campaignCompanies.id,
+								campaignId: campaignCompanies.campaignId,
+								companyName: campaignCompanies.companyName,
+								contactEmail: campaignCompanies.contactEmail,
+								sequenceStep: campaignCompanies.sequenceStep,
+								nextSendAt: campaignCompanies.nextSendAt,
+								nextEmailNote: campaignCompanies.nextEmailNote,
+								prospectStage: outreachProspects.stage,
+							})
+							.from(campaignCompanies)
+							.leftJoin(outreachProspects, ilike(outreachProspects.company, campaignCompanies.companyName))
+							.where(and(isNotNull(campaignCompanies.nextSendAt), lte(campaignCompanies.nextSendAt, new Date())))
+							.orderBy(campaignCompanies.nextSendAt);
+						const due = rows.filter((r) => !r.prospectStage || !DEAD_STAGES.has(r.prospectStage));
+						noteRead(readSession, due.flatMap((r) => [`campaign_company:${r.id}`, `campaign:${r.campaignId}`]));
+						result = { due };
+						break;
+					}
+					case "mark_campaign_email_sent": {
+						const cadence = CADENCES[String(toolArgs.cadence ?? "rung-1")] ?? CADENCES["rung-1"];
+						const sentAt = toolArgs.sent_at ? new Date(String(toolArgs.sent_at)) : new Date();
+						if (Number.isNaN(sentAt.getTime())) {
+							result = { error: "invalid sent_at" };
+							break;
+						}
+						const row = await resolveCampaignCompany(toolArgs);
+						if ("error" in row) {
+							result = row;
+							break;
+						}
+						const rg = requireRead(readSession, `campaign_company:${row.id}`, "call list_campaigns or get_due_follow_ups first");
+						if (!rg.ok) {
+							result = rg;
+							break;
+						}
+						const deltaDays = cadence[row.sequenceStep - 1]; // step just sent is 1-based
+						const nextSendAt = deltaDays === undefined ? null : new Date(sentAt.getTime() + deltaDays * 86_400_000);
+						const [updated] = await db
+							.update(campaignCompanies)
+							.set({
+								sequenceStep: row.sequenceStep + 1,
+								nextSendAt,
+								...(toolArgs.next_email_note !== undefined ? { nextEmailNote: String(toolArgs.next_email_note) } : {}),
+							})
+							.where(eq(campaignCompanies.id, row.id))
+							.returning({ id: campaignCompanies.id, sequenceStep: campaignCompanies.sequenceStep, nextSendAt: campaignCompanies.nextSendAt });
+						result = { ...updated, sequenceDone: nextSendAt === null };
+						break;
+					}
+					case "stop_campaign_company": {
+						const reason = String(toolArgs.reason ?? "stopped").trim();
+						const row = await resolveCampaignCompany(toolArgs);
+						if ("error" in row) {
+							result = row;
+							break;
+						}
+						const rg = requireRead(readSession, `campaign_company:${row.id}`, "call list_campaigns or get_due_follow_ups first");
+						if (!rg.ok) {
+							result = rg;
+							break;
+						}
+						const [updated] = await db
+							.update(campaignCompanies)
+							.set({ nextSendAt: null, nextEmailNote: `STOPPED: ${reason}` })
+							.where(eq(campaignCompanies.id, row.id))
+							.returning({ id: campaignCompanies.id, nextSendAt: campaignCompanies.nextSendAt, note: campaignCompanies.nextEmailNote });
+						result = updated;
+						break;
+					}
+					case "newsletter_subscribe": {
+						const email = String(toolArgs.email ?? "").trim().toLowerCase();
+						if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+							result = { error: "valid email required" };
+							break;
+						}
+						const key = process.env.RESEND_API_KEY;
+						if (!key) {
+							result = { error: "RESEND_API_KEY not configured" };
+							break;
+						}
+						const { Resend } = await import("resend");
+						const resend = new Resend(key);
+						const segmentId = process.env.RESEND_SEGMENT_ID;
+						const { error } = await resend.contacts.create({
+								email,
+								unsubscribed: false,
+								...(segmentId ? { segments: [{ id: segmentId }] } : {}),
+							});
+						if (error) {
+								result = { error: `resend contacts.create failed: ${error.message}` };
+							break;
+						}
+						result = { ok: true, email, note: "added to the Basalt Dispatch segment — Resend unsubscribe is honored" };
+						break;
+					}
+				case "get_voice_lessons": {
+					const scope = toolScope(toolArgs);
+					const topic = toolArgs.topic === "subject" || toolArgs.topic === "cta" ? toolArgs.topic : undefined;
+					// the lessons gate marker: a doc write from this chat is only accepted
+					// within 1h of this call (and with lessons_reviewed=true on the write)
+					if (toolArgs.chat_uuid) await recordLessonReview(String(toolArgs.chat_uuid));
+					result = {
+						lessons: await getVoiceLessons(toolArgs.limit ? Number(toolArgs.limit) : undefined, scope, topic),
+						known_genres: await listKnownGenres(),
+					};
+					break;
+				}
+				case "lint_voice_text": {
+					const scope = toolScope(toolArgs);
+					result = await lintVoiceText(String(toolArgs.text ?? ""), scope);
+					break;
+				}
+				case "lint_voice_check": {
+					const scope = toolScope(toolArgs);
+					if (!scope) {
+						result = { error: "surface is required (email|docs|post|newsletter) — rules and lessons are scoped per surface." };
+						break;
+					}
+					const text = String(toolArgs.text ?? "");
+					result = {
+						lint: await lintVoiceText(text, scope),
+						top_lessons: (await topLessonsForText(text, scope)).slice(0, 10),
+						known_genres: await listKnownGenres(),
+					};
+					break;
+				}
+				case "create_doc": {
+					const gate = await gateGenre(toolArgs);
+					if ("error" in gate) {
+						result = gate;
+						break;
+					}
+					const docMarkdown = toolArgs.markdown ? String(toolArgs.markdown) : "";
+					const lessons = await gateLessonsForText(toolArgs, docMarkdown, { surface: "docs", genre: gate.genre ?? null });
+					if (!lessons.ok) {
+						result = lessons;
+						break;
+					}
+					const docLint = await lintVoiceText(docMarkdown, { surface: "docs", genre: gate.genre ?? null });
+					if (docLint.avoidCount > 0) {
+						result = lintGateError(docLint);
+						break;
+					}
+					const d = await createDoc(String(toolArgs.title ?? "Untitled"), docMarkdown, {
+						author: "agent",
+						chatUuid: toolArgs.chat_uuid ? String(toolArgs.chat_uuid) : undefined,
+						genre: gate.genre,
+					});
+					noteRead(readSession, `doc:${d.id}`);
+					result = { id: d.id, title: d.title, version: d.version, kind: null, genre: d.genre, lint: docLint };
+					break;
+				}
+				case "create_post":
+				case "create_newsletter": {
+					const gate = await gateGenre(toolArgs);
+					if ("error" in gate) {
+						result = gate;
+						break;
+					}
+					const kind = toolName === "create_post" ? ("post" as const) : ("newsletter" as const);
+					const markdown = String(toolArgs.markdown ?? "");
+					const lessons = await gateLessonsForText(toolArgs, markdown, { surface: kind, genre: gate.genre ?? null });
+					if (!lessons.ok) {
+						result = lessons;
+						break;
+					}
+					// hard gate: reject BEFORE the doc exists — no advisory landing
+					const lint = await lintVoiceText(markdown, { surface: kind, genre: gate.genre ?? null });
+					if (lint.avoidCount > 0) {
+						result = lintGateError(lint);
+						break;
+					}
+					const d = await createDoc(String(toolArgs.title ?? "Untitled"), markdown, {
+						author: "agent",
+						kind,
+						genre: gate.genre,
+						chatUuid: toolArgs.chat_uuid ? String(toolArgs.chat_uuid) : undefined,
+					});
+					noteRead(readSession, `doc:${d.id}`);
+					result = { id: d.id, title: d.title, kind, genre: d.genre, version: d.version, status: d.status, lint };
+					break;
+				}
+				case "list_docs": {
+					const kind = toolArgs.kind === "post" || toolArgs.kind === "newsletter" ? toolArgs.kind : null;
+					result = (await listDocs())
+						.filter((d) => (toolArgs.kind === "docs" ? d.kind === null : kind ? d.kind === kind : true))
+						.map((d) => ({
+							id: d.id,
+							title: d.title,
+							kind: d.kind,
+							genre: d.genre,
+							status: d.status,
+							version: d.version,
+							updatedAt: d.updatedAt,
+						}));
+					break;
+				}
+					case "get_doc": {
+						const d = await getDoc(String(toolArgs.doc_id ?? ""));
+						if (d) noteRead(readSession, `doc:${d.id}`);
+						result = d
+							? { id: d.id, title: d.title, status: d.status, markdown: d.markdown, version: d.version }
+							: { error: "not found" };
+						break;
+					}
+					case "write_doc": {
+						const rg = requireRead(readSession, `doc:${String(toolArgs.doc_id ?? "")}`, 'call get_doc(doc_id) — or get_component(kind="doc")');
+						if (!rg.ok) {
+							result = rg;
+							break;
+						}
+						const gate = await gateGenre(toolArgs);
+						if ("error" in gate) {
+							result = gate;
+							break;
+						}
+						const content = String(toolArgs.content ?? "");
+						const [targetDoc] = await db
+							.select({ kind: docs.kind, genre: docs.genre })
+							.from(docs)
+							.where(eq(docs.id, String(toolArgs.doc_id ?? "")))
+							.limit(1);
+						const lessons = await gateLessonsForText(toolArgs, content, {
+							surface: targetDoc ? docSurface(targetDoc.kind) : "docs",
+							genre: gate.genre ?? targetDoc?.genre ?? null,
+						});
+						if (!lessons.ok) {
+							result = lessons;
+							break;
+						}
+						// agentWrite runs the hard lint gate itself: lint before save,
+						// rejected writes leave the doc untouched
+						result = await agentWrite({
+							docId: String(toolArgs.doc_id ?? ""),
+							content: String(toolArgs.content ?? ""),
+							chatUuid: String(toolArgs.chat_uuid ?? ""),
+							mode: toolArgs.mode === "replace" ? "replace" : "append",
+							genre: gate.genre ?? undefined,
+						});
+					}
+						break;
+					case "set_newsletter_subject": {
+						const d = await getDoc(String(toolArgs.doc_id ?? ""));
+						if (!d) {
+							result = { error: "not found" };
+							break;
+						}
+						{
+							const rg = requireRead(readSession, `doc:${d.id}`, "call get_doc(doc_id) first");
+							if (!rg.ok) {
+								result = rg;
+								break;
+							}
+						}
+						if (d.kind !== "newsletter") {
+							result = { error: `doc ${d.id} is not a newsletter (kind=${d.kind}) — the subject only exists for issues` };
+							break;
+						}
+						const subject = String(toolArgs.subject ?? "").trim();
+						if (!subject) {
+							result = { error: "subject is required" };
+							break;
+						}
+						// the title IS the subject — rename is the whole write. Subject lint
+						// is advisory: a subject is a fragment, not body prose, so warnings
+						// never block the rename.
+						const warnings = (await lintVoiceText(subject, { surface: "newsletter" })).violations;
+						await renameDoc(d.id, subject);
+						result = { id: d.id, subject, lint_warnings: warnings };
+						break;
+					}
+					case "set_channel_appendix": {
+						const d = await getDoc(String(toolArgs.doc_id ?? ""));
+						if (!d) {
+							result = { error: "not found" };
+							break;
+						}
+						{
+							const rg = requireRead(readSession, `doc:${d.id}`, "call get_doc(doc_id) first");
+							if (!rg.ok) {
+								result = rg;
+								break;
+							}
+						}
+						if (d.kind !== "newsletter") {
+							result = { error: `doc ${d.id} is not a newsletter (kind=${d.kind}) — channel appendix only exists for issues` };
+							break;
+						}
+						const channel = toolArgs.channel === "email" || toolArgs.channel === "web" ? toolArgs.channel : null;
+						if (!channel) {
+							result = { error: 'channel must be "email" or "web"' };
+							break;
+						}
+						const content = String(toolArgs.content ?? "");
+						// advisory lint — channel copy lands either way, Collin reviews
+						const warnings = content.trim()
+							? (await lintVoiceText(content, { surface: "newsletter" })).violations
+							: [];
+						await setDocAppendix(d.id, channel, content);
+						result = { id: d.id, channel, lint_warnings: warnings };
+						break;
+					}
+					case "list_doc_versions":
+						result = { versions: await listDocVersions(String(toolArgs.doc_id ?? "")) };
+						break;
+					case "get_doc_diff": {
+						const diff = await getDocVersionDiff(String(toolArgs.doc_id ?? ""), Number(toolArgs.version));
+						result = diff === null ? { error: "version not found" } : diff;
+						break;
+					}
+					case "list_emails": {
+						const { getPrimaryAccount, listInbox } = await import("~/lib/gmail");
+						const account = await getPrimaryAccount();
+						result = account
+							? (await listInbox(account, { q: toolArgs.q ? String(toolArgs.q) : undefined })).slice(0, toolArgs.limit ? Number(toolArgs.limit) : 25)
+							: { error: "no Gmail account connected" };
+						break;
+					}
+					case "get_email": {
+						const { getPrimaryAccount, threadWithMessages } = await import("~/lib/gmail");
+						const account = await getPrimaryAccount();
+						result = account
+							? await threadWithMessages(account, String(toolArgs.thread_id ?? ""))
+							: { error: "no Gmail account connected" };
+						break;
+					}
+					case "create_email_draft": {
+						// hard gate BEFORE insert: a lint-failing draft never lands, so retries
+						// can't pile up duplicate outbox rows (the 3-drafts bug). Revisions of
+						// an already-landed draft go through draft_id instead of a new row.
+						const { createEmailDraft, updateEmailDraft } = await import("~/lib/email-outbox");
+						const draftBody = String(toolArgs.body ?? "");
+						// send_at: schedule the landed draft for auto-send via the outbox ticker
+						const scheduleDraftResult = async (outboxId: string) => {
+							const when = new Date(String(toolArgs.send_at));
+							if (Number.isNaN(when.getTime())) {
+								result = { ...(result as object), scheduled: false, error: "invalid send_at — draft left unscheduled" };
+								return;
+							}
+							const { scheduleOutboxDraft } = await import("~/lib/email-outbox");
+							const sched = await scheduleOutboxDraft(outboxId, when);
+							result = sched.ok
+								? { ...(result as object), scheduled: true, sendAt: sched.sendAt }
+								: { ...(result as object), scheduled: false, scheduleError: "error" in sched ? sched.error : "voice_lint blocked" };
+						};
+						const lessons = await gateLessonsForText(toolArgs, draftBody, { surface: "email", genre: null });
+						if (!lessons.ok) {
+							result = lessons;
+							break;
+						}
+						const draftLint = await lintVoiceText(draftBody, { surface: "email" });
+						if (draftLint.avoidCount > 0) {
+							result = lintGateError(draftLint);
+							break;
+						}
+						// campaign linkage: validate the target row exists, then carry both
+						// fields onto the outbox row — every campaign send becomes a real
+						// outbox row joined to its campaign company
+						let campaignCompanyId: string | undefined;
+						let campaignStep: number | undefined;
+						if (toolArgs.campaign_company_id) {
+							campaignCompanyId = String(toolArgs.campaign_company_id);
+							const [cc] = await db
+								.select({ id: campaignCompanies.id })
+								.from(campaignCompanies)
+								.where(eq(campaignCompanies.id, campaignCompanyId))
+								.limit(1);
+							if (!cc) {
+								result = { error: "campaign_company_id not found — get ids from list_campaigns" };
+								break;
+							}
+							if (toolArgs.campaign_step !== undefined) {
+								campaignStep = Number(toolArgs.campaign_step);
+								if (!Number.isInteger(campaignStep) || campaignStep < 1) {
+									result = { error: "campaign_step must be a positive integer" };
+									break;
+								}
+							}
+						}
+						// tolerate a single string or an array of paths
+						const attPaths = Array.isArray(toolArgs.attachments)
+							? toolArgs.attachments.map(String)
+							: toolArgs.attachments
+								? [String(toolArgs.attachments)]
+								: undefined;
+						if (toolArgs.draft_id) {
+							const rg = requireRead(readSession, `email-draft:${String(toolArgs.draft_id)}`, 'call get_component(kind="email-draft", id=draft_id) first — or just create a new draft');
+							if (!rg.ok) {
+								result = rg;
+								break;
+							}
+							const upd = await updateEmailDraft({
+								outboxId: String(toolArgs.draft_id),
+								to: String(toolArgs.to ?? ""),
+								cc: toolArgs.cc ? String(toolArgs.cc) : undefined,
+								bcc: toolArgs.bcc ? String(toolArgs.bcc) : undefined,
+								subject: String(toolArgs.subject ?? ""),
+								body: draftBody,
+								...(campaignCompanyId ? { campaignCompanyId, campaignStep } : {}),
+								...(attPaths ? { attachments: attPaths } : {}),
+								...(toolArgs.signature ? { signature: toolArgs.signature as "full" | "plain" | "none" } : {}),
+							});
+							result = upd;
+							if (!(upd && typeof upd === "object" && "outboxId" in upd)) break;
+							if (toolArgs.send_at) await scheduleDraftResult(String(upd.outboxId));
+							break;
+						}
+						const created = await createEmailDraft({
+							to: String(toolArgs.to ?? ""),
+							cc: toolArgs.cc ? String(toolArgs.cc) : undefined,
+							bcc: toolArgs.bcc ? String(toolArgs.bcc) : undefined,
+							subject: String(toolArgs.subject ?? ""),
+							body: draftBody,
+							chatUuid: String(toolArgs.chat_uuid ?? ""),
+							threadId: toolArgs.thread_id ? String(toolArgs.thread_id) : undefined,
+							...(campaignCompanyId ? { campaignCompanyId, campaignStep } : {}),
+							...(attPaths ? { attachments: attPaths } : {}),
+							...(toolArgs.signature ? { signature: toolArgs.signature as "full" | "plain" | "none" } : {}),
+						});
+						noteRead(readSession, `email-draft:${created.outboxId}`);
+						result = created;
+						if (toolArgs.send_at) await scheduleDraftResult(created.outboxId);
+						break;
+					}
+					// ── Short links ──
+					case "create_short_link": {
+						const target = String(toolArgs.target ?? "").trim();
+						if (!TARGET_RE.test(target)) {
+							result = { error: "target must be an http(s) URL" };
+							break;
+						}
+						// optional attach: must be an existing post/newsletter doc
+						const docIdRaw = String(toolArgs.doc_id ?? "").trim();
+						let docId: string | null = null;
+						if (docIdRaw) {
+							if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(docIdRaw)) {
+								result = { error: "doc_id must be a docs.id uuid — get one from list_docs" };
+								break;
+							}
+							const [doc] = await db
+								.select({ id: docs.id })
+								.from(docs)
+								.where(and(eq(docs.id, docIdRaw), inArray(docs.kind, ["post", "newsletter"])))
+								.limit(1);
+							if (!doc) {
+								result = { error: "doc_id must be an existing post or newsletter (plain docs can't be attached)" };
+								break;
+							}
+							docId = doc.id;
+						}
+						// slug is always a generated opaque key — retried on the astronomically rare PK collision
+						for (let attempt = 0; attempt < 3; attempt++) {
+							const slug = randomKey();
+							try {
+								await db.insert(shortLinks).values({ slug, target, docId });
+								result = { slug, url: `${shortLinkBase()}/l/${slug}`, target, doc_id: docId, created: true };
+								break;
+							} catch (e) {
+								if (!(e instanceof Error) || !e.message.includes("duplicate key")) throw e;
+							}
+						}
+						result ??= { error: "could not generate a unique slug — call again" };
+						break;
+					}
+					case "list_short_links":
+						result = await db
+							.select({
+								slug: shortLinks.slug,
+								target: shortLinks.target,
+								clicks: shortLinks.clicks,
+								doc_id: shortLinks.docId,
+								doc_title: docs.title,
+								doc_kind: docs.kind,
+								created_at: shortLinks.createdAt,
+							})
+							.from(shortLinks)
+							.leftJoin(docs, eq(shortLinks.docId, docs.id))
+							.orderBy(desc(shortLinks.clicks), desc(shortLinks.createdAt));
+						break;
+					// ── Components (registry-driven generic tools) ──
+					case "list_component_types":
+						result = { components: listComponentTypes() };
+						break;
+					case "get_component": {
+						const kind = String(toolArgs.kind ?? "");
+						const id = String(toolArgs.id ?? "");
+						const def = getComponent(kind);
+						if (!def) {
+							result = { error: `unknown kind "${kind}" — call list_component_types` };
+							break;
+						}
+						const card = await resolveCard({ kind, id });
+						const links = await linksFor({ kind, id });
+						if (!card.deleted && card.title) noteRead(readSession, [`${kind}:${id}`, nameKey(kind, card.title)]);
+						const rawRow = card.deleted ? null : ((await loadRow(def, id)) ?? null);
+						// row subset: scalars only, long strings truncated (bodies never dump)
+						const row = rawRow ? Object.fromEntries(
+							Object.entries(rawRow).filter(([, v]) => ["string", "number", "boolean"].includes(typeof v))
+								.map(([k, v]) => [k, typeof v === "string" && v.length > 200 ? v.slice(0, 200) + "…" : v]),
+						) : null;
+						// quotes: the priced lines ARE the payload — row is scalars-only by design,
+						// so attach a compact items + totals view
+						let quoteExtras: Record<string, unknown> = {};
+						if (kind === "quote" && !card.deleted) {
+							const items = await db.select().from(quoteItems).where(eq(quoteItems.quoteId, id)).orderBy(quoteItems.sortOrder);
+							quoteExtras = {
+								totals: computeQuoteTotals(items),
+								items: items.map((i) => ({ group: i.group, name: i.name, detail: i.detail, hours: i.hours, rate: i.unitRate, amount: i.hours * i.unitRate })),
+							};
+						}
+						// people: the row is scalars-only — attach the person view (addresses,
+						// orgs, outreach, recent email, brain page) so one get_component call
+						// answers "who is this and what's our history"
+						let personExtras: Record<string, unknown> = {};
+						if (kind === "contact" && !card.deleted) {
+							const d = await getPersonDossier(id);
+							if (d) {
+								personExtras = {
+									person: {
+										emails: d.addresses,
+										companies: d.companies.map((c) => c.name),
+										projects: d.projects.map((p) => ({ name: p.name, status: p.status })),
+										outreach: d.prospects.map((p) => ({ company: p.company, stage: p.stage })),
+										quotes: d.quotes.map((q) => ({ title: q.title, status: q.status })),
+										recent_email: d.messages.slice(0, 10).map((m) => ({
+											subject: m.subject,
+											from: m.fromEmail,
+											sent: m.isSent,
+											date: m.date,
+											attachments: m.attachments.map((a) => a.filename),
+										})),
+										brain_page: d.brain
+											? { slug: d.brain.slug, facts: d.brain.facts.slice(0, 10).map((f) => f.fact) }
+											: null,
+									},
+								};
+							}
+						}
+						// email drafts: the body IS the payload — revising via create_email_draft(draft_id)
+						// is gated on reading the draft first, so a 200-char preview dead-ends every edit.
+						// Full editable fields ride alongside the truncated generic row (same pattern as
+						// quote items / person dossier).
+						const draftExtras = kind === "email-draft" && rawRow ? {
+							draft: {
+								to: rawRow.toEmail,
+								cc: rawRow.ccEmail,
+								bcc: rawRow.bccEmail,
+								subject: rawRow.subject,
+								body: rawRow.body,
+								status: rawRow.status,
+								sendAt: rawRow.sendAt,
+								signature: rawRow.signature,
+								threadId: rawRow.threadId,
+								campaignCompanyId: rawRow.campaignCompanyId,
+								campaignStep: rawRow.campaignStep,
+								attachments: rawRow.attachments,
+							},
+						} : {};
+						result = { card, row, ...quoteExtras, ...personExtras, ...draftExtras, links };
+						break;
+					}
+					case "get_person": {
+						let memberId = toolArgs.id ? String(toolArgs.id) : "";
+						if (!memberId && toolArgs.name) {
+							const needle = String(toolArgs.name).trim();
+							const [byName] = await db
+								.select({ id: clientMembers.id })
+								.from(clientMembers)
+								.where(ilike(clientMembers.name, `%${needle}%`))
+								.limit(1);
+							if (byName) memberId = byName.id;
+							else {
+								const [byEmail] = await db
+									.select({ id: clientMembers.id })
+									.from(clientMembers)
+									.where(ilike(clientMembers.email, needle))
+									.limit(1);
+								memberId = byEmail?.id ?? "";
+								if (!memberId) {
+									const [byExtra] = await db
+										.select({ memberId: clientMemberEmails.memberId })
+										.from(clientMemberEmails)
+										.where(ilike(clientMemberEmails.email, needle))
+										.limit(1);
+									memberId = byExtra?.memberId ?? "";
+								}
+							}
+						}
+						if (!memberId) {
+							result = { error: "pass name (fuzzy) or id — or find the person via search_components" };
+							break;
+						}
+						const d = await getPersonDossier(memberId);
+						if (!d) {
+							result = { error: `no person ${memberId}` };
+							break;
+						}
+						result = {
+							person: { id: d.member.id, name: d.member.name, primary_email: d.member.email },
+							emails: d.addresses,
+							companies: d.companies,
+							projects: d.projects.map((p) => ({ id: p.id, name: p.name, status: p.status })),
+							quotes: d.quotes,
+							invoices: d.invoices.map((i) => ({ number: i.number, amount: i.amount, status: i.status })),
+							deliverables: d.deliverables.map((x) => ({ title: x.title, status: x.status })),
+							outreach: d.prospects,
+							recent_email: d.messages,
+							meetings: d.meetings,
+							mentions: d.links.map((l) => ({ direction: l.direction, type: l.linkType, card: l.card })),
+							brain: d.brain,
+						};
+						break;
+					}
+					case "get_email_attachment": {
+						const messageId = String(toolArgs.message_id ?? "");
+						const attachmentId = String(toolArgs.attachment_id ?? "");
+						const [row] = await db
+							.select({ attachments: emailMessages.attachments, accountId: emailThreads.accountId })
+							.from(emailMessages)
+							.innerJoin(emailThreads, eq(emailMessages.threadId, emailThreads.id))
+							.where(eq(emailMessages.id, messageId))
+							.limit(1);
+						if (!row) {
+							result = { error: `no message ${messageId}` };
+							break;
+						}
+						const [account] = await db
+							.select({ id: emailAccounts.id, refreshToken: emailAccounts.refreshToken })
+							.from(emailAccounts)
+							.where(eq(emailAccounts.id, row.accountId))
+							.limit(1);
+						if (!account) {
+							result = { error: "the message's email account no longer exists" };
+							break;
+						}
+						try {
+							const meta = row.attachments.find((a) => a.attachmentId === attachmentId);
+							const att = await fetchAttachment(account, messageId, attachmentId);
+							result = {
+								filename: meta?.filename ?? att.filename ?? attachmentId,
+								mimeType: meta?.mimeType ?? att.mimeType ?? "application/octet-stream",
+								size: att.size,
+								content_base64: Buffer.from(att.data, "base64url").toString("base64"),
+							};
+						} catch (e) {
+							result = { error: `Gmail fetch failed: ${e instanceof Error ? e.message : e}` };
+						}
+						break;
+					}
+					case "search_components": {
+						const hits = await searchAll(String(toolArgs.q ?? ""));
+						noteRead(readSession, hits.map((h) => `${h.kind}:${h.id}`));
+						result = { hits };
+						break;
+					}
+					case "link_components": {
+						const fromRef = { kind: String(toolArgs.from_kind ?? ""), id: String(toolArgs.from_id ?? "") };
+						const toRef = { kind: String(toolArgs.to_kind ?? ""), id: String(toolArgs.to_id ?? "") };
+						const hint = "call get_component on BOTH endpoints (or search_components / list_links)";
+						const rgFrom = requireRead(readSession, `${fromRef.kind}:${fromRef.id}`, hint);
+						if (!rgFrom.ok) {
+							result = rgFrom;
+							break;
+						}
+						const rgTo = requireRead(readSession, `${toRef.kind}:${toRef.id}`, hint);
+						if (!rgTo.ok) {
+							result = rgTo;
+							break;
+						}
+						try {
+							await linkComponents(
+								fromRef,
+								toRef,
+								{ linkType: toolArgs.link_type ? String(toolArgs.link_type) : "references", context: toolArgs.context ? String(toolArgs.context) : null, createdBy: "agent" },
+							);
+							result = { linked: true };
+						} catch (e) {
+							result = e instanceof UnknownKindError ? { error: e.message } : { error: String(e) };
+						}
+						break;
+					}
+					case "list_links": {
+						const kind = String(toolArgs.kind ?? "");
+						if (!getComponent(kind)) {
+							result = { error: `unknown kind "${kind}" — call list_component_types` };
+							break;
+						}
+						const links = await listLinks({ kind, id: String(toolArgs.id ?? "") });
+						noteRead(readSession,
+							[`${kind}:${String(toolArgs.id ?? "")}`,
+								...links.owners.map((o) => `${o.card.kind}:${o.card.id}`),
+								...links.children.map((c) => `${c.card.kind}:${c.card.id}`),
+								...links.links.map((l) => `${l.card.kind}:${l.card.id}`)],
+						);
+						result = links;
+						break;
+					}
+					case "create_video": {
+						const url = String(toolArgs.url ?? "").trim();
+						if (!/^https?:\/\//i.test(url)) {
+							result = { error: "url must be an http(s) URL (CAP share link or direct mp4)" };
+							break;
+						}
+						let prospectId: string | null = null;
+						if (toolArgs.prospect_id) {
+							const [row] = await db.select({ id: outreachProspects.id }).from(outreachProspects).where(eq(outreachProspects.id, String(toolArgs.prospect_id))).limit(1);
+							prospectId = row?.id ?? null;
+							if (!prospectId) {
+								result = { error: "prospect_id not found — list_outreach has ids" };
+								break;
+							}
+						} else if (toolArgs.prospect) {
+							const cname = String(toolArgs.prospect).trim();
+							const [existing] = await db.select({ id: outreachProspects.id }).from(outreachProspects).where(ilike(outreachProspects.company, cname)).limit(1);
+							if (existing) prospectId = existing.id;
+							else {
+								const [created] = await db.insert(outreachProspects).values({ company: cname }).returning({ id: outreachProspects.id });
+								prospectId = created.id;
+							}
+						}
+						const v = await createVideo({
+							url,
+							title: toolArgs.title ? String(toolArgs.title) : undefined,
+							description: toolArgs.description ? String(toolArgs.description) : null,
+							prospectId,
+						});
+						result = { id: v.id, url: v.url, prospectId: v.prospectId, watchLink: `/v/${v.id}`, fullWatchLink: `https://basalt.ac/v/${v.id}` };
+						break;
+					}
+					// ── Quotes (drafts-only: humans send, clients sign) ──
+					case "create_quote": {
+						const gate = await gateGenre(toolArgs);
+						if ("error" in gate) {
+							result = gate;
+							break;
+						}
+						const itemsRaw = Array.isArray(toolArgs.items) ? (toolArgs.items as Record<string, unknown>[]) : [];
+						if (itemsRaw.length === 0) {
+							result = { error: "items[] is required (at least one line item)" };
+							break;
+						}
+						const items = itemsRaw.map((raw, i) => parseQuoteItem(raw, i));
+						// company must already exist — never auto-create a client on a financial doc
+						let companyId: string | null = null;
+						if (toolArgs.company_id) {
+							const [row] = await db.select({ id: companies.id }).from(companies).where(eq(companies.id, String(toolArgs.company_id))).limit(1);
+							if (!row) {
+								result = { error: "company_id not found" };
+								break;
+							}
+							companyId = row.id;
+						} else if (toolArgs.company) {
+							const cname = String(toolArgs.company).trim();
+							const matches = await db.select({ id: companies.id, name: companies.name }).from(companies).where(ilike(companies.name, cname)).limit(5);
+							const exact = matches.find((m) => m.name.toLowerCase() === cname.toLowerCase());
+							if (exact) companyId = exact.id;
+							else if (matches.length === 1) companyId = matches[0].id;
+							else {
+								result = {
+									error: `company "${cname}" ${matches.length === 0 ? "does not exist — create it in the dashboard first" : "is ambiguous — pass company_id from these"}: ${matches.map((m) => m.name).join(", ") || "no close matches"}`,
+								};
+								break;
+							}
+						} else {
+							result = { error: "company or company_id is required" };
+							break;
+						}
+						const markdown = toolArgs.markdown ? String(toolArgs.markdown) : skeletonQuoteMarkdown(items);
+						const lessons = await gateLessonsForText(toolArgs, markdown, { surface: "docs", genre: gate.genre ?? "quote" });
+						if (!lessons.ok) {
+							result = lessons;
+							break;
+						}
+						const lint = await lintVoiceText(markdown, { surface: "docs", genre: gate.genre ?? "quote" });
+						if (lint.avoidCount > 0) {
+							result = lintGateError(lint);
+							break;
+						}
+						const title = String(toolArgs.title ?? "Untitled quote");
+						const doc = await createDoc(title, markdown, {
+							author: "agent",
+							chatUuid: toolArgs.chat_uuid ? String(toolArgs.chat_uuid) : undefined,
+							genre: gate.genre ?? "quote",
+						});
+						const [row] = await db
+							.insert(quotes)
+							.values({
+								companyId: companyId!,
+								projectId: toolArgs.project_id ? String(toolArgs.project_id) : null,
+								bodyDocId: doc.id,
+								title,
+								validDays: Number(toolArgs.valid_days) || 30,
+								quotedCapHours: toolArgs.quoted_cap_hours ? Number(toolArgs.quoted_cap_hours) : null,
+							})
+							.returning({ id: quotes.id });
+						await db.insert(quoteItems).values(items.map((it) => ({ ...it, quoteId: row.id })));
+						result = {
+							id: row.id,
+							doc_id: doc.id,
+							status: "draft",
+							totals: computeQuoteTotals(items),
+							note: "draft created — Collin reviews and sends from the dashboard; the client signs in the portal",
+						};
+						break;
+					}
+					case "update_quote": {
+						const quoteId = String(toolArgs.quote_id ?? "");
+						const [q] = await db.select().from(quotes).where(eq(quotes.id, quoteId)).limit(1);
+						if (!q) {
+							result = { error: "quote_id not found" };
+							break;
+						}
+							if (q.status !== "draft") {
+								result = { error: `quote is ${q.status} — immutable via MCP once sent. Collin edits sent quotes in the dashboard.` };
+								break;
+							}
+							const rg = requireRead(readSession, [`quote:${quoteId}`, nameKey("quote", q.title)], 'call get_component(kind="quote", id) or list_quotes first');
+							if (!rg.ok) {
+								result = rg;
+								break;
+							}
+						if (!toolArgs.title && !Array.isArray(toolArgs.items) && !toolArgs.markdown) {
+							result = { error: "nothing to update — pass title, items, and/or markdown" };
+							break;
+						}
+						const gate = await gateGenre(toolArgs);
+						if ("error" in gate) {
+							result = gate;
+							break;
+						}
+						if (toolArgs.title) {
+							const title = String(toolArgs.title).trim();
+							if (title) {
+								await db.update(quotes).set({ title }).where(eq(quotes.id, quoteId));
+								await renameDoc(q.bodyDocId, title);
+							}
+						}
+						if (Array.isArray(toolArgs.items)) {
+							const items = (toolArgs.items as Record<string, unknown>[]).map((raw, i) => parseQuoteItem(raw, i));
+							if (items.length === 0) {
+								result = { error: "items[] cannot be empty — use get_component/list_quotes to inspect instead" };
+								break;
+							}
+							await db.delete(quoteItems).where(eq(quoteItems.quoteId, quoteId));
+							await db.insert(quoteItems).values(items.map((it) => ({ ...it, quoteId })));
+						}
+						if (toolArgs.markdown) {
+							const content = String(toolArgs.markdown);
+							const lessons = await gateLessonsForText(toolArgs, content, { surface: "docs", genre: gate.genre ?? "quote" });
+							if (!lessons.ok) {
+								result = lessons;
+								break;
+							}
+							// agentWrite runs the hard lint gate itself and lands as an agent version
+							result = await agentWrite({ docId: q.bodyDocId, content, chatUuid: String(toolArgs.chat_uuid ?? ""), mode: "replace", genre: gate.genre ?? undefined });
+						}
+						const items = await db.select().from(quoteItems).where(eq(quoteItems.quoteId, quoteId)).orderBy(quoteItems.sortOrder);
+						result = { id: quoteId, status: q.status, totals: computeQuoteTotals(items) };
+						break;
+					}
+					case "list_quotes": {
+						const conditions = [];
+						if (toolArgs.status) {
+							const s = String(toolArgs.status);
+							if (!["draft", "sent", "accepted", "rejected"].includes(s)) {
+								result = { error: "status must be draft|sent|accepted|rejected" };
+								break;
+							}
+							conditions.push(eq(quotes.status, s as "draft" | "sent" | "accepted" | "rejected"));
+						}
+						if (toolArgs.company_id) conditions.push(eq(quotes.companyId, String(toolArgs.company_id)));
+						const rows = await db
+							.select({ id: quotes.id, title: quotes.title, status: quotes.status, companyId: quotes.companyId, projectId: quotes.projectId, createdAt: quotes.createdAt, updatedAt: quotes.updatedAt })
+							.from(quotes)
+							.where(conditions.length > 0 ? and(...conditions) : undefined)
+							.orderBy(desc(quotes.createdAt))
+							.limit(Math.min(Number(toolArgs.limit) || 50, 100));
+						noteRead(readSession, rows.flatMap((r) => [`quote:${r.id}`, nameKey("quote", r.title)]));
+						result = await Promise.all(
+							rows.map(async (r) => ({
+								...r,
+								totals: computeQuoteTotals(await db.select().from(quoteItems).where(eq(quoteItems.quoteId, r.id))),
+							})),
+						);
+						break;
+					}
+					case "project_actuals": {
+						result = (await getProjectActuals(String(toolArgs.project_id ?? ""))) ?? { error: "project_id not found" };
+						break;
+					}
+					case "funnel_stats": {
+						const runCols = { id: funnelRuns.id, funnelId: funnelRuns.funnelId, source: funnelRuns.source, status: funnelRuns.status, createdAt: funnelRuns.createdAt };
+						const [run] = toolArgs.run_id
+							? await db.select(runCols).from(funnelRuns).where(eq(funnelRuns.id, String(toolArgs.run_id))).limit(1)
+							: await db.select(runCols).from(funnelRuns).orderBy(desc(funnelRuns.createdAt)).limit(1);
+						if (!run) {
+							result = { error: toolArgs.run_id ? "run_id not found — call with no args for the latest run" : "no funnel runs exist yet" };
+							break;
+						}
+						const [funnel] = await db.select().from(funnels).where(eq(funnels.id, run.funnelId)).limit(1);
+						if (!funnel) {
+							result = { error: "funnel row missing for this run" };
+							break;
+						}
+						noteRead(readSession, [`funnel_run:${run.id}`, `funnel:${funnel.id}`]);
+						const [{ count: items }] = await db
+							.select({ count: sql<number>`count(*)::int` })
+							.from(funnelItems)
+							.where(eq(funnelItems.runId, run.id));
+						const [{ count: promoted }] = await db
+							.select({ count: sql<number>`count(*)::int` })
+							.from(funnelItems)
+							.where(and(eq(funnelItems.runId, run.id), isNotNull(funnelItems.prospectId)));
+						const verdicts = await db
+							.select({ stage: funnelStageResults.stage, verdict: funnelStageResults.verdict, count: sql<number>`count(*)::int` })
+							.from(funnelStageResults)
+							.innerJoin(funnelItems, eq(funnelStageResults.itemId, funnelItems.id))
+							.where(eq(funnelItems.runId, run.id))
+							.groupBy(funnelStageResults.stage, funnelStageResults.verdict);
+						const vmap = new Map(verdicts.map((v) => [`${v.stage}:${v.verdict}`, v.count]));
+						result = {
+							funnel: { id: funnel.id, name: funnel.name, stages: funnel.stages },
+							run: { id: run.id, source: run.source, status: run.status, createdAt: run.createdAt },
+							totals: { items, promoted },
+							stages: funnel.stages.map((s) => {
+								const pass = vmap.get(`${s.key}:pass`) ?? 0;
+								const fail = vmap.get(`${s.key}:fail`) ?? 0;
+								return { key: s.key, label: s.label, gate: s.gate, method: s.method, soft: !!s.soft, pass, fail, unreached: Math.max(items - pass - fail, 0) };
+							}),
+						};
+						break;
+					}
+					case "list_funnel_items": {
+						const runCols = { id: funnelRuns.id, funnelId: funnelRuns.funnelId, source: funnelRuns.source, status: funnelRuns.status, createdAt: funnelRuns.createdAt };
+						const [run] = toolArgs.run_id
+							? await db.select(runCols).from(funnelRuns).where(eq(funnelRuns.id, String(toolArgs.run_id))).limit(1)
+							: await db.select(runCols).from(funnelRuns).orderBy(desc(funnelRuns.createdAt)).limit(1);
+						if (!run) {
+							result = { error: toolArgs.run_id ? "run_id not found — call with no args for the latest run" : "no funnel runs exist yet" };
+							break;
+						}
+						const [funnel] = await db.select().from(funnels).where(eq(funnels.id, run.funnelId)).limit(1);
+						const stageKeys = (funnel?.stages ?? []).map((s) => s.key);
+						noteRead(readSession, [`funnel_run:${run.id}`, ...(funnel ? [`funnel:${funnel.id}`] : [])]);
+						const stage = toolArgs.stage ? String(toolArgs.stage) : null;
+						const verdict = toolArgs.verdict ? String(toolArgs.verdict) : null;
+						if (stage && !stageKeys.includes(stage)) {
+							result = { error: `unknown stage "${stage}" — stages: ${stageKeys.join(", ")}` };
+							break;
+						}
+						if (verdict && !["pass", "fail", "unreached"].includes(verdict)) {
+							result = { error: "verdict must be pass | fail | unreached" };
+							break;
+						}
+						if (verdict && !stage) {
+							result = { error: "verdict requires stage" };
+							break;
+						}
+						const limit = Math.min(Math.max(Number(toolArgs.limit ?? 50) || 50, 1), 100);
+						const offset = Math.max(Number(toolArgs.offset ?? 0) || 0, 0);
+						const filters = [eq(funnelItems.runId, run.id)];
+						if (toolArgs.q) filters.push(ilike(funnelItems.companyName, `%${String(toolArgs.q)}%`));
+						if (stage && verdict && verdict !== "unreached") {
+							filters.push(sql`exists (select 1 from ${funnelStageResults} fsr where fsr.item_id = ${funnelItems.id} and fsr.stage = ${stage} and fsr.verdict = ${verdict})`);
+						}
+						if (stage && verdict === "unreached") {
+							filters.push(sql`not exists (select 1 from ${funnelStageResults} fsr where fsr.item_id = ${funnelItems.id} and fsr.stage = ${stage})`);
+						}
+						const rows = await db
+							.select({ id: funnelItems.id, company: funnelItems.companyName, city: funnelItems.city, state: funnelItems.state, prospectId: funnelItems.prospectId, createdAt: funnelItems.createdAt })
+							.from(funnelItems)
+							.where(and(...filters))
+							.orderBy(funnelItems.companyName)
+							.limit(limit)
+							.offset(offset);
+						noteRead(readSession, rows.map((r) => `funnel_item:${r.id}`));
+						const [{ count: matched }] = await db
+							.select({ count: sql<number>`count(*)::int` })
+							.from(funnelItems)
+							.where(and(...filters));
+						const ids = rows.map((r) => r.id);
+						const vs = ids.length
+							? await db.select({ itemId: funnelStageResults.itemId, stage: funnelStageResults.stage, verdict: funnelStageResults.verdict, method: funnelStageResults.method, note: funnelStageResults.note, checkedAt: funnelStageResults.checkedAt }).from(funnelStageResults).where(inArray(funnelStageResults.itemId, ids)).orderBy(funnelStageResults.checkedAt)
+							: [];
+						const byItem = new Map<string, typeof vs>();
+						for (const v of vs) {
+							const list = byItem.get(v.itemId) ?? [];
+							list.push(v);
+							byItem.set(v.itemId, list);
+						}
+						result = {
+							run: { id: run.id, funnel: funnel?.name ?? "unknown" },
+							matched,
+							limit,
+							offset,
+							items: rows.map((r) => ({
+								id: r.id,
+								company: r.company,
+								city: r.city,
+								state: r.state,
+								promoted: !!r.prospectId,
+								verdicts: (byItem.get(r.id) ?? []).map(({ itemId: _omit, ...v }) => v),
+							})),
+						};
+						break;
+					}
+					case "create_funnel": {
+						const name = String(toolArgs.name ?? "").trim();
+						if (!name) {
+							result = { error: "name is required" };
+							break;
+						}
+						try {
+							result = await createFunnel(name, toolArgs.description ? String(toolArgs.description) : null, toolArgs.extra_stages);
+							if (result && typeof result === "object" && "id" in result) noteRead(readSession, `funnel:${String(result.id)}`);
+						} catch (e) {
+							result = { error: String(e instanceof Error ? e.message : e) };
+						}
+						break;
+					}
+					case "create_funnel_run": {
+						const run = await createFunnelRun({
+							funnelId: toolArgs.funnel_id ? String(toolArgs.funnel_id) : undefined,
+							funnelName: toolArgs.funnel_name ? String(toolArgs.funnel_name) : undefined,
+							source: toolArgs.source ? String(toolArgs.source) : undefined,
+							note: toolArgs.note ? String(toolArgs.note) : undefined,
+						});
+						if (!("error" in run)) noteRead(readSession, `funnel_run:${run.run.id}`);
+						result = run;
+						break;
+					}
+					case "scrape_funnel_company": {
+						const [item] = await db
+							.select({ id: funnelItems.id, company: funnelItems.companyName, raw: funnelItems.rawData })
+							.from(funnelItems)
+							.where(eq(funnelItems.id, String(toolArgs.item_id ?? "")))
+							.limit(1);
+						if (!item) {
+							result = { error: "Unknown item_id" };
+							break;
+						}
+						{
+							const rg = requireRead(readSession, `funnel_item:${item.id}`, "call list_funnel_items first");
+							if (!rg.ok) {
+								result = rg;
+								break;
+							}
+						}
+						if (cookieDead()) {
+							result = { error: "IMPORTYETI_COOKIE is missing or expired — refresh the importyeti_token JWT before scraping" };
+							break;
+						}
+						const raw = (item.raw ?? {}) as Record<string, unknown>;
+						const slug =
+							(toolArgs.slug ? String(toolArgs.slug) : null) ??
+							(typeof raw.importyetiSlug === "string" ? raw.importyetiSlug : null) ??
+							item.company
+								.toLowerCase()
+								.replace(/&/g, "and")
+								.replace(/[^a-z0-9]+/g, "-")
+								.replace(/^-+|-+$/g, "");
+						try {
+							const { data } = await scrapeCompanyPage(slug);
+							await db
+								.update(funnelItems)
+								.set({
+									rawData: {
+										...raw,
+										importyetiSlug: slug,
+										scrape: data as unknown as Record<string, unknown>,
+									},
+								})
+								.where(eq(funnelItems.id, item.id));
+							result = {
+								company: item.company,
+								slug,
+								totalShipments: data.totalShipments,
+								suppliers: data.suppliers.length,
+								recentShipments: data.shipments.length,
+								monthsOfData: data.shipmentPeriods.length,
+								confidentialityPeriods: data.confidentialityPeriods,
+								website: data.canonicalWebsite,
+								mergedInto: "rawData.scrape",
+							};
+						} catch (e) {
+							result = {
+								error: e instanceof ScrapeFailed ? e.message : String(e),
+								hint: "if the slug was guessed wrong, find the right one at importyeti.com and retry with slug=",
+							};
+						}
+						break;
+					}
+					case "add_funnel_items": {
+						const [runRow] = await db
+							.select({ id: funnelRuns.id, status: funnelRuns.status })
+							.from(funnelRuns)
+							.where(eq(funnelRuns.id, String(toolArgs.run_id ?? "")))
+							.limit(1);
+						if (!runRow) {
+							result = { error: "run_id not found — create_funnel_run or funnel_stats has ids" };
+							break;
+						}
+						if (runRow.status !== "open") {
+							result = { error: "Run is closed — reopen by creating a new run" };
+							break;
+						}
+						const rg = requireRead(readSession, `funnel_run:${runRow.id}`, "call funnel_stats or list_funnel_items first");
+						if (!rg.ok) {
+							result = rg;
+							break;
+						}
+						const rows = (Array.isArray(toolArgs.items) ? toolArgs.items : []).filter(
+							(x: unknown) => !!x && typeof x === "object" && typeof (x as Record<string, unknown>).companyName === "string",
+						) as { companyName: string }[];
+						if (rows.length === 0) {
+							result = { error: "items[] with companyName required" };
+							break;
+						}
+						if (rows.length > 100) {
+							result = { error: "Max 100 items per call" };
+							break;
+						}
+						result = { ok: true, ...(await importRunItems(runRow.id, rows)) };
+						break;
+					}
+					case "run_funnel_stage": {
+						const rg = requireRead(readSession, `funnel_run:${String(toolArgs.run_id ?? "")}`, "call funnel_stats or list_funnel_items first");
+						if (!rg.ok) {
+							result = rg;
+							break;
+						}
+						result = await runStageBatch(
+							String(toolArgs.run_id ?? ""),
+							String(toolArgs.stage ?? ""),
+							Number(toolArgs.limit ?? 50) || 50,
+						);
+						break;
+					}
+					case "list_funnel_schedules": {
+						const rows = await db
+							.select({
+								funnelId: funnels.id,
+								funnelName: funnels.name,
+								enabled: funnelSchedules.enabled,
+								discoverySource: funnelSchedules.discoverySource,
+								discoveryIntervalDays: funnelSchedules.discoveryIntervalDays,
+								enrichPerDay: funnelSchedules.enrichPerDay,
+								techPerDay: funnelSchedules.techPerDay,
+								lastDiscoveryAt: funnelSchedules.lastDiscoveryAt,
+								lastEnrichAt: funnelSchedules.lastEnrichAt,
+							})
+							.from(funnels)
+							.leftJoin(funnelSchedules, eq(funnelSchedules.funnelId, funnels.id))
+							.orderBy(funnels.name);
+						noteRead(readSession, rows.map((r) => `funnel:${r.funnelId}`));
+						result = { funnels: rows.map((r) => ({ ...r, running: r.enabled === true })) };
+						break;
+					}
+					case "set_funnel_schedule": {
+						const enabledArg = toolArgs.enabled;
+						const enabled = enabledArg === true || String(enabledArg) === "true";
+						if (enabledArg === undefined || enabledArg === null || !["true", "false"].includes(String(enabledArg))) {
+							result = { error: "enabled (true|false) is required — this flips live paid enrichment" };
+							break;
+						}
+						let target: { id: string; name: string } | undefined;
+						if (toolArgs.funnel_id) {
+							[target] = await db.select({ id: funnels.id, name: funnels.name }).from(funnels).where(eq(funnels.id, String(toolArgs.funnel_id))).limit(1);
+						} else if (toolArgs.funnel_name) {
+							[target] = await db.select({ id: funnels.id, name: funnels.name }).from(funnels).where(ilike(funnels.name, String(toolArgs.funnel_name))).limit(1);
+						}
+						if (!target) {
+							result = { error: "funnel not found — list_funnel_schedules has ids and names" };
+							break;
+						}
+						const rg = requireRead(readSession, `funnel:${target.id}`, "call list_funnel_schedules first — this flips live paid enrichment");
+						if (!rg.ok) {
+							result = rg;
+							break;
+						}
+						const [existing] = await db.select({ id: funnelSchedules.id }).from(funnelSchedules).where(eq(funnelSchedules.funnelId, target.id)).limit(1);
+						if (existing) {
+							await db.update(funnelSchedules).set({ enabled, updatedAt: new Date() }).where(eq(funnelSchedules.id, existing.id));
+						} else {
+							await db.insert(funnelSchedules).values({ funnelId: target.id, enabled });
+						}
+						result = { funnelId: target.id, funnelName: target.name, enabled, running: enabled };
+						break;
+					}
+					case "record_funnel_verdict": {
+						const verdict = String(toolArgs.verdict ?? "");
+						if (!toolArgs.item_id || !toolArgs.stage || !["pass", "fail"].includes(verdict)) {
+							result = { error: "item_id, stage, verdict (pass|fail) required" };
+							break;
+						}
+						const rg = requireRead(readSession, `funnel_item:${String(toolArgs.item_id)}`, "call list_funnel_items first");
+						if (!rg.ok) {
+							result = rg;
+							break;
+						}
+						result = await recordStageVerdict({
+							itemId: String(toolArgs.item_id),
+							stage: String(toolArgs.stage),
+							verdict: verdict as "pass" | "fail",
+							note: toolArgs.note ? String(toolArgs.note) : null,
+							evidenceUrl: toolArgs.evidence_url ? String(toolArgs.evidence_url) : null,
+							method: toolArgs.method ? String(toolArgs.method) : null,
+						});
+						break;
+					}
+				case "list_oauth_apps": {
+					const { data, error } = await supabaseService().auth.admin.oauth.listClients();
+					if (error) {
+						result = { error: error.message };
+						break;
+					}
+					const apps = (data?.clients ?? []).map((c) => ({
+						client_id: c.client_id,
+						name: c.client_name,
+						redirect_uris: c.redirect_uris,
+						auth_method: c.token_endpoint_auth_method,
+						created_at: c.created_at,
+					}));
+					noteRead(readSession, apps.flatMap((a) => [`oauth_app:${a.client_id}`, nameKey("oauth_app", a.name)]));
+					result = { apps };
+					break;
+				}
+				case "create_oauth_app": {
+					const name = String(toolArgs.name ?? "").trim();
+					const uris = oauthRedirectUris(toolArgs.redirect_uris);
+					const authMethod = oauthAuthMethod(toolArgs.auth_method);
+					if (!name || !uris || !authMethod) {
+						result = {
+							error: [
+								!name ? "name is required" : null,
+								uris ? null : "redirect_uris (string[]) needs at least one URI that parses as a URL",
+								authMethod ? null : `auth_method must be one of: ${OAUTH_AUTH_METHODS.join(", ")}`,
+							]
+								.filter(Boolean)
+								.join("; "),
+						};
+						break;
+					}
+					const { data, error } = await supabaseService().auth.admin.oauth.createClient({
+						client_name: name,
+						redirect_uris: uris,
+						token_endpoint_auth_method: authMethod,
+					});
+					if (error || !data) {
+						result = { error: error?.message ?? "Failed to create OAuth app" };
+						break;
+					}
+					// client_secret is only ever returned at creation — surface it once
+					result = {
+						client_id: data.client_id,
+						client_secret: data.client_secret ?? null,
+						name,
+						redirect_uris: uris,
+						auth_method: authMethod,
+						note: "client_secret is returned ONLY here, once — store it now",
+					};
+					break;
+				}
+				case "update_oauth_app": {
+					const clientId = String(toolArgs.client_id ?? "");
+					if (!clientId) {
+						result = { error: "client_id is required — list_oauth_apps has ids" };
+						break;
+					}
+					const rg = requireRead(readSession, `oauth_app:${clientId}`, "call list_oauth_apps first — this edits a live OAuth app");
+					if (!rg.ok) {
+						result = rg;
+						break;
+					}
+					const update: { client_name?: string; redirect_uris?: string[]; token_endpoint_auth_method?: OAuthAuthMethod } = {};
+					let updateErr: string | null = null;
+					if (typeof toolArgs.name === "string" && toolArgs.name.trim()) update.client_name = toolArgs.name.trim();
+					if (toolArgs.redirect_uris !== undefined) {
+						const uris = oauthRedirectUris(toolArgs.redirect_uris);
+						if (!uris) updateErr = "redirect_uris (string[]) needs at least one URI that parses as a URL";
+						else update.redirect_uris = uris;
+					}
+					if (toolArgs.auth_method !== undefined) {
+						const m = oauthAuthMethod(toolArgs.auth_method);
+						if (!m) updateErr = `auth_method must be one of: ${OAUTH_AUTH_METHODS.join(", ")}`;
+						else update.token_endpoint_auth_method = m;
+					}
+					if (updateErr || Object.keys(update).length === 0) {
+						result = { error: updateErr ?? "nothing to update — pass name, redirect_uris, and/or auth_method" };
+						break;
+					}
+					const { data, error } = await supabaseService().auth.admin.oauth.updateClient(clientId, update);
+					if (error) {
+						result = { error: error.message };
+						break;
+					}
+					result = { client_id: data?.client_id ?? clientId, updated: update, note: "redirect_uris replaced the whole list" };
+					break;
+				}
+					default:
+						return rpcError(id, -32601, `Unknown tool: ${toolName}`);
+				}
+				return rpcResponse(id, {
+					content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+				});
+			} catch (err) {
+				return rpcError(id, -32603, `Tool execution error: ${err instanceof Error ? err.message : String(err)}`);
+			}
+		}
+
+		case "ping":
+			return rpcResponse(id, {});
+
+		default:
+			return rpcError(id, -32601, `Method not found: ${body.method}`);
+	}
+}
+
+export function OPTIONS() {
+	return new Response(null, {
+		status: 204,
+		headers: {
+			"Access-Control-Allow-Origin": "*",
+			"Access-Control-Allow-Methods": "POST, OPTIONS",
+			"Access-Control-Allow-Headers": "Authorization, Content-Type",
+		},
+	});
+}
+
+export function GET() {
+	return json({
+		server: "madcactus-brain",
+		version: "1.0.0",
+		protocol: PROTOCOL_VERSION,
+		endpoint: "POST /api/brain-mcp",
+		auth: "Authorization: Bearer mc_<admin-api-key>",
+		tools: TOOLS.map((t) => t.name),
+	});
+}

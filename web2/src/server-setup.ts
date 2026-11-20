@@ -13,6 +13,12 @@ configureServerErrors({
 	},
 });
 
-// Scheduler + realtime triggers move here from the old entry-server when
-// their modules are ported (phase 3).
+// Scheduler + realtime triggers: moved from the old entry-server. GlobalThis
+// guards in startScheduler/ensureRealtimeTriggers make re-evaluation harmless.
+import { startScheduler } from "~/lib/scheduler";
+import { ensureRealtimeTriggers } from "~/lib/live-server";
+
+startScheduler();
+ensureRealtimeTriggers();
+
 export {};

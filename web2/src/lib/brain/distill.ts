@@ -1,0 +1,828 @@
+// Brain distillation — the LLM cycle phases (gbrain's extract_facts /
+// consolidate / enrich), fed by workspace content since the last cursor.
+// Deterministic phases live in ingest.ts; runCycle() orchestrates both and
+// is lazily triggered by brain MCP calls (24h staleness). Facts are NEVER
+// deleted — supersession chains are the audit trail.
+import { and, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
+import { db } from "~/db";
+import {
+	brainChunks,
+	brainFacts,
+	brainPages,
+	brainState,
+	brainTakes,
+	companies,
+	docs,
+	documents,
+	emailMessages,
+	emailThreads,
+	projects,
+	slackChannels,
+	slackMessages,
+	textVersions,
+	voicePatterns,
+} from "~/db/schema";
+import { chunkText, factHash, slugify } from "./core";
+import { syncEntities, syncPersons, syncProspects, syncCampaigns, detectLoops, backfillTimeline, recomputeWeight } from "./ingest";
+import { embedPending } from "./embed";
+import { addVoicePatterns, clearVoiceLintCache } from "~/lib/voice-lint-db";
+import type { PatternCandidate } from "~/lib/voice-lint";
+import { docSurface } from "~/lib/voice-lint";
+import { syncSlack } from "~/lib/slack";
+
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+
+function brainModel(): string {
+	return process.env.BRAIN_MODEL || "anthropic/claude-sonnet-4.5";
+}
+
+async function llm(
+	system: string,
+	user: string,
+	opts: { timeoutMs?: number; model?: string; reasoningMaxTokens?: number } = {},
+): Promise<string> {
+	const key = process.env.OPENROUTER_API_KEY;
+	if (!key) throw new Error("OPENROUTER_API_KEY not set");
+	const res = await fetch(OPENROUTER_URL, {
+		method: "POST",
+		headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+		signal: opts.timeoutMs ? AbortSignal.timeout(opts.timeoutMs) : undefined,
+		body: JSON.stringify({
+			model: opts.model ?? brainModel(),
+			...(opts.reasoningMaxTokens ? { reasoning: { max_tokens: opts.reasoningMaxTokens } } : {}),
+			messages: [
+				{ role: "system", content: system },
+				{ role: "user", content: user },
+			],
+		}),
+	});
+	if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${(await res.text()).slice(0, 300)}`);
+	const body = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+	return body.choices?.[0]?.message?.content ?? "";
+}
+
+/** First JSON array in the response — tolerates fences/narration. */
+export function parseJsonArray(text: string): unknown[] {
+	const start = text.indexOf("[");
+	const end = text.lastIndexOf("]");
+	if (start === -1 || end <= start) throw new Error("no JSON array in LLM output");
+	return JSON.parse(text.slice(start, end + 1)) as unknown[];
+}
+
+// ── Cursors (brain_state) ──────────────────────────────────────────
+
+async function getCursor(key: string): Promise<string | null> {
+	const [row] = await db.select({ value: brainState.value }).from(brainState).where(eq(brainState.key, key));
+	const v = row?.value as { at?: string } | undefined;
+	return v?.at || null;
+}
+
+async function setCursor(key: string, at: string) {
+	await db
+		.insert(brainState)
+		.values({ key, value: { at } })
+		.onConflictDoUpdate({ target: brainState.key, set: { value: { at } } });
+}
+
+// ── extract_lessons (the diff engine) ──────────────────────────────
+
+export type VersionRow = {
+	id: string;
+	entity: string; // 'doc' | 'email_draft'
+	entityId: string;
+	author: string;
+	content: string;
+	createdAt: Date;
+};
+
+export type LessonPair = {
+	entity: string;
+	entityId: string;
+	agent: VersionRow;
+	human: VersionRow;
+};
+
+/**
+ * Pair agent writes with the human edit that followed them — each pair is one
+ * "what the agent did vs what Collin kept" data point. The most recent agent
+ * version before each human version is its counterpart; each agent version
+ * pairs at most once. Versions must be ascending by createdAt.
+ */
+export function findPairs(versions: VersionRow[]): LessonPair[] {
+	const byEntity = new Map<string, VersionRow[]>();
+	for (const v of versions) {
+		const list = byEntity.get(v.entityId) ?? [];
+		list.push(v);
+		byEntity.set(v.entityId, list);
+	}
+	const pairs: LessonPair[] = [];
+	for (const [, list] of byEntity) {
+		list.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+		let pendingAgent: VersionRow | null = null;
+		let pendingHuman: VersionRow | null = null;
+		const flush = () => {
+			if (pendingAgent && pendingHuman) {
+				pairs.push({ entity: pendingHuman.entity, entityId: pendingHuman.entityId, agent: pendingAgent, human: pendingHuman });
+			}
+			pendingAgent = null;
+			pendingHuman = null;
+		};
+		for (const v of list) {
+			if (v.author === "agent") {
+				flush(); // previous round ends when the agent writes again
+				pendingAgent = v;
+			} else {
+				pendingHuman = v; // consecutive human edits: keep the latest
+			}
+		}
+		flush();
+	}
+	return pairs;
+}
+
+const LESSONS_SYSTEM = `You derive durable writing lessons from editing pairs.
+Input: pairs of (agent draft, Collin's final text). For each pair output what a writing agent should learn:
+[{"lesson": "<one durable rule, stated as a preference>", "entity": "<client/topic it applies to, or 'voice' if universal>", "patterns": [{"rule": "<the rule in one short phrase>", "pattern": "<literal phrase or regex to find it>", "type": "literal|regex", "direction": "avoid|prefer", "before": "<example violating text>", "after": "<example fixed text>"}]}]
+Rules: lessons are general ("Cut the throat-clearing opener", "Use 'Glad' not 'Sounds like'"), never quote the whole text. 0-2 lessons per pair; add patterns only when the edit is mechanically detectable (a phrase Collin removes or prefers) — max 2 per lesson, and only when the diff clearly shows it. Skip pairs with nothing to learn. Output ONLY the JSON array.`;
+
+/** Learn from diffs: agent write → human edit pairs become lesson facts. */
+export async function extractLessons(opts: { maxPairs?: number; maxChars?: number } = {}): Promise<{ pairs: number; lessons: number; patterns: number }> {
+	const maxPairs = opts.maxPairs ?? 8;
+	const maxChars = opts.maxChars ?? 2000;
+	const since = await getCursor("extract_lessons");
+	const sinceDate = since ? new Date(since) : new Date(Date.now() - 30 * 86_400_000);
+
+	const rows = await db
+		.select()
+		.from(textVersions)
+		.where(and(gt(textVersions.createdAt, sinceDate), inArray(textVersions.entity, ["doc", "email_draft"])))
+		.orderBy(textVersions.createdAt)
+		.limit(100);
+
+	const pairs = findPairs(
+		rows.map((r) => ({
+			id: r.id,
+			entity: r.entity,
+			entityId: r.entityId,
+			author: r.author,
+			content: r.content,
+			createdAt: r.createdAt,
+		})),
+	).slice(-maxPairs);
+
+	if (pairs.length === 0) {
+		const last = rows.at(-1)?.createdAt;
+		if (last) await setCursor("extract_lessons", last.toISOString());
+		return { pairs: 0, lessons: 0, patterns: 0 };
+	}
+
+	// scope stamps: lessons learned from a doc inherit that doc's kind+genre,
+	// so a LinkedIn-post lesson never lints an email (and vice versa)
+	const docIds = [...new Set(pairs.filter((p) => p.entity === "doc").map((p) => p.entityId))];
+	const docRows = docIds.length
+		? await db.select({ id: docs.id, kind: docs.kind, genre: docs.genre }).from(docs).where(inArray(docs.id, docIds))
+		: [];
+	const docById = new Map(docRows.map((d) => [d.id, d]));
+	const scopeForPair = (p: { entity: string; entityId: string }): { surface: string; genre?: string | null } => {
+		if (p.entity === "doc") {
+			const d = docById.get(p.entityId);
+			return { surface: d ? docSurface(d.kind) : "docs", genre: d?.genre ?? null };
+		}
+		return { surface: surfaceForPair(p.entity) };
+	};
+
+	let lessons = 0;
+	let patterns = 0;
+	let newest: Date | null = null;
+	for (const p of pairs) {
+		const prompt = `PAIR — agent draft:
+${p.agent.content.slice(0, maxChars)}
+
+Collin's final:
+${p.human.content.slice(0, maxChars)}`;
+		const out = parseJsonArray(await llm(LESSONS_SYSTEM, prompt)) as {
+			lesson?: string;
+			entity?: string;
+			patterns?: PatternCandidate[];
+		}[];
+		for (const item of out) {
+			if (!item?.lesson) continue;
+			const scope = scopeForPair(p);
+			await insertFacts(
+				[{ entity: item.entity ?? "voice", fact: item.lesson, kind: "lesson", notability: "high", confidence: 0.9 }],
+				{ sourceTable: "text_versions", sourceId: p.human.id, surface: scope.surface, genre: scope.genre ?? null },
+			);
+			lessons++;
+			if (item.patterns?.length) {
+				patterns += await addVoicePatterns(item.patterns, item.lesson, scope);
+			}
+		}
+		if (!newest || p.human.createdAt > newest) newest = p.human.createdAt;
+	}
+	if (newest) await setCursor("extract_lessons", newest.toISOString());
+	return { pairs: pairs.length, lessons, patterns };
+}
+
+// ── extract_facts ──────────────────────────────────────────────────
+
+type ExtractedFact = {
+	entity: string;
+	fact: string;
+	kind?: string;
+	notability?: string;
+	confidence?: number;
+};
+
+const EXTRACT_SYSTEM = `You extract durable facts for a consulting firm's company brain.
+Given recent workspace content (emails, doc edits), output a JSON array of facts worth remembering:
+[{"entity": "<client/person/project name as it appears>", "fact": "<one atomic, durable statement>", "kind": "event|preference|commitment|belief|fact|idea", "notability": "high|medium|low", "confidence": 0.0-1.0}]
+Rules: only durable facts (relationships, decisions, preferences, commitments, project state) — not chatter.
+Never invent. One atomic fact per item. Output ONLY the JSON array.`;
+
+/** Which surface a lesson/fact applies to — rules differ per surface. */
+export function surfaceForPair(entity: string): string {
+	if (entity === "email_draft") return "email";
+	if (entity === "doc") return "docs";
+	return entity;
+}
+
+/** Insert facts with deterministic dedup (entity + normalized-text hash). */
+export async function insertFacts(
+	facts: (ExtractedFact & { speaker?: string })[],
+	provenance: { sourceTable: string; sourceId?: string; surface?: string; genre?: string | null },
+) {
+	let inserted = 0;
+	let skipped = 0;
+	for (const f of facts) {
+		if (!f?.entity || !f?.fact) continue;
+		try {
+			await db
+				.insert(brainFacts)
+				.values({
+					entitySlug: slugify(f.entity),
+					fact: f.fact,
+					kind: (f.kind as never) ?? "fact",
+					notability: (f.notability as never) ?? "medium",
+					confidence: typeof f.confidence === "number" ? Math.min(1, Math.max(0, f.confidence)) : 1,
+					sourceTable: provenance.sourceTable,
+					sourceId: provenance.sourceId,
+					surface: provenance.surface,
+					genre: provenance.genre?.trim().toLowerCase() || null,
+					context: f.speaker ? `said by ${f.speaker}` : null,
+					factHash: factHash(f.fact),
+				})
+				.onConflictDoNothing({ target: [brainFacts.entitySlug, brainFacts.factHash] });
+			inserted++;
+		} catch {
+			skipped++;
+		}
+	}
+	return { inserted, skipped };
+}
+
+/** Extract facts from email + doc-version content newer than the cursor. */
+export async function extractFacts(opts: { maxChars?: number } = {}): Promise<{ inserted: number; skipped: number; sources: number }> {
+	const maxChars = opts.maxChars ?? 24000;
+	const since = await getCursor("extract_facts");
+	const sinceDate = since ? new Date(since) : new Date(Date.now() - 7 * 86_400_000);
+
+	const emails = await db
+		.select({
+			id: emailMessages.id,
+			date: emailMessages.date,
+			subject: emailThreads.subject,
+			from: emailMessages.fromName,
+			body: emailMessages.bodyText,
+		})
+		.from(emailMessages)
+		.innerJoin(emailThreads, eq(emailThreads.id, emailMessages.threadId))
+		.where(gt(emailMessages.date, sinceDate))
+		.orderBy(desc(emailMessages.date))
+		.limit(40);
+
+	const docEdits = await db
+		.select({
+			id: textVersions.id,
+			date: textVersions.createdAt,
+			author: textVersions.author,
+			content: textVersions.content,
+		})
+		.from(textVersions)
+		.where(and(gt(textVersions.createdAt, sinceDate), eq(textVersions.entity, "doc")))
+		.orderBy(desc(textVersions.createdAt))
+		.limit(20);
+
+	// build the batch, newest first, capped at maxChars
+	let batch = "";
+	let newest: Date | null = null;
+	let sources = 0;
+	for (const m of emails) {
+		const block = `EMAIL ${m.date.toISOString()} — ${m.subject} (from ${m.from ?? "unknown"}):\n${(m.body ?? "").slice(0, 4000)}\n\n`;
+		if (batch.length + block.length > maxChars) break;
+		batch += block;
+		if (!newest || m.date > newest) newest = m.date;
+		sources++;
+	}
+	for (const d of docEdits) {
+		const block = `DOC EDIT ${d.date.toISOString()} (${d.author}):\n${d.content.slice(0, 4000)}\n\n`;
+		if (batch.length + block.length > maxChars) break;
+		batch += block;
+		if (!newest || d.date > newest) newest = d.date;
+		sources++;
+	}
+
+	if (!batch.trim()) {
+		if (newest) await setCursor("extract_facts", newest.toISOString());
+		return { inserted: 0, skipped: 0, sources: 0 };
+	}
+
+	const out = parseJsonArray(await llm(EXTRACT_SYSTEM, batch)) as ExtractedFact[];
+	const res = await insertFacts(out, { sourceTable: "email_messages" });
+	if (newest) await setCursor("extract_facts", newest.toISOString());
+	return { ...res, sources };
+}
+
+// ── extract_transcripts (meetings, speaker-attributed) ─────────────
+
+const TRANSCRIPT_SYSTEM = `You extract durable facts from a meeting transcript for a consulting firm's company brain.
+Output a JSON array:
+[{"entity": "<client/project the fact is about>", "speaker": "<who said it, exactly as labeled>", "fact": "<one atomic durable statement, attributed>", "kind": "event|preference|commitment|belief|fact|idea", "notability": "high|medium|low", "confidence": 0.0-1.0}]
+Rules: decisions, commitments, preferences, objections, project state — not small talk. Attribute the fact to its speaker in "speaker". Never invent. Output ONLY the JSON array.`;
+
+/**
+ * Distill meeting transcripts into speaker-attributed facts. Reprocessing
+ * (after diarization improves) expires the old document-sourced facts and
+ * re-extracts — the audit trail keeps the expired rows.
+ */
+export async function extractTranscripts(
+	opts: { maxChars?: number; reprocess?: boolean } = {},
+): Promise<{ meetings: number; inserted: number }> {
+	const maxChars = opts.maxChars ?? 24000;
+	if (opts.reprocess) {
+		await db
+			.update(brainFacts)
+			.set({ expiredAt: new Date() })
+			.where(and(eq(brainFacts.sourceTable, "documents"), isNull(brainFacts.expiredAt)));
+		await setCursor("extract_transcripts", "");
+	}
+	const since = await getCursor("extract_transcripts");
+	const sinceDate = since ? new Date(since) : new Date(Date.now() - 90 * 86_400_000);
+
+	const meetings = await db
+		.select({
+			id: documents.id,
+			title: documents.title,
+			transcriptJson: documents.transcriptJson,
+			createdAt: documents.createdAt,
+			company: companies.name,
+		})
+		.from(documents)
+		.leftJoin(projects, eq(projects.id, documents.projectId))
+		.leftJoin(companies, eq(companies.id, projects.companyId))
+		.where(and(eq(documents.type, "transcript"), gt(documents.createdAt, sinceDate)))
+		.orderBy(desc(documents.createdAt))
+		.limit(5);
+
+	let inserted = 0;
+	let newest: Date | null = null;
+	for (const doc of meetings) {
+		if (!doc.transcriptJson) continue;
+		let turns: { speaker?: string; text?: string }[] = [];
+		try {
+			turns = JSON.parse(doc.transcriptJson) as typeof turns;
+		} catch {
+			continue;
+		}
+		const transcript = turns
+			.map((t) => `[${t.speaker ?? "unknown"}]: ${t.text ?? ""}`)
+			.join("\n")
+			.slice(0, maxChars);
+		if (!transcript.trim()) continue;
+
+		const out = parseJsonArray(
+			await llm(
+				TRANSCRIPT_SYSTEM,
+				`Meeting: ${doc.title}${doc.company ? ` (client: ${doc.company})` : ""}\n\nTranscript:\n${transcript}`,
+			),
+		) as ExtractedFact[];
+		const res = await insertFacts(out, { sourceTable: "documents", sourceId: doc.id, surface: "transcript" });
+		inserted += res.inserted;
+		// deterministic person events: every speaker gets an audit fact on their
+		// person page — the base a person brief enriches from
+		const meetingDate = doc.createdAt.toISOString().slice(0, 10);
+		const speakerNames = [...new Set(turns.map((t) => (t.speaker ?? "").trim()).filter(Boolean))];
+		for (const speaker of speakerNames) {
+			if (/^speaker \d+$/i.test(speaker)) continue;
+			await insertFacts(
+				[
+					{
+						entity: `person ${speaker}`,
+						fact: `Spoke in the meeting "${doc.title}" (${meetingDate})`,
+						kind: "event",
+						notability: "low",
+						confidence: 1,
+					},
+				],
+				{ sourceTable: "documents", sourceId: doc.id, surface: "transcript" },
+			);
+		}
+		if (!newest || doc.createdAt > newest) newest = doc.createdAt;
+	}
+	if (newest && !opts.reprocess) await setCursor("extract_transcripts", newest.toISOString());
+	if (opts.reprocess) await setCursor("extract_transcripts", new Date().toISOString());
+	return { meetings: meetings.length, inserted };
+}
+
+// ── extract_slack_facts ────────────────────────────────────────────
+
+/** Extract facts from slack messages newer than the cursor (channel hinted). */
+export async function extractSlackFacts(opts: { maxChars?: number } = {}): Promise<{ inserted: number; sources: number }> {
+	const maxChars = opts.maxChars ?? 20000;
+	const since = await getCursor("extract_slack");
+	const sinceDate = since ? new Date(since) : new Date(Date.now() - 7 * 86_400_000);
+
+	const rows = await db
+		.select({
+			id: slackMessages.id,
+			date: slackMessages.messageAt,
+			text: slackMessages.text,
+			channel: slackChannels.name,
+			userName: slackMessages.userName,
+		})
+		.from(slackMessages)
+		.innerJoin(slackChannels, eq(slackChannels.id, slackMessages.channelId))
+		.where(gt(slackMessages.messageAt, sinceDate))
+		.orderBy(slackMessages.messageAt)
+		.limit(120);
+
+	if (rows.length === 0) return { inserted: 0, sources: 0 };
+
+	// one batch, channel+author labeled; provenance is table-level (slack
+	// messages are chatty — per-fact source ids aren't worth the token cost)
+	let batch = "";
+	let newest: Date | null = null;
+	for (const r of rows) {
+		const block = `SLACK #${r.channel} ${r.date.toISOString()} — ${r.userName}: ${r.text.slice(0, 500)}\n`;
+		if (batch.length + block.length > maxChars) break;
+		batch += block;
+		if (!newest || r.date > newest) newest = r.date;
+	}
+	if (!batch.trim()) return { inserted: 0, sources: 0 };
+
+	const out = parseJsonArray(await llm(EXTRACT_SYSTEM, batch)) as ExtractedFact[];
+	const res = await insertFacts(out, { sourceTable: "slack_messages", surface: "slack" });
+	if (newest) await setCursor("extract_slack", newest.toISOString());
+	return { inserted: res.inserted, sources: rows.length };
+}
+
+// ── consolidate (facts → takes) ────────────────────────────────────
+
+const CONSOLIDATE_SYSTEM = `You consolidate facts about one entity into a single durable "take".
+Given a list of facts, output a JSON array with exactly one object:
+[{"claim": "<one paragraph synthesizing the current state of this entity>", "weight": 0.0-1.0}]
+The claim must be consistent with the facts, no speculation. Output ONLY the JSON array.`;
+
+/** Cluster unconsolidated facts per entity → one take (facts stay as audit). */
+export async function consolidate(opts: { minFacts?: number; entitySlug?: string } = {}): Promise<{ entities: number }> {
+	const minFacts = opts.minFacts ?? 5;
+	const clusters = await db
+		.select({ entitySlug: brainFacts.entitySlug, n: sql<number>`count(*)::int` })
+		.from(brainFacts)
+		.where(
+			and(
+				isNull(brainFacts.consolidatedAt),
+				isNull(brainFacts.expiredAt),
+				opts.entitySlug ? eq(brainFacts.entitySlug, opts.entitySlug) : sql`true`,
+			),
+		)
+		.groupBy(brainFacts.entitySlug)
+		.having(sql`count(*) >= ${minFacts}`);
+
+	let entities = 0;
+	for (const c of clusters) {
+		const facts = await db
+			.select({ fact: brainFacts.fact })
+			.from(brainFacts)
+			.where(and(eq(brainFacts.entitySlug, c.entitySlug), isNull(brainFacts.consolidatedAt)))
+			.orderBy(desc(brainFacts.createdAt))
+			.limit(50);
+		const out = parseJsonArray(
+			await llm(CONSOLIDATE_SYSTEM, `Entity: ${c.entitySlug}\n\nFacts:\n${facts.map((f) => `- ${f.fact}`).join("\n")}`),
+		) as { claim?: string; weight?: number }[];
+		const claim = out[0]?.claim;
+		if (!claim) continue;
+
+		const [page] = await db
+			.select({ id: brainPages.id })
+			.from(brainPages)
+			.where(eq(brainPages.slug, c.entitySlug))
+			.limit(1);
+		let pageId = page?.id;
+		if (!pageId) {
+			const [created] = await db
+				.insert(brainPages)
+				.values({ slug: c.entitySlug, type: "take", title: c.entitySlug })
+				.returning({ id: brainPages.id });
+			pageId = created.id;
+		}
+		const [last] = await db
+			.select({ rowNum: brainTakes.rowNum })
+			.from(brainTakes)
+			.where(eq(brainTakes.pageId, pageId))
+			.orderBy(desc(brainTakes.rowNum))
+			.limit(1);
+		await db.insert(brainTakes).values({
+			pageId,
+			rowNum: (last?.rowNum ?? 0) + 1,
+			claim,
+			kind: "fact",
+			weight: typeof out[0]?.weight === "number" ? Math.min(1, Math.max(0, out[0].weight)) : 0.5,
+		});
+		// mark the cluster consolidated — pointers keep the audit trail
+		const factIds = await db
+			.select({ id: brainFacts.id })
+			.from(brainFacts)
+			.where(and(eq(brainFacts.entitySlug, c.entitySlug), isNull(brainFacts.consolidatedAt)));
+		if (factIds.length > 0) {
+			await db
+				.update(brainFacts)
+				.set({ consolidatedAt: new Date(), consolidatedInto: pageId })
+				.where(inArray(brainFacts.id, factIds.map((f) => f.id)));
+		}
+		entities++;
+	}
+	return { entities };
+}
+
+// ── enrich (page body from facts + takes) ──────────────────────────
+
+const ENRICH_SYSTEM = `You write a concise entity brief (max 200 words) for a consulting firm's company brain.
+Input: facts and takes. Output ONLY the brief as markdown — who they are, current state, active threads, what to remember before talking to them. No preamble.`;
+
+/** Synthesize compiled_truth for thin entity pages from their facts/takes. */
+export async function enrich(opts: { slug?: string } = {}): Promise<{ enriched: number }> {
+	const pages = await db
+		.select({ id: brainPages.id, slug: brainPages.slug, truth: brainPages.compiledTruth })
+		.from(brainPages)
+		.where(
+			and(
+				eq(brainPages.type, "entity"),
+				isNull(brainPages.deletedAt),
+				opts.slug ? eq(brainPages.slug, opts.slug) : sql`length(${brainPages.compiledTruth}) < 200`,
+			),
+		)
+		.limit(10);
+
+	let enriched = 0;
+	for (const p of pages) {
+		const facts = await db
+			.select({ fact: brainFacts.fact })
+			.from(brainFacts)
+			.where(and(eq(brainFacts.entitySlug, p.slug), isNull(brainFacts.expiredAt)))
+			.orderBy(desc(brainFacts.createdAt))
+			.limit(30);
+		if (facts.length === 0) continue;
+		const takes = await db.select({ claim: brainTakes.claim }).from(brainTakes).where(eq(brainTakes.pageId, p.id));
+		const brief = await llm(
+			ENRICH_SYSTEM,
+			`Facts:\n${facts.map((f) => `- ${f.fact}`).join("\n")}\n\nTakes:\n${takes.map((t) => `- ${t.claim}`).join("\n")}`,
+		);
+		if (!brief.trim()) continue;
+		await db.update(brainPages).set({ compiledTruth: brief }).where(eq(brainPages.id, p.id));
+		await rechunkPage(p.id, brief);
+		enriched++;
+	}
+	return { enriched };
+}
+
+/** Rebuild the retrieval chunks for a page (call after body changes). */
+export async function rechunkPage(pageId: string, body: string) {
+	await db.delete(brainChunks).where(eq(brainChunks.pageId, pageId));
+	const chunks = chunkText(body);
+	if (chunks.length === 0) return;
+	await db.insert(brainChunks).values(
+		chunks.map((c, i) => ({
+			pageId,
+			chunkIndex: i,
+			chunkText: c,
+			tokenCount: Math.ceil(c.length / 4),
+		})),
+	);
+}
+
+// ── consolidate_voice (nightly hygiene: every lesson + pattern earns its keep) ──
+
+const VOICE_CONSOLIDATE_SYSTEM = `You curate a writing-voice rulebase derived from an editor's real edits.
+Input: active voice lessons (id, text, surface, genre, confidence) and lint patterns (id, rule, pattern, direction, override_count).
+Output JSON array:
+[{"kind":"merge","keep":"<lesson-id>","absorb":["<lesson-id>",...],"text":"<optional sharpened merged lesson>"},
+ {"kind":"retire","id":"<lesson-id>","reason":"..."},
+ {"kind":"pattern","id":"<pattern-id>","action":"disable"|"merge_into"|"keep","merge_into":"<pattern-id when action=merge_into>","confidence_delta":-0.2..0.2,"reason":"..."}]
+Rules: merge only lessons saying the SAME thing in different words — keep the clearest, rewrite only when a merge sharpens it. Retire lessons that are obsolete, tied to one old draft, or contradicted by a newer one. Patterns: "disable" when too broad or it flags text the editor actually writes (especially override_count >= 2); "merge_into" when it duplicates another pattern (the kept one stays); ±0.1 confidence nudges for merely noisy ones. Be conservative: a wrong deletion costs voice quality, mild redundancy costs little. Output ONLY the JSON array.`;
+
+/** Deterministic half of nightly voice hygiene — pure, unit-tested:
+ *  patterns overridden >=3 times are auto-disabled (the human overrode them
+ *  enough that they're wrong), and active lessons beyond the cap are the
+ *  lowest-confidence ones. */
+export function planVoiceConsolidation(
+	lessons: { id: string; confidence: number }[],
+	patterns: { id: string; overrideCount: number }[],
+	opts: { maxLessons?: number; overrideLimit?: number } = {},
+) {
+	const maxLessons = opts.maxLessons ?? 60;
+	const overrideLimit = opts.overrideLimit ?? 3;
+	const autoDisable = patterns.filter((p) => p.overrideCount >= overrideLimit).map((p) => p.id);
+	const keep = [...lessons].sort((a, b) => b.confidence - a.confidence).slice(0, maxLessons);
+	const capRetire = lessons.filter((l) => !keep.some((k) => k.id === l.id)).map((l) => l.id);
+	return { autoDisable, capRetire };
+}
+
+/** Nightly LLM pass over lessons + patterns: merge near-duplicates (supersession
+ *  pointers keep the audit trail), retire stale ones, disable wrong patterns,
+ *  nudge confidences. Deterministic rules handle the clear cases first. */
+export async function consolidateVoice(): Promise<{
+	lessonsMerged: number;
+	lessonsRetired: number;
+	lessonsCapped: number;
+	patternsDisabled: number;
+	patternsMerged: number;
+	patternsAdjusted: number;
+}> {
+	const lessons = await db
+		.select({ id: brainFacts.id, fact: brainFacts.fact, surface: brainFacts.surface, genre: brainFacts.genre, confidence: brainFacts.confidence })
+		.from(brainFacts)
+		.where(and(eq(brainFacts.entitySlug, "voice"), eq(brainFacts.kind, "lesson"), isNull(brainFacts.expiredAt)))
+		.orderBy(desc(brainFacts.confidence))
+		.limit(200);
+	const patterns = await db
+		.select({ id: voicePatterns.id, rule: voicePatterns.rule, pattern: voicePatterns.pattern, direction: voicePatterns.direction, overrideCount: voicePatterns.overrideCount, surface: voicePatterns.surface, genre: voicePatterns.genre })
+		.from(voicePatterns)
+		.where(eq(voicePatterns.enabled, true))
+		.limit(300);
+
+	const out = { lessonsMerged: 0, lessonsRetired: 0, lessonsCapped: 0, patternsDisabled: 0, patternsMerged: 0, patternsAdjusted: 0 };
+	const lessonIds = new Set(lessons.map((l) => l.id));
+	const patternIds = new Set(patterns.map((p) => p.id));
+	const now = new Date();
+	const retire = async (id: string, into: string | null) => {
+		await db
+			.update(brainFacts)
+			.set({ expiredAt: now, consolidatedAt: now, ...(into ? { supersededBy: into, consolidatedInto: into } : {}) })
+			.where(eq(brainFacts.id, id));
+	};
+
+	// deterministic: humans overrode this pattern enough — it's wrong; cap the active set
+	const plan = planVoiceConsolidation(lessons, patterns);
+	for (const id of plan.autoDisable) {
+		await db.update(voicePatterns).set({ enabled: false }).where(eq(voicePatterns.id, id));
+		out.patternsDisabled++;
+	}
+	for (const id of plan.capRetire) {
+		if (!lessonIds.has(id)) continue;
+		await retire(id, null);
+		out.lessonsCapped++;
+	}
+
+	// LLM curation — one call, conservative actions only. It sees the post-cap
+	// ACTIVE set (the retired excess is already gone from consideration) and
+	// runs under a hard timeout so one slow completion can't wedge the cycle.
+	const activeLessons = lessons.filter((l) => !plan.capRetire.includes(l.id));
+	if (activeLessons.length + patterns.length > 0) {
+		try {
+			const prompt = `Lessons:
+${activeLessons.map((l) => `- [${l.id}] (${l.surface ?? "any"}/${l.genre ?? "any"}, conf ${l.confidence.toFixed(2)}) ${l.fact}`).join("\n")}
+Patterns:
+${patterns.map((p) => `- [${p.id}] ${p.direction}: "${p.rule}" matches /${p.pattern}/ (${p.surface ?? "any"}/${p.genre ?? "any"}, overridden ${p.overrideCount}x)`).join("\n")}`;
+			const actions = parseJsonArray(
+				await llm(VOICE_CONSOLIDATE_SYSTEM, prompt, {
+				timeoutMs: 180_000,
+				model: process.env.VOICE_MODEL || "z-ai/glm-5.3-flash",
+				// unbounded reasoning hangs this call for minutes — a budget lands it in ~15s
+				reasoningMaxTokens: 4000,
+			}),
+			) as {
+				kind?: string;
+				keep?: string;
+				absorb?: string[];
+				text?: string;
+				id?: string;
+				action?: string;
+				merge_into?: string;
+				confidence_delta?: number;
+			}[];
+			for (const a of actions) {
+				if (a.kind === "merge" && a.keep && lessonIds.has(a.keep)) {
+					const absorbed = (a.absorb ?? []).filter((id) => lessonIds.has(id) && id !== a.keep);
+					if (!absorbed.length && !a.text) continue;
+					for (const id of absorbed) {
+						await retire(id, a.keep);
+						out.lessonsMerged++;
+					}
+					if (a.text && a.text.length <= 300) {
+						await db
+							.update(brainFacts)
+							.set({ fact: a.text, confidence: sql`least(${brainFacts.confidence} + 0.05, 1)` })
+							.where(eq(brainFacts.id, a.keep));
+					}
+				} else if (a.kind === "retire" && a.id && lessonIds.has(a.id)) {
+					await retire(a.id, null);
+					out.lessonsRetired++;
+				} else if (a.kind === "pattern" && a.id && patternIds.has(a.id)) {
+					const delta = typeof a.confidence_delta === "number" ? Math.max(-0.2, Math.min(0.2, a.confidence_delta)) : 0;
+					if (a.action === "disable" || (a.action === "merge_into" && a.merge_into && patternIds.has(a.merge_into) && a.merge_into !== a.id)) {
+						await db.update(voicePatterns).set({ enabled: false }).where(eq(voicePatterns.id, a.id));
+						if (a.action === "merge_into") out.patternsMerged++;
+						else out.patternsDisabled++;
+					} else if (delta !== 0) {
+						await db
+							.update(voicePatterns)
+							.set({ confidence: sql`greatest(least(${voicePatterns.confidence} + ${delta}, 1), 0)` })
+							.where(eq(voicePatterns.id, a.id));
+						out.patternsAdjusted++;
+					}
+				}
+			}
+		} catch (e) {
+			console.error("[brain] consolidateVoice LLM pass failed:", e);
+		}
+	}
+	if (out.patternsDisabled || out.patternsMerged || out.patternsAdjusted) clearVoiceLintCache();
+	return out;
+}
+
+// ── cycle orchestrator ─────────────────────────────────────────────
+
+const CYCLE_STALE_MS = 24 * 3600_000;
+
+/** Full brain cycle: deterministic phases, then LLM distillation. */
+export async function runCycle(
+	opts: { skipLlm?: boolean; reprocessTranscripts?: boolean; slack?: boolean } = {},
+): Promise<Record<string, unknown>> {
+	const out: Record<string, unknown> = {};
+	if (opts.slack) {
+		try {
+			out.slackSync = await syncSlack();
+		} catch (e) {
+			out.slackSync = { error: e instanceof Error ? e.message : String(e) };
+		}
+	}
+	out.entities = await syncEntities();
+	out.persons = await syncPersons();
+	out.prospects = await syncProspects();
+	out.campaigns = await syncCampaigns();
+	out.loops = await detectLoops();
+	out.timeline = await backfillTimeline();
+	if (!opts.skipLlm) {
+		try {
+			out.extract = await extractFacts();
+		} catch (e) {
+			out.extract = { error: e instanceof Error ? e.message : String(e) };
+		}
+		try {
+			out.lessons = await extractLessons();
+		} catch (e) {
+			out.lessons = { error: e instanceof Error ? e.message : String(e) };
+		}
+		try {
+			out.voiceConsolidate = await consolidateVoice();
+		} catch (e) {
+			out.voiceConsolidate = { error: e instanceof Error ? e.message : String(e) };
+		}
+		try {
+			out.transcripts = await extractTranscripts({ reprocess: opts.reprocessTranscripts });
+		} catch (e) {
+			out.transcripts = { error: e instanceof Error ? e.message : String(e) };
+		}
+		try {
+			out.slackFacts = await extractSlackFacts();
+		} catch (e) {
+			out.slackFacts = { error: e instanceof Error ? e.message : String(e) };
+		}
+		try {
+			out.consolidate = await consolidate();
+		} catch (e) {
+			out.consolidate = { error: e instanceof Error ? e.message : String(e) };
+		}
+		try {
+			out.enrich = await enrich();
+		} catch (e) {
+			out.enrich = { error: e instanceof Error ? e.message : String(e) };
+		}
+		try {
+			out.embed = await embedPending();
+		} catch (e) {
+			out.embed = { error: e instanceof Error ? e.message : String(e) };
+		}
+	}
+	out.weight = await recomputeWeight();
+	await setCursor("last_cycle_at", new Date().toISOString());
+	return out;
+}
+
+/** Lazy trigger: run the cycle in the background if it's been >24h. */
+export async function maybeRunCycle(): Promise<boolean> {
+	const last = await getCursor("last_cycle_at");
+	if (last && Date.now() - new Date(last).getTime() < CYCLE_STALE_MS) return false;
+	void runCycle().catch(() => {});
+	return true;
+}
