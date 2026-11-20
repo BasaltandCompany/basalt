@@ -1,16 +1,13 @@
 // Replaces nitro's prerender of the static marketing pages (migration plan phase 6).
-// The generated nodeServer runtime serves static files only on exact hits — no
-// directory-index or .html fallback — so this script (1) spawns the built
-// artifact on an ephemeral port, saves the marketing pages into dist/client,
-// and (2) patches staticFile() in node-runtime.js to resolve <path>/index.html
-// and <path>.html so pretty URLs hit the prerendered files.
+// Writes the marketing pages into dist/client; scripts/bun-server.ts serves
+// them with pretty-URL resolution (index.html / <path>.html).
 // Runs as the postbuild script (bun run executes pre/post hooks).
 // We spawn instead of importing dist/server/server.js because importing boots
 // the scheduler (serverSetup) — side effects we don't want in a build step.
 // /scorecard is NOT prerendered: it is a deliberate 302 to /brain (retired
 // lead magnet — see src/routes/scorecard.ts); a static file would shadow it.
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import path from "node:path";
 
 const dist = path.join(import.meta.dir, "..", "dist");
@@ -50,23 +47,3 @@ try {
 	server.kill();
 }
 
-// Patch the generated staticFile() for pretty URLs (idempotent).
-// statSync().isFile(), not existsSync(): bun's path.join(clientRoot, "/")
-// keeps the trailing slash, so the directory itself "exists" and sendFile
-// would reject it, silently falling back to SSR.
-const rt = path.join(dist, "server", "node-runtime.js");
-let src = readFileSync(rt, "utf8");
-if (!src.includes("statSync(f).isFile()")) {
-	const anchor = `return file.startsWith(clientRoot + path.sep) ? file : null;`;
-	if (!src.includes(anchor)) throw new Error("prerender: staticFile anchor not found — @solidjs/vite-plugin changed its output");
-	src = src.replace(
-		anchor,
-		`const candidates = [file, file + ".html", path.join(file, "index.html")];\n\treturn candidates.filter((f) => f.startsWith(clientRoot + path.sep)).find((f) => { try { return statSync(f).isFile(); } catch { return false; } }) ?? null;`,
-	);
-	src = src.replace(
-		`import { stat } from "node:fs/promises";`,
-		`import { stat } from "node:fs/promises";\nimport { statSync } from "node:fs";`,
-	);
-	writeFileSync(rt, src);
-	console.log("prerender: staticFile patched for pretty URLs");
-}

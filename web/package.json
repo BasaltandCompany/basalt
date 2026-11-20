@@ -7,7 +7,7 @@
     "build": "bun --bun vite build && bun run scripts/check-client-bundle.ts",
     "postbuild": "bun scripts/prerender.ts",
     "serve": "bun vite preview",
-    "start": "bun dist/server/node.js",
+    "start": "bun scripts/bun-server.ts",
     "typecheck": "tsc --noEmit",
     "test": "DATABASE_URL=postgres://dummy@localhost:5/dummy bun test",
     "prepare": "command -v git >/dev/null 2>&1 && git config core.hooksPath .githooks || true",

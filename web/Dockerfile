@@ -37,6 +37,10 @@ COPY --from=builder /app/web/dist ./web/dist
 COPY --from=builder /app/packages/ui ./packages/ui
 
 EXPOSE 3000
+# web/scripts holds bun-server.ts (the production entry) and prerender.ts
+COPY --from=builder /app/web/scripts ./web/scripts
+
+EXPOSE 3000
 ENV HOST=0.0.0.0 PORT=3000 NODE_ENV=production
 WORKDIR /app/web
-CMD ["bun", "dist/server/node.js"]
+CMD ["bun", "scripts/bun-server.ts"]
