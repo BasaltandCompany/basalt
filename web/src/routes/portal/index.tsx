@@ -48,6 +48,10 @@ export default function PortalHome() {
 								<div class="label">Open Invoices</div>
 								<div class="value">{d().invoiceCount}</div>
 							</div>
+							<div class="stat-card">
+								<div class="label">Hours logged · {Math.round((d().hoursThisWeek ?? 0) * 10) / 10}h this week</div>
+								<div class="value">{Math.round((d().hoursTotal ?? 0) * 10) / 10}h</div>
+							</div>
 							<a href="/portal/value" style={{ "text-decoration": "none" }}>
 								<div class="stat-card">
 									<div class="label">Saved to date</div>
@@ -79,6 +83,29 @@ export default function PortalHome() {
 								</For>
 							</div>
 						</div>
+
+
+						{/* ── Updates ─────────────────────────────── */}
+						<Show when={(d().updates ?? []).length > 0}>
+							<div style={{ "margin-top": "32px" }}>
+								<div class="section-heading">Updates</div>
+								<div style={{ display: "flex", "flex-direction": "column", gap: "12px" }}>
+									<For each={d().updates}>
+										{(u) => (
+											<Card style={{ padding: "20px" }}>
+												<div class="muted" style={{ "font-size": "12px" }}>
+													{u.projectName} · {new Date(u.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+												</div>
+												<Show when={u.title}>
+													<div style={{ "font-size": "15px", "font-weight": 500, "margin-top": "4px" }}>{u.title}</div>
+												</Show>
+												<div style={{ "font-size": "14px", "line-height": "1.55", "margin-top": "6px", "white-space": "pre-line" }}>{u.body}</div>
+											</Card>
+										)}
+									</For>
+								</div>
+							</div>
+						</Show>
 
 						{/* ── Deliverables ─────────────────────────── */}
 						<div style={{ "margin-top": "32px" }}>

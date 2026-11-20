@@ -1,6 +1,6 @@
 import { query, formAction, revalidate } from "@solidjs/router";
 import { redirect } from "@solidjs/web";
-import { eq, and, desc, inArray } from "drizzle-orm";
+import { eq, and, desc, inArray, ne } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm";
 import { getClient, clientSignIn, setClientSessionCookie } from "./client-session";
 import { supabaseAdmin, supabaseService } from "./supabase";
@@ -15,6 +15,7 @@ import {
 	invoices,
 	deliverables,
 	deliverableUpdates,
+	projectUpdates,
 	apiKeys,
 	quotes,
 	quoteItems,
@@ -52,7 +53,7 @@ export const getClientDashboardQuery = query(async () => {
 
 	const companyIds = memberCompanies.map((c) => c.companyId);
 	if (companyIds.length === 0)
-		return { projects: [], deliverables: [], docCount: 0, invoiceCount: 0 };
+		return { projects: [], deliverables: [], docCount: 0, invoiceCount: 0, updates: [], hoursThisWeek: 0, hoursTotal: 0 };
 
 	// All projects across the member's companies
 	const memberProjects = await db
@@ -128,11 +129,41 @@ export const getClientDashboardQuery = query(async () => {
 					)
 			: [];
 
+	// Project status updates feed + hours — the client's "live status" view.
+	const updateRows =
+		projectIds.length > 0
+			? await db
+					.select({
+						id: projectUpdates.id,
+						projectId: projectUpdates.projectId,
+						title: projectUpdates.title,
+						body: projectUpdates.body,
+						createdAt: projectUpdates.createdAt,
+						projectName: projects.name,
+					})
+					.from(projectUpdates)
+					.innerJoin(projects, eq(projects.id, projectUpdates.projectId))
+					.where(inArray(projectUpdates.projectId, projectIds))
+					.orderBy(desc(projectUpdates.createdAt))
+					.limit(20)
+			: [];
+	const entryRows =
+		projectIds.length > 0
+			? await db
+					.select({ hours: timeEntries.hours, entryDate: timeEntries.entryDate })
+					.from(timeEntries)
+					.where(inArray(timeEntries.projectId, projectIds))
+			: [];
+	const weekStart = new Date(Date.now() - 7 * 86_400_000);
+
 	return {
 		projects: memberProjects,
 		deliverables: deliverablesWithUpdates,
 		docCount: docRows.length,
 		invoiceCount: invoiceRows.length,
+		updates: updateRows,
+		hoursThisWeek: entryRows.filter((e) => new Date(e.entryDate) >= weekStart).reduce((s, e) => s + e.hours, 0),
+		hoursTotal: entryRows.reduce((s, e) => s + e.hours, 0),
 	};
 }, "client-dashboard");
 
@@ -452,7 +483,7 @@ export const getClientQuotesQuery = query(async () => {
 		})
 		.from(quotes)
 		.innerJoin(companies, eq(companies.id, quotes.companyId))
-		.where(inArray(quotes.companyId, companyIds))
+		.where(and(inArray(quotes.companyId, companyIds), ne(quotes.status, "draft")))
 		.orderBy(desc(quotes.updatedAt));
 	const allItems = await db.select().from(quoteItems);
 	return rows.map((q) => ({
@@ -476,7 +507,7 @@ export const getClientQuoteQuery = query(async (id: string) => {
 		.innerJoin(companies, eq(companies.id, quotes.companyId))
 		.where(and(eq(quotes.id, id), inArray(quotes.companyId, companyIds.length > 0 ? companyIds : ["00000000-0000-0000-0000-000000000000"])))
 		.limit(1);
-	if (!row) return null;
+	if (!row || row.quote.status === "draft") return null; // drafts are admin-only until sent
 	const [items, bodyDoc, versions, signatures] = await Promise.all([
 		db.select().from(quoteItems).where(eq(quoteItems.quoteId, id)).orderBy(quoteItems.sortOrder),
 		db.select({ id: docs.id, markdown: docs.markdown }).from(docs).where(eq(docs.id, row.quote.bodyDocId)).limit(1),

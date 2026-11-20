@@ -17,6 +17,7 @@ import {
 	invoices,
 	deliverables,
 	deliverableUpdates,
+	projectUpdates,
 	timeEntries,
 	tools,
 	apiKeys,
@@ -53,6 +54,8 @@ import { generateApiKey, hashKey, keyPrefix } from "~/lib/crypto";
 import { normalizeBrainTools } from "~/lib/brain-activity";
 import { contactSuggestionsFor, latestThreadFor } from "~/lib/outreach-email";
 import { triggerSyncIfStale } from "~/lib/email-queries";
+import { lintVoiceText, recordLintOverrides } from "~/lib/voice-lint-db";
+import { sendStatusUpdateEmail, sendQuoteReadyEmail } from "~/lib/notify";
 import { campaignStats } from "~/lib/campaign-stats";
 import { setProspectVideo } from "~/lib/videos";
 import { createDoc } from "~/lib/docs";
@@ -1727,8 +1730,73 @@ export const setQuoteStatusAction = formAction(async (formData: FormData) => {
 		await db.update(projects).set({ fixedPrice: totals.total }).where(eq(projects.id, q.projectId));
 	}
 	await revalidate([getQuoteQuery.keyFor(id), getQuotesQuery.key, getProjectQuotesQuery.key, getProjectQuery.key, getProjectsQuery.key]);
-	return { success: `Status → ${status}.` };
+	// draft → sent ("ready for review") notifies the company's portal members.
+	// Deliberately re-fires on revise-and-resend — each sent is a new version.
+	// Email failure never fails the status change; the send result just shapes
+	// the toast.
+	let notifyNote = "";
+	if (status === "sent" && q.status === "draft" && formData.get("notify") !== "0") {
+		try {
+			const res = await sendQuoteReadyEmail(id);
+			if (res.ok) {
+				if (res.delivered > 0) notifyNote = ` Notified ${res.delivered} stakeholder${res.delivered === 1 ? "" : "s"}.`;
+				else if (res.note) notifyNote = ` ${res.note}`;
+			} else console.error("[quote-notify]", res.error);
+		} catch (e) {
+			console.error("[quote-notify]", e);
+		}
+	}
+	return { success: `Status → ${status}.${notifyNote}` };
 }, "setQuoteStatus");
+
+// Post a client-facing status update on a project; optionally broadcast it
+// to the company's active portal members through Resend. The body passes the
+// same voice-lint gate as outbox sends — avoid-violations block until the
+// human overrides. emailedAt records that the broadcast went out.
+export const postProjectUpdateAction = formAction(async (formData: FormData) => {
+	"use server";
+	await requireAdmin();
+	const projectId = String(formData.get("project_id") || "");
+	const title = String(formData.get("title") || "").trim();
+	const body = String(formData.get("body") || "").trim();
+	const notify = formData.get("notify") !== null;
+	const overrideLint = formData.get("override_lint") !== null;
+	if (!body) return { error: "Update cannot be empty." };
+	const [project] = await db.select({ id: projects.id }).from(projects).where(eq(projects.id, projectId)).limit(1);
+	if (!project) return { error: "Project not found." };
+
+	let emailedAt: Date | null = null;
+	let note = "";
+	if (notify) {
+		const lint = await lintVoiceText(body, { surface: "email" });
+		if (lint.avoidCount > 0 && !overrideLint) {
+			return { blocked: "voice_lint" as const, violations: lint.violations };
+		}
+		if (lint.avoidCount > 0 && overrideLint) {
+			await recordLintOverrides(lint.violations.map((v) => v.patternId), projectId);
+		}
+		const res = await sendStatusUpdateEmail({ projectId, title: title || null, body });
+		if (!res.ok) return { error: res.error };
+		if (res.delivered > 0) emailedAt = new Date();
+		note = res.note ?? (res.failed.length ? `Posted, but ${res.failed.length} send(s) failed: ${res.failed.join("; ")}` : `Emailed ${res.delivered} stakeholder${res.delivered === 1 ? "" : "s"}.`);
+	}
+
+	await db.insert(projectUpdates).values({ projectId, title: title || null, body, emailedAt });
+	await revalidate([getProjectQuery.keyFor(projectId), getProjectUpdatesQuery.keyFor(projectId)]);
+	return { success: note || "Update posted." };
+}, "postProjectUpdate");
+
+// Recent status updates for one project — the admin page's posted list.
+export const getProjectUpdatesQuery = query(async (projectId: string) => {
+	"use server";
+	await requireAdmin();
+	return db
+		.select()
+		.from(projectUpdates)
+		.where(eq(projectUpdates.projectId, projectId))
+		.orderBy(desc(projectUpdates.createdAt))
+		.limit(20);
+}, "project-updates");
 
 // ── People (contact profile pages /admin/contacts) ───────────────
 // A person = client_members row: one primary (login) email + extras in

@@ -13,7 +13,8 @@ import {
 	getProjectQuery,
 	getUserQuery,
 } from "~/lib/queries";
-import { createDeliverableAction, getDeliverablesQuery, deleteDeliverableAction, updateQuoteMetaAction, importQuoteToProjectAction, getProjectQuotesQuery, getQuotesQuery, getCompaniesForSelectQuery } from "~/lib/admin-queries";
+import { createDeliverableAction, getDeliverablesQuery, deleteDeliverableAction, updateQuoteMetaAction, importQuoteToProjectAction, getProjectQuotesQuery, getQuotesQuery, getCompaniesForSelectQuery, postProjectUpdateAction, getProjectUpdatesQuery } from "~/lib/admin-queries";
+import type { LintViolation } from "~/lib/voice-lint";
 import { updateProjectAction } from "~/lib/queries";
 import type { DeliverableStatus, ProjectStatus, QuoteStatus, Project } from "~/db/schema";
 import { money } from "~/lib/quotes";
@@ -54,6 +55,7 @@ export default function ProjectDetail() {
 	const deliverables = createMemo(() => getDeliverablesQuery(params.id!), { deferStream: true });
 	const companies = createMemo(() => getCompaniesForSelectQuery(), { deferStream: true });
 	const projectQuotes = createMemo(() => getProjectQuotesQuery(params.id!), { deferStream: true });
+	const projectUpdates = createMemo(() => getProjectUpdatesQuery(params.id!), { deferStream: true });
 	const allQuotes = createMemo(() => getQuotesQuery(), { deferStream: true });
 	const createEntry = useAction(createTimeEntryAction);
 	const deleteEntry = useAction(deleteTimeEntryAction);
@@ -68,6 +70,37 @@ export default function ProjectDetail() {
 	// not submit a duplicate entry.
 	const [logging, setLogging] = createSignal(false);
 	const [updateDeliverableId, setUpdateDeliverableId] = createSignal<string | null>(null);
+
+	// Status-update broadcast: post + optional stakeholder email. A voice-lint
+	// block keeps the violations visible with an override, like the outbox composer.
+	const postUpdate = useAction(postProjectUpdateAction);
+	const [posting, setPosting] = createSignal(false);
+	const [postMsg, setPostMsg] = createSignal("");
+	const [postIsError, setPostIsError] = createSignal(false);
+	type PostUpdateResult = { error?: string; success?: string; blocked?: "voice_lint"; violations?: LintViolation[] };
+	const [postBlocked, setPostBlocked] = createSignal<PostUpdateResult | null>(null);
+
+	async function handlePostUpdate(e: SubmitEvent) {
+		e.preventDefault();
+		const form = e.currentTarget as HTMLFormElement;
+		setPosting(true);
+		setPostMsg("");
+		setPostIsError(false);
+		setPostBlocked(null);
+		const res = (await postUpdate(new FormData(form))) as PostUpdateResult;
+		setPosting(false);
+		if (res?.blocked === "voice_lint") {
+			setPostBlocked(res);
+			return;
+		}
+		if (res?.error) {
+			setPostMsg(res.error);
+			setPostIsError(true);
+			return;
+		}
+		setPostMsg(res?.success ?? "Update posted.");
+		form.reset();
+	}
 	const [statusSaving, setStatusSaving] = createSignal(false);
 
 	const today = new Date().toISOString().slice(0, 10);
@@ -402,6 +435,62 @@ export default function ProjectDetail() {
 								projectId={params.id!}
 								referer={`/admin/projects/${params.id}`}
 							/>
+
+							{/* Status update broadcast */}
+							<div class="section-heading">Status Update</div>
+							<Card style={{ "margin-bottom": "32px" }}>
+								<form onSubmit={handlePostUpdate}>
+									<input type="hidden" name="project_id" value={p().id} />
+									<div class="form-group">
+										<label for="update_title">Title (optional)</label>
+										<input id="update_title" name="title" placeholder="Weekly update" />
+									</div>
+									<div class="form-group">
+										<label for="update_body">Update</label>
+										<textarea id="update_body" name="body" rows={4} required placeholder="What moved this week…" />
+									</div>
+									<div class="form-group">
+										<label style={{ display: "flex", "align-items": "center", gap: "8px", cursor: "pointer" }}>
+											<input type="checkbox" name="notify" checked style={{ width: "auto" }} />
+											Email stakeholders
+										</label>
+									</div>
+									<Show when={postBlocked()}>
+										{(blocked) => (
+											<div class="form-group">
+												<p class="login-error">Voice rules flagged {blocked().violations?.length ?? 0} thing(s):</p>
+												<ul style={{ "font-size": "13px", margin: "6px 0 12px", "padding-left": "20px" }}>
+													<For each={blocked().violations ?? []}>{(v) => <li>{v.rule}: “{v.matched}”</li>}</For>
+												</ul>
+												<label style={{ display: "flex", "align-items": "center", gap: "8px", cursor: "pointer" }}>
+													<input type="checkbox" name="override_lint" style={{ width: "auto" }} />
+													Send anyway (override)
+												</label>
+											</div>
+										)}
+									</Show>
+									<Show when={postMsg()}>
+										<p class={postIsError() ? "login-error" : "muted"} style={{ "margin-bottom": "12px" }}>{postMsg()}</p>
+									</Show>
+									<Button type="submit" disabled={posting()}>{posting() ? "Posting…" : "Post update"}</Button>
+								</form>
+								<Show when={(projectUpdates() ?? []).length > 0}>
+									<div style={{ "margin-top": "24px", "border-top": "1px solid rgba(0,0,0,0.08)", "padding-top": "16px" }}>
+										<div class="muted" style={{ "font-size": "12px", "margin-bottom": "8px" }}>Recent updates</div>
+										<For each={projectUpdates()}>
+											{(u) => (
+												<div style={{ "margin-bottom": "10px" }}>
+													<span class="muted" style={{ "font-size": "12px" }}>{new Date(u.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+													{" · "}
+													<span style={{ "font-size": "13px" }}>{u.title ?? u.body.slice(0, 80)}</span>
+													<Show when={u.emailedAt}><span class="badge badge-completed" style={{ "margin-left": "8px", "font-size": "11px" }}>emailed</span></Show>
+												</div>
+											)}
+										</For>
+									</div>
+								</Show>
+							</Card>
+
 
 							{/* Log form — admin only */}
 							<div class="section-heading">Log Time</div>

@@ -26,7 +26,7 @@ export default function PortalQuoteDetail() {
 	return (
 		<PortalLayout user={user()}>
 			<Title>Quote — Basalt Client Portal</Title>
-			<Show when={quote()} fallback={<p class="muted">Loading…</p>}>
+				<Show when={quote()} fallback={<p class="muted">Quote not found or not shared yet.</p>}>
 				{(q) => (
 					<div style={{ "max-width": "820px", margin: "0 auto" }}>
 						<div style={{ display: "flex", "justify-content": "space-between", "align-items": "center", gap: "12px", "margin-bottom": "24px" }}>
