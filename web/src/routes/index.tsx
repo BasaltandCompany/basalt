@@ -32,7 +32,7 @@ const MESSAGES: Message[] = [
     ],
   },
   {
-    title: "Start with the goody bag. Free.",
+    title: "Start with free tools.",
     body:
       "Free tools to run your company with AI — plus the steps to set them up, 3 months of Claude, and your AI game plan.",
     tools: [
@@ -42,14 +42,14 @@ const MESSAGES: Message[] = [
       },
       {
         name: "Basalt security scanner",
-        line: "A weekly report on how safe your company is. Plain words, in your inbox. Coming soon.",
+        line: "Get a weekly report on how safe your company is. Plain words, in your inbox.",
       },
       {
         name: "Basalt Software Factory",
         line: "Build and ship your own software. One-stop deploys to Fly, Railway, or Render.",
       },
     ],
-    cta: { href: "/gift", label: "Claim the goody bag" },
+    cta: { href: "/gift", label: "Get your free AI game plan" },
   },
 ]
 
