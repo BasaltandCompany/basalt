@@ -126,6 +126,10 @@ async function captureInviteLink(email: string): Promise<string> {
 }
 
 export default async function globalSetup() {
+	// This setup deletes and recreates fixtures; never let it target hosted data.
+	const local = (url: string) => ["localhost", "127.0.0.1"].includes(new URL(url).hostname);
+	if (!SUPABASE_URL || !process.env.DATABASE_URL || !local(SUPABASE_URL) || !local(process.env.DATABASE_URL) || !local(SITE))
+		throw new Error("Portal E2E requires local Supabase, database, and site URLs.");
 	await healthCheck();
 	const rivalProjectId = await seed();
 	await deleteAuthUser(CLIENT_EMAIL);
