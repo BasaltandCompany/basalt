@@ -5,7 +5,7 @@
 // Every consumer here is server-side (API routes, scheduler, brain MCP);
 // "use server" stays on the previously-marked fns as a tripwire — a future
 // client import gets RPC stubs instead of a db-in-browser crash.
-import { and, desc, eq, isNotNull, ne } from "drizzle-orm";
+import { and, desc, eq, isNotNull, ne, sql } from "drizzle-orm";
 import { db } from "~/db";
 import { emailMessages, emailOutbox, emailThreads } from "~/db/schema";
 import { buildReplyQuote, getPrimaryAccount, threadWithMessages, sendGmail } from "~/lib/gmail";
@@ -390,6 +390,9 @@ export async function updateEmailDraft(input: {
 			...(input.campaignCompanyId !== undefined ? { campaignCompanyId: input.campaignCompanyId, campaignStep: input.campaignStep } : {}),
 			...(input.signature ? { signature: input.signature } : {}),
 			...(input.signatureText !== undefined ? { signatureText: input.signatureText || null } : {}),
+			// meta revisions bump version too — meta-only agent tweaks (e.g. cc)
+			// must reach the pool's strictly-greater version guard
+			version: sql`${emailOutbox.version} + 1`,
 		})
 		.where(eq(emailOutbox.id, input.outboxId));
 	const version = await saveDraftBody(input.outboxId, input.body, "agent");
@@ -415,9 +418,13 @@ export async function saveDraftBody(
 	if (!row) return null;
 	const tracked = await trackText("email_draft", outboxId, row.loroSnapshot, author, body);
 	if (!tracked) return row.version;
-	await db
+	// bump, never absolute: the column is the row's monotonic sync token
+	// (pool strictly-greater guard) — the text-version count lives in
+	// text_versions and must not drag a meta-bumped version backward
+	const [updated] = await db
 		.update(emailOutbox)
-		.set({ body, loroSnapshot: tracked.loroSnapshot, version: tracked.version })
-		.where(eq(emailOutbox.id, outboxId));
-	return tracked.version;
+		.set({ body, loroSnapshot: tracked.loroSnapshot, version: sql`${emailOutbox.version} + 1` })
+		.where(eq(emailOutbox.id, outboxId))
+		.returning();
+	return updated.version;
 }
