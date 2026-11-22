@@ -2,7 +2,11 @@
 // entries around src/App.tsx wrapped in src/Document.tsx. Build emits
 // dist/client (assets) + dist/server/server.js (handleRequest).
 import { fileURLToPath } from "node:url";
+import dotenv from "dotenv";
 import "dotenv/config";
+// dev-setup.sh writes local-stack overrides to .env.local, but dotenv/config only
+// reads .env — without this the SSR server runs auth against the PROD project.
+dotenv.config({ override: true, path: ".env.local" });
 import { fileRoutes } from "filesystem-routing/vite";
 import solid from "@solidjs/vite-plugin";
 import tailwindcss from "@tailwindcss/vite";

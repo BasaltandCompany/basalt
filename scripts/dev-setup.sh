@@ -140,6 +140,7 @@ if [ -n "$API_URL" ] && [ -n "$ANON" ] && [ -n "$SVC" ] && [ ! -f web/.env.local
 SUPABASE_URL=$API_URL
 SUPABASE_ANON_KEY=$ANON
 SUPABASE_SERVICE_KEY=$SVC
+PUBLIC_SITE_URL=http://localhost:3011
 DEV_ADMIN_EMAIL=admin@madcactus.org
 DEV_ADMIN_PASSWORD=cactus-local-dev
 LOCAL

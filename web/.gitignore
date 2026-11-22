@@ -4,3 +4,8 @@ dist/
 solid-env.d.ts
 .env
 .env.local
+e2e/.state.json
+
+# playwright
+test-results/
+playwright-report/

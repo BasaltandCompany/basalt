@@ -1,5 +1,5 @@
 import { Title } from "@solidjs/meta";
-import { createMemo, For, Show, createSignal } from "solid-js";
+import { createMemo, createDeferred, For, Show, createSignal } from "solid-js";
 
 import PortalLayout from "~/components/PortalLayout";
 import {
@@ -23,11 +23,19 @@ export default function PortalDocuments() {
 	});
 
 	const [searchQuery, setSearchQuery] = createSignal("");
-	const searchResults = createMemo(async () => {
-		const q = searchQuery();
+	// Debounce before the query flight: per-keystroke flights supersede each
+	// other mid-air and the sentinel throw halts the whole reactive tree.
+	const [debouncedQuery, setDebouncedQuery] = createSignal("");
+	let searchTimer: ReturnType<typeof setTimeout> | undefined;
+	const updateSearchQuery = (v: string) => {
+		setSearchQuery(v);
+		clearTimeout(searchTimer);
+		searchTimer = setTimeout(() => setDebouncedQuery(v), 300);
+	};
+	const searchResults = createDeferred(() => {
+		const q = debouncedQuery();
 		if (q.trim().length < 2) return null;
-		const hits = await searchDocumentsQuery(q);
-		return hits.length > 0 ? hits : null;
+		return searchDocumentsQuery(q);
 	});
 
 	const showSearch = () =>
@@ -45,7 +53,7 @@ export default function PortalDocuments() {
 					type="text"
 					placeholder="Search documents and transcripts…"
 					value={searchQuery()}
-					onInput={(e) => setSearchQuery(e.currentTarget.value)}
+					onInput={(e) => updateSearchQuery(e.currentTarget.value)}
 					style={{
 						width: "100%",
 						padding: "12px 16px",
