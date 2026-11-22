@@ -16,7 +16,7 @@ import type { EmailThread, EmailMessage, EmailOutbox } from "~/db/schema";
 import { SIGNATURES } from "~/lib/email-signature";
 import { ingestKind } from "~/lib/sync/sync-client";
 import { transact } from "~/lib/sync/transactions";
-import { poolRow, poolRows, poolSeeded } from "~/lib/sync/pool";
+import { mergeIntoPool, poolRow, poolRows, poolSeeded } from "~/lib/sync/pool";
 import type { PoolRow } from "~/lib/sync/merge";
 import { Button, buttonVariants } from "@basaltac/ui";
 
@@ -105,6 +105,13 @@ export default function AdminEmail() {
 				reconcile: !v.q,
 				refetch: () => void revalidate("email-inbox"),
 			});
+			// drafts: the query payload is never search-filtered, so reconcile is
+			// always safe; subscribing the kind also gives agent draft edits the
+			// ~3s /api/sync incremental merge
+			ingestKind("email-draft", data.drafts as unknown as PoolRow[], {
+				reconcile: true,
+				refetch: () => void revalidate("email-inbox"),
+			});
 		},
 	);
 
@@ -125,6 +132,10 @@ export default function AdminEmail() {
 		// search mode renders the server's matches, minus rows optimistically archived
 		return (inbox()?.threads ?? []).filter((t) => poolThread(t.id)?.archived !== true);
 	};
+	// drafts read pool-first too: pool rows update from the /api/sync poll (~3s)
+	// while the query only moves on revalidate — agent edits show live everywhere
+	const visibleDrafts = (): EmailOutbox[] =>
+		poolSeeded("email-draft") ? poolRows<EmailOutbox>("email-draft") : inbox()?.drafts ?? [];
 	const isUnread = (t: EmailThread) => poolThread(t.id)?.unread ?? t.unread;
 	// display order = newest first — the current message on top, the rest of
 	// the thread underneath (data order untouched: r/f still read .at(-1))
@@ -139,7 +150,7 @@ export default function AdminEmail() {
 		if (!visMode()) return [];
 		const [a, b] = visRangeIdx();
 		// visual mode indexes whatever list is up — inbox threads or draft rows
-		const ids = folder() === "drafts" ? (inbox()?.drafts ?? []).map((d) => d.id) : visibleThreads().map((t) => t.id);
+		const ids = folder() === "drafts" ? visibleDrafts().map((d) => d.id) : visibleThreads().map((t) => t.id);
 		return ids.slice(a, b + 1);
 	};
 	// draftId tracks the outbox row created by a Send click, so a lint-blocked
@@ -194,11 +205,11 @@ export default function AdminEmail() {
 	// overlay mounted; a missing row (close/send/discard/schedule) drops it, so
 	// Close/Esc actually closes — the old `?? prev` kept the overlay alive forever.
 	const openDraftRow = createMemo<EmailOutbox | undefined>((prev) => {
-		const row = inbox()?.drafts.find((x) => x.id === openDraft());
+		const row = visibleDrafts().find((x) => x.id === openDraft());
 		return row && prev?.id === row.id ? prev : row;
 	});
 	createEffect(
-		() => [openDraft(), inbox()?.drafts] as const,
+		() => [openDraft(), visibleDrafts()] as const,
 		([id, drafts]) => {
 			if (id && !drafts?.find((x) => x.id === id)) setOpenDraft(null);
 		},
@@ -242,7 +253,7 @@ export default function AdminEmail() {
 		(v) => {
 			const id = v.id;
 			if (!id || v.lint !== undefined) return;
-			untrack(() => lintDraft(id, v.body ?? inbox()?.drafts.find((d) => d.id === id)?.body ?? ""));
+			untrack(() => lintDraft(id, v.body ?? visibleDrafts().find((d) => d.id === id)?.body ?? ""));
 		},
 	);
 
@@ -270,7 +281,7 @@ export default function AdminEmail() {
 	const [selOutbox, setSelOutbox] = createSignal<string | null>(null);
 	const activateNav = async (i: number) => {
 		if (folder() === "drafts") {
-			const d = inbox()?.drafts?.[i];
+			const d = visibleDrafts()[i];
 			setSelIdx(i);
 			if (d) setOpenDraft(d.id);
 			document.querySelectorAll("[data-thread-row]")[i]?.scrollIntoView({ block: "nearest" });
@@ -515,10 +526,13 @@ export default function AdminEmail() {
 			});
 			if (res.ok) {
 				// saved fields are clean now — future agent edits apply live again.
-				// The response carries the row version; marking it makes the sync
-				// ignore stale-poll rows that raced this save (the old→new flash).
-				const { version } = (await res.json().catch(() => ({}))) as { version?: number | null };
-				for (const [k, v] of Object.entries(payload)) draftSyncMark[outboxId]?.(k, v, version ?? undefined);
+				// The response row carries the final monotonic version; merging it
+				// into the pool immediately advances the pool past any poll that
+				// raced this save (version guard skips it — the old→new flash is
+				// dead), and markSynced baselines every saved field on that version.
+				const saved = (await res.json().catch(() => null)) as (EmailOutbox & { version?: number | null }) | null;
+				for (const [k, v] of Object.entries(payload)) draftSyncMark[outboxId]?.(k, v, saved?.version ?? undefined);
+				if (saved?.id) mergeIntoPool("email-draft", [saved as unknown as PoolRow], false); // id guard: never merge a stub
 				setDraftSaveState({ ...draftSaveState(), [outboxId]: `saved ${new Date().toLocaleTimeString()}` });
 				if (openDraftHistory() === outboxId) {
 					const r = await fetch(`/api/email/drafts/${outboxId}?versions=1`);
@@ -770,7 +784,7 @@ export default function AdminEmail() {
 				const cur = selected() || openDraft() || selOutbox() ? selIdx() : -1;
 				const navLen =
 					folder() === "drafts" || folder() === "outbox"
-						? (folder() === "drafts" ? inbox()?.drafts?.length : inbox()?.outbox?.length) ?? 0
+						? (folder() === "drafts" ? visibleDrafts().length : inbox()?.outbox?.length) ?? 0
 						: threads.length;
 				const step = async (i: number) => {
 					if (folder() === "drafts" || folder() === "outbox") {
@@ -820,7 +834,7 @@ export default function AdminEmail() {
 			// V visual mode: inbox (bulk triage) + drafts (bulk discard)
 			if (
 				e.key === "V" &&
-				(folder() === "inbox" ? threads.length : (inbox()?.drafts?.length ?? 0))
+				(folder() === "inbox" ? threads.length : visibleDrafts().length)
 			) {
 				e.preventDefault();
 				setVisAnchor(Math.max(selIdx(), 0));
@@ -830,7 +844,7 @@ export default function AdminEmail() {
 			// drafts tab: # discards the cursor draft (or the visual range)
 			if (folder() === "drafts") {
 				if (e.key === "#") {
-					const ids = visMode() ? visRangeIds() : [inbox()?.drafts?.[selIdx()]?.id].filter(Boolean) as string[];
+					const ids = visMode() ? visRangeIds() : [visibleDrafts()[selIdx()]?.id].filter(Boolean) as string[];
 					askDraftDiscard(ids);
 				}
 				return;
@@ -967,7 +981,7 @@ export default function AdminEmail() {
 						Inbox<Show when={visibleThreads().length}> · {visibleThreads().length}</Show>
 					</button>
 					<button type="button" class={{ active: folder() === "drafts" }} onClick={() => setFolder("drafts")}>
-						Drafts<Show when={inbox()?.drafts?.length}> · {inbox()!.drafts.length}</Show>
+						Drafts<Show when={visibleDrafts().length}> · {visibleDrafts().length}</Show>
 					</button>
 					<button type="button" class={{ active: folder() === "outbox" }} onClick={() => setFolder("outbox")}>
 						Outbox<Show when={inbox()?.outbox?.length}> · {inbox()!.outbox.length}</Show>
@@ -984,8 +998,8 @@ export default function AdminEmail() {
 			{/* Drafts tab — agent + composed drafts, edit → send; every edit
 			    lands as a CRDT-tracked version (History shows what changed) */}
 			<Show when={folder() === "drafts"}>
-				<Show when={inbox()?.drafts?.length} fallback={<div class="muted">No open drafts. Agents push drafts via create_email_draft; compose with c in the Inbox.</div>}>
-					<For each={inbox()!.drafts}>
+				<Show when={visibleDrafts().length} fallback={<div class="muted">No open drafts. Agents push drafts via create_email_draft; compose with c in the Inbox.</div>}>
+					<For each={visibleDrafts()}>
 						{(d, i) => (
 							<div
 								data-thread-row=""
@@ -1272,7 +1286,7 @@ export default function AdminEmail() {
 					// live agent-edit ingestion: agent edits via MCP land in inbox() on the
 					// /api/changes revalidate and apply here in place — without clobbering
 					// unsaved local edits (createRemoteSync keeps per-field sync state)
-					const liveDraft = () => inbox()?.drafts.find((x) => x.id === d.id);
+					const liveDraft = () => poolRow<EmailOutbox>("email-draft", d.id) ?? inbox()?.drafts.find((x) => x.id === d.id);
 					const setMetaField = (field: "subject" | "to" | "cc" | "bcc" | "signature" | "signatureText", v: string) =>
 						setEditMeta({ ...editMeta(), [d.id]: { ...editMeta()[d.id], [field]: v } });
 					// per-draft footer editing: an override replaces the branded variant for
@@ -1290,12 +1304,12 @@ export default function AdminEmail() {
 					const applied = (field: string) => note(`agent just edited the ${field} — updated here`);
 					const kept = (field: string) => note(`agent just edited the ${field} — kept your unsaved changes (their version is in History)`);
 					const syncs = {
-						subject: createRemoteSync({ remote: () => liveDraft()?.subject ?? d.subject, local: () => editMeta()[d.id]?.subject ?? d.subject, setLocal: (v) => setMetaField("subject", v), onApplied: () => applied("subject"), onConflict: () => kept("subject") }),
-						to: createRemoteSync({ remote: () => liveDraft()?.toEmail ?? d.toEmail, local: () => editMeta()[d.id]?.to ?? d.toEmail, setLocal: (v) => setMetaField("to", v), onApplied: () => applied("to"), onConflict: () => kept("to") }),
-						cc: createRemoteSync({ remote: () => liveDraft()?.ccEmail ?? d.ccEmail ?? "", local: () => editMeta()[d.id]?.cc ?? d.ccEmail ?? "", setLocal: (v) => setMetaField("cc", v), onApplied: () => applied("cc"), onConflict: () => kept("cc") }),
-						bcc: createRemoteSync({ remote: () => liveDraft()?.bccEmail ?? d.bccEmail ?? "", local: () => editMeta()[d.id]?.bcc ?? d.bccEmail ?? "", setLocal: (v) => setMetaField("bcc", v), onApplied: () => applied("bcc"), onConflict: () => kept("bcc") }),
-						signature: createRemoteSync({ remote: () => liveDraft()?.signature ?? d.signature ?? "", local: () => editMeta()[d.id]?.signature ?? d.signature ?? "", setLocal: (v) => setMetaField("signature", v), onApplied: () => applied("footer"), onConflict: () => kept("footer") }),
-						signatureText: createRemoteSync({ remote: () => liveDraft()?.signatureText ?? d.signatureText ?? "", local: () => editMeta()[d.id]?.signatureText ?? d.signatureText ?? "", setLocal: (v) => setMetaField("signatureText", v), onApplied: () => applied("footer"), onConflict: () => kept("footer") }),
+						subject: createRemoteSync({ remote: () => liveDraft()?.subject ?? d.subject, remoteVersion: () => liveDraft()?.version, local: () => editMeta()[d.id]?.subject ?? d.subject, setLocal: (v) => setMetaField("subject", v), onApplied: () => applied("subject"), onConflict: () => kept("subject") }),
+						to: createRemoteSync({ remote: () => liveDraft()?.toEmail ?? d.toEmail, remoteVersion: () => liveDraft()?.version, local: () => editMeta()[d.id]?.to ?? d.toEmail, setLocal: (v) => setMetaField("to", v), onApplied: () => applied("to"), onConflict: () => kept("to") }),
+						cc: createRemoteSync({ remote: () => liveDraft()?.ccEmail ?? d.ccEmail ?? "", remoteVersion: () => liveDraft()?.version, local: () => editMeta()[d.id]?.cc ?? d.ccEmail ?? "", setLocal: (v) => setMetaField("cc", v), onApplied: () => applied("cc"), onConflict: () => kept("cc") }),
+						bcc: createRemoteSync({ remote: () => liveDraft()?.bccEmail ?? d.bccEmail ?? "", remoteVersion: () => liveDraft()?.version, local: () => editMeta()[d.id]?.bcc ?? d.bccEmail ?? "", setLocal: (v) => setMetaField("bcc", v), onApplied: () => applied("bcc"), onConflict: () => kept("bcc") }),
+						signature: createRemoteSync({ remote: () => liveDraft()?.signature ?? d.signature ?? "", remoteVersion: () => liveDraft()?.version, local: () => editMeta()[d.id]?.signature ?? d.signature ?? "", setLocal: (v) => setMetaField("signature", v), onApplied: () => applied("footer"), onConflict: () => kept("footer") }),
+						signatureText: createRemoteSync({ remote: () => liveDraft()?.signatureText ?? d.signatureText ?? "", remoteVersion: () => liveDraft()?.version, local: () => editMeta()[d.id]?.signatureText ?? d.signatureText ?? "", setLocal: (v) => setMetaField("signatureText", v), onApplied: () => applied("footer"), onConflict: () => kept("footer") }),
 						body: createRemoteSync({ remote: () => liveDraft()?.body ?? d.body, remoteVersion: () => liveDraft()?.version, local: () => editBody()[d.id] ?? d.body, setLocal: (v) => setEditBody({ ...editBody(), [d.id]: v }), onApplied: () => applied("body"), onConflict: () => kept("body") }),
 					};
 					draftSyncMark[d.id] = (field, v, version) => syncs[field as keyof typeof syncs]?.markSynced(v, version);
@@ -1406,7 +1420,7 @@ export default function AdminEmail() {
 							<VoiceLintPanel result={draftLint()[d.id] ?? null} stale={lintStale()[d.id]} />
 							<div style={{ display: "flex", gap: "6px", "flex-wrap": "wrap", "align-items": "center", margin: "8px 0" }}>
 								{/* attachments ride the live row — frozen d would hide uploads that land via revalidate */}
-								<For each={inbox()?.drafts.find((x) => x.id === d.id)?.attachments ?? []}>
+								<For each={liveDraft()?.attachments ?? []}>
 									{(a) => (
 										<span style={{ "font-size": "12px", padding: "2px 8px", border: "1px solid rgba(0,0,0,0.12)", "border-radius": "12px", display: "inline-flex", gap: "6px", "align-items": "center" }}>
 											{a.filename} ({(a.size / 1048576).toFixed(1)}MB)
