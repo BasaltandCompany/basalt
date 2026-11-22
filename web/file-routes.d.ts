@@ -251,6 +251,12 @@ declare module "virtual:file-routes" {
       $$route?: undefined;
     },
     {
+      path: "/admin/reset-password";
+      page: true;
+      $component: FileRouteLazyRef<Pick<typeof import("./src/routes/admin/reset-password"), Extract<"default", keyof typeof import("./src/routes/admin/reset-password")>>>;
+      $$route?: undefined;
+    },
+    {
       path: "/admin/secure-shares/:id";
       page: true;
       $component: FileRouteLazyRef<Pick<typeof import("./src/routes/admin/secure-shares/[id]"), Extract<"default", keyof typeof import("./src/routes/admin/secure-shares/[id]")>>>;
@@ -610,6 +616,13 @@ declare module "virtual:file-routes" {
       $$route?: undefined;
     },
     {
+      path: "/api/security-report";
+      page: false;
+      $GET: FileRouteLazyRef<Pick<typeof import("./src/routes/api/security-report"), Extract<"GET", keyof typeof import("./src/routes/api/security-report")>>>;
+      $HEAD: FileRouteLazyRef<Pick<typeof import("./src/routes/api/security-report"), Extract<"GET", keyof typeof import("./src/routes/api/security-report")>>>;
+      $$route?: undefined;
+    },
+    {
       path: "/api/social/linkedin";
       page: false;
       $GET: FileRouteLazyRef<Pick<typeof import("./src/routes/api/social/linkedin"), Extract<"GET", keyof typeof import("./src/routes/api/social/linkedin")>>>;
@@ -814,6 +827,18 @@ declare module "virtual:file-routes" {
       path: "/portal/quotes/";
       page: true;
       $component: FileRouteLazyRef<Pick<typeof import("./src/routes/portal/quotes/index"), Extract<"default", keyof typeof import("./src/routes/portal/quotes/index")>>>;
+      $$route?: undefined;
+    },
+    {
+      path: "/portal/reset-password";
+      page: true;
+      $component: FileRouteLazyRef<Pick<typeof import("./src/routes/portal/reset-password"), Extract<"default", keyof typeof import("./src/routes/portal/reset-password")>>>;
+      $$route?: undefined;
+    },
+    {
+      path: "/portal/security";
+      page: true;
+      $component: FileRouteLazyRef<Pick<typeof import("./src/routes/portal/security"), Extract<"default", keyof typeof import("./src/routes/portal/security")>>>;
       $$route?: undefined;
     },
     {
@@ -1229,6 +1254,14 @@ declare module "virtual:file-routes" {
       children?: undefined;
     },
     {
+      path: "/portal/security";
+      id: "/portal/security";
+      page: true;
+      $component: FileRouteLazyRef<Pick<typeof import("./src/routes/portal/security"), Extract<"default", keyof typeof import("./src/routes/portal/security")>>>;
+      $$route?: undefined;
+      children?: undefined;
+    },
+    {
       path: "/admin/companies/";
       id: "/admin/companies/";
       page: true;
@@ -1333,6 +1366,14 @@ declare module "virtual:file-routes" {
       children?: undefined;
     },
     {
+      path: "/admin/reset-password";
+      id: "/admin/reset-password";
+      page: true;
+      $component: FileRouteLazyRef<Pick<typeof import("./src/routes/admin/reset-password"), Extract<"default", keyof typeof import("./src/routes/admin/reset-password")>>>;
+      $$route?: undefined;
+      children?: undefined;
+    },
+    {
       path: "/admin/secure-shares/";
       id: "/admin/secure-shares/";
       page: true;
@@ -1353,6 +1394,14 @@ declare module "virtual:file-routes" {
       id: "/admin/newsletters/:id";
       page: true;
       $component: FileRouteLazyRef<Pick<typeof import("./src/routes/admin/newsletters/[id]"), Extract<"default", keyof typeof import("./src/routes/admin/newsletters/[id]")>>>;
+      $$route?: undefined;
+      children?: undefined;
+    },
+    {
+      path: "/portal/reset-password";
+      id: "/portal/reset-password";
+      page: true;
+      $component: FileRouteLazyRef<Pick<typeof import("./src/routes/portal/reset-password"), Extract<"default", keyof typeof import("./src/routes/portal/reset-password")>>>;
       $$route?: undefined;
       children?: undefined;
     },

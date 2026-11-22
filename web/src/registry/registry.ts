@@ -31,6 +31,7 @@ import {
 	shortLinks,
 	invoices,
 	deliverables,
+	projectUpdates,
 	pullRequests,
 	reviewerInstallations,
 	reviewerReviews,
@@ -264,6 +265,26 @@ const deliverable = defineComponent({
 	ownerLinks: [{ key: "projectId", column: deliverables.projectId, kind: "project" }],
 });
 
+// Project status updates: Collin's client-facing broadcast posts. Emailing
+// the company's stakeholders goes through lib/notify.ts (Resend); emailedAt
+// marks the broadcast as sent.
+const projectUpdate = defineComponent({
+	kind: "project-update",
+	label: "Project update",
+	description:
+		"A client-facing status update posted on a project and broadcast by email to the company's portal members — the weekly-update record. Post from the admin project page; the email carries a preview + this week's hours/deliverables digest.",
+	table: projectUpdates,
+	title: (r) => r.title ?? r.body.slice(0, 60),
+	subtitle: (r) => (r.emailedAt ? "emailed to stakeholders" : "posted — not emailed"),
+	status: {
+		get: (r) => (r.emailedAt ? "emailed" : "posted"),
+		labels: { posted: "posted — not emailed", emailed: "emailed to stakeholders" },
+	},
+	adminPath: (r) => `/admin/projects/${r.projectId}`,
+	search: { columns: [projectUpdates.title, projectUpdates.body] },
+	ownerLinks: [{ key: "projectId", column: projectUpdates.projectId, kind: "project" }],
+});
+
 // Pull requests mirror GitHub via the App webhook (lib/github-prs.ts).
 // External objects — never owned by basalt; linked to deliverables via
 // entity_links so a PR card survives a deleted deliverable and vice versa.
@@ -468,6 +489,7 @@ export const COMPONENTS: Record<string, AnyComponentDefinition> = {
 	"short-link": shortLink as AnyComponentDefinition,
 	invoice: invoice as AnyComponentDefinition,
 	deliverable: deliverable as AnyComponentDefinition,
+	"project-update": projectUpdate as AnyComponentDefinition,
 	"pull_request": pullRequest as AnyComponentDefinition,
 	"pr_review": prReview as AnyComponentDefinition,
 	"quote": quote as AnyComponentDefinition,

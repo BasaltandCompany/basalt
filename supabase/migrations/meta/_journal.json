@@ -470,6 +470,20 @@
       "when": 1795195249583,
       "tag": "20261120172049_talented_corsair",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1795211261765,
+      "tag": "20261120214741_whole_shinko_yamashiro",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1795214743611,
+      "tag": "20261120224543_red_marauders",
+      "breakpoints": true
     }
   ]
 }

@@ -69,10 +69,13 @@ export default function Login() {
 							<Show when={error()}>
 								<p class="login-error">{error()}</p>
 							</Show>
-							<Button type="submit"  style={{ width: "100%", "margin-top": "8px" }} disabled={loading()}>
-								{loading() ? "Signing in…" : "Sign in"}
-							</Button>
-						</form>
+						<Button type="submit"  style={{ width: "100%", "margin-top": "8px" }} disabled={loading()}>
+							{loading() ? "Signing in…" : "Sign in"}
+						</Button>
+					</form>
+					<p class="muted" style={{ "text-align": "center", "margin-top": "12px", "font-size": "13px" }}>
+						<a href="/admin/reset-password">Forgot password?</a>
+					</p>
 					</Card>
 				</div>
 			}

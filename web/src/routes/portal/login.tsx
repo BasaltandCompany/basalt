@@ -158,6 +158,9 @@ export default function ClientLogin() {
 							Sign in
 						</Button>
 					</form>
+					<p class="muted" style={{ "text-align": "center", "margin-top": "12px", "font-size": "13px" }}>
+						<a href="/portal/reset-password">Forgot password?</a>
+					</p>
 				</Show>
 			</Card>
 		</div>

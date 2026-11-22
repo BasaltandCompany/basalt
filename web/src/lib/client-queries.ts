@@ -1,6 +1,6 @@
 import { query, formAction, revalidate } from "@solidjs/router";
 import { redirect } from "@solidjs/web";
-import { eq, and, desc, inArray } from "drizzle-orm";
+import { eq, and, desc, inArray, ne } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm";
 import { getClient, clientSignIn, setClientSessionCookie } from "./client-session";
 import { supabaseAdmin, supabaseService } from "./supabase";
@@ -15,6 +15,7 @@ import {
 	invoices,
 	deliverables,
 	deliverableUpdates,
+	projectUpdates,
 	apiKeys,
 	quotes,
 	quoteItems,
@@ -25,6 +26,7 @@ import {
 	tools,
 	reviewerInstallations,
 	reviewerReviews,
+	securityReports,
 } from "~/db/schema";
 import type { DocumentType, QuoteStatus } from "~/db/schema";
 import { computeQuoteTotals, composeQuoteMarkdown } from "~/lib/quotes";
@@ -54,7 +56,7 @@ export const getClientDashboardQuery = query(async () => {
 
 	const companyIds = memberCompanies.map((c) => c.companyId);
 	if (companyIds.length === 0)
-		return { projects: [], deliverables: [], docCount: 0, invoiceCount: 0 };
+		return { projects: [], deliverables: [], docCount: 0, invoiceCount: 0, updates: [], hoursThisWeek: 0, hoursTotal: 0 };
 
 	// All projects across the member's companies
 	const memberProjects = await db
@@ -130,11 +132,41 @@ export const getClientDashboardQuery = query(async () => {
 					)
 			: [];
 
+	// Project status updates feed + hours — the client's "live status" view.
+	const updateRows =
+		projectIds.length > 0
+			? await db
+					.select({
+						id: projectUpdates.id,
+						projectId: projectUpdates.projectId,
+						title: projectUpdates.title,
+						body: projectUpdates.body,
+						createdAt: projectUpdates.createdAt,
+						projectName: projects.name,
+					})
+					.from(projectUpdates)
+					.innerJoin(projects, eq(projects.id, projectUpdates.projectId))
+					.where(inArray(projectUpdates.projectId, projectIds))
+					.orderBy(desc(projectUpdates.createdAt))
+					.limit(20)
+			: [];
+	const entryRows =
+		projectIds.length > 0
+			? await db
+					.select({ hours: timeEntries.hours, entryDate: timeEntries.entryDate })
+					.from(timeEntries)
+					.where(inArray(timeEntries.projectId, projectIds))
+			: [];
+	const weekStart = new Date(Date.now() - 7 * 86_400_000);
+
 	return {
 		projects: memberProjects,
 		deliverables: deliverablesWithUpdates,
 		docCount: docRows.length,
 		invoiceCount: invoiceRows.length,
+		updates: updateRows,
+		hoursThisWeek: entryRows.filter((e) => new Date(e.entryDate) >= weekStart).reduce((s, e) => s + e.hours, 0),
+		hoursTotal: entryRows.reduce((s, e) => s + e.hours, 0),
 	};
 }, "client-dashboard");
 
@@ -229,6 +261,34 @@ export const getClientValueQuery = query(async () => {
 		),
 	};
 }, "client-value");
+
+/** Weekly security reports for the member's companies (newest first), from the
+ *  security-review skill pipeline. Rows are inserted service-side; the HTML/PDF
+ *  bytes live in the private security-reports bucket, served via signed URLs
+ *  through /api/security-report after the path-prefix company check. */
+export const getClientSecurityQuery = query(async () => {
+	"use server";
+	const member = await getClient();
+	if (!member) throw redirect("/portal/login");
+
+	const memberCompanies = await db
+		.select({ companyId: clientCompanyMembers.companyId, companyName: companies.name })
+		.from(clientCompanyMembers)
+		.innerJoin(companies, eq(companies.id, clientCompanyMembers.companyId))
+		.where(eq(clientCompanyMembers.memberId, member.id));
+
+	const companyIds = memberCompanies.map((c) => c.companyId);
+	if (companyIds.length === 0) return { reports: [] };
+
+	const reports = await db
+		.select({ ...getTableColumns(securityReports), companyName: companies.name })
+		.from(securityReports)
+		.innerJoin(companies, eq(companies.id, securityReports.companyId))
+		.where(inArray(securityReports.companyId, companyIds))
+		.orderBy(desc(securityReports.weekOf));
+
+	return { reports };
+}, "client-security");
 
 /** One project the member's companies own, with its deliverables (each
  *  with its update timeline and logged hours). The membership join IS the
@@ -464,6 +524,106 @@ export const clientLoginAction = formAction(async (formData: FormData) => {
 	throw redirect("/portal");
 }, "client-login");
 
+// Non-redirecting member lookup for pages that need to render differently
+// when signed in (getClientUserQuery redirects; this doesn't).
+export const getPortalMemberQuery = query(async () => {
+	"use server";
+	return getClient();
+}, "portal-member");
+
+// Password reset origin for Supabase recovery redirect_to (must be on the
+// dashboard's Redirect Allow-list or GoTrue falls back to the Site URL).
+const SITE_URL = process.env.PUBLIC_SITE_URL?.replace(/\/$/, "") ?? "https://basalt.ac";
+
+export const clientForgotPasswordAction = formAction(async (formData: FormData) => {
+	"use server";
+	const email = String(formData.get("email") || "").trim().toLowerCase();
+	// Portal rule: only active members get a reset email (Supabase auth is
+	// just the password gate), and the response is identical either way so it
+	// can't be used to enumerate members.
+	const [member] = await db
+		.select({ id: clientMembers.id })
+		.from(clientMembers)
+		.where(eq(clientMembers.email, email))
+		.limit(1);
+	if (member) {
+		try {
+			await supabaseAdmin().auth.resetPasswordForEmail(email, {
+				redirectTo: `${SITE_URL}/portal/reset-password`,
+			});
+		} catch {
+			// A timed-out send must not leak infra detail into the UI.
+		}
+	}
+	return { error: null };
+}, "client-forgot-password");
+
+export const clientResetPasswordAction = formAction(async (formData: FormData) => {
+	"use server";
+	// Two recovery-token shapes (implicit fragment access_token, PKCE query
+	// token_hash) or a logged-in member changing their password.
+	const accessToken = String(formData.get("access_token") || "");
+	const tokenHash = String(formData.get("token_hash") || "");
+	const password = String(formData.get("password") || "");
+	if (password.length < 6) return { error: "Password must be at least 6 characters." };
+
+	let authUserId: string | null = null;
+	try {
+		if (accessToken) {
+			const { data, error } = await supabaseAdmin().auth.getUser(accessToken);
+			if (!error && data.user) authUserId = data.user.id;
+		} else if (tokenHash) {
+			const { data, error } = await supabaseAdmin().auth.verifyOtp({
+				token_hash: tokenHash,
+				type: "recovery",
+			});
+			if (!error && data.user) authUserId = data.user.id;
+		}
+	} catch {
+		// Supabase timeout → treated as an invalid link below.
+	}
+	let member: { id: string; isActive: boolean } | undefined;
+	if (authUserId) {
+		// Token proves control of the email; resolve that email's membership.
+		const { data } = await supabaseService().auth.admin.getUserById(authUserId);
+		const email = data.user?.email?.toLowerCase();
+		if (email) {
+			[member] = await db
+				.select({ id: clientMembers.id, isActive: clientMembers.isActive })
+				.from(clientMembers)
+				.where(eq(clientMembers.email, email))
+				.limit(1);
+		}
+	} else {
+		// No token → logged-in member changing their password. Member sessions
+		// aren't Supabase sessions, so resolve the auth user by email.
+		const current = await getClient();
+		if (current) {
+			[member] = await db
+				.select({ id: clientMembers.id, isActive: clientMembers.isActive })
+				.from(clientMembers)
+				.where(eq(clientMembers.email, current.email))
+				.limit(1);
+			if (member?.isActive) {
+				const [authUser] = (await db.execute(
+					sql`select id from auth.users where lower(email) = ${current.email} limit 1`
+				)) as unknown as { id: string }[];
+				authUserId = authUser?.id ?? null;
+			}
+		}
+	}
+	if (!authUserId)
+		return { error: "This reset link is invalid or has expired. Request a new one." };
+	if (!member || !member.isActive)
+		return { error: "Your portal account isn't active. Contact us for access." };
+
+	const { error } = await supabaseService().auth.admin.updateUserById(authUserId, { password });
+	if (error) return { error: `Could not update password: ${error.message}` };
+
+	setClientSessionCookie(member.id);
+	throw redirect("/portal");
+}, "client-reset-password");
+
 // Consumes the token Supabase appends to /portal/login after an invite-email
 // click and sets the member's first password. Two proof shapes are accepted:
 // an implicit-flow access_token (fragment; what admin-API invites produce with
@@ -566,7 +726,7 @@ export const getClientQuotesQuery = query(async () => {
 		})
 		.from(quotes)
 		.innerJoin(companies, eq(companies.id, quotes.companyId))
-		.where(inArray(quotes.companyId, companyIds))
+		.where(and(inArray(quotes.companyId, companyIds), ne(quotes.status, "draft")))
 		.orderBy(desc(quotes.updatedAt));
 	const allItems = await db.select().from(quoteItems);
 	return rows.map((q) => ({
@@ -590,7 +750,7 @@ export const getClientQuoteQuery = query(async (id: string) => {
 		.innerJoin(companies, eq(companies.id, quotes.companyId))
 		.where(and(eq(quotes.id, id), inArray(quotes.companyId, companyIds.length > 0 ? companyIds : ["00000000-0000-0000-0000-000000000000"])))
 		.limit(1);
-	if (!row) return null;
+	if (!row || row.quote.status === "draft") return null; // drafts are admin-only until sent
 	const [items, bodyDoc, versions, signatures] = await Promise.all([
 		db.select().from(quoteItems).where(eq(quoteItems.quoteId, id)).orderBy(quoteItems.sortOrder),
 		db.select({ id: docs.id, markdown: docs.markdown }).from(docs).where(eq(docs.id, row.quote.bodyDocId)).limit(1),
