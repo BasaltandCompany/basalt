@@ -689,6 +689,26 @@ export const deliverableUpdates = pgTable(
 	],
 );
 
+// ── Project status updates (client-facing broadcasts) ──────────────
+// Collin posts a status update on a project from the admin side; emailing
+// the company's portal members goes through lib/notify.ts (Resend) and
+// flips emailedAt. Registered in the registry as kind "project-update".
+export const projectUpdates = pgTable(
+	"project_updates",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "cascade" }),
+		title: text("title"),
+		body: text("body").notNull(),
+		// null = posted without emailing stakeholders
+		emailedAt: timestamp("emailed_at"),
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+	},
+	(t) => [index("idx_project_updates_project").on(t.projectId)],
+);
+
 // ── Pull requests (GitHub App webhook mirror) ─────────────────────
 // Rows mirror GitHub PRs; githubId is the stable API id so webhook
 // redelivery upserts instead of duplicating. Never owned by basalt —
@@ -1601,6 +1621,33 @@ export const secureShareItems = pgTable(
 );
 
 
+
+// ── Weekly security reports (delivered by the security-review skill) ─
+
+// One row per company per scan week. The GitHub Actions pipeline in
+// BasaltandCompany/security-review uploads report.html/report.pdf to the
+// private `security-reports` bucket and upserts these rows with the service
+// role. Portal clients read their own company's rows at /portal/security;
+// scoping is app-level (clientCompanyMembers) like every other portal table.
+export const securityReports = pgTable(
+	"security_reports",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		companyId: uuid("company_id")
+			.notNull()
+			.references(() => companies.id, { onDelete: "cascade" }),
+		// Monday of the report week (YYYY-MM-DD)
+		weekOf: date("week_of").notNull(),
+		title: text("title").notNull(),
+		verdict: text("verdict").notNull().default(""),
+		// { open, new, fixed, accepted, kev } counts for the portal card
+		summary: jsonb("summary").notNull().default({}),
+		htmlPath: text("html_path").notNull(),
+		pdfPath: text("pdf_path").notNull(),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(t) => [uniqueIndex("uq_security_reports_company_week").on(t.companyId, t.weekOf)],
+);
 // ── Inferred types (replaces hand-maintained interfaces) ───────────
 
 export type Company = typeof companies.$inferSelect;
@@ -1617,6 +1664,7 @@ export type Quote = typeof quotes.$inferSelect;
 export type QuoteItem = typeof quoteItems.$inferSelect;
 export type QuoteVersion = typeof quoteVersions.$inferSelect;
 export type QuoteSignature = typeof quoteSignatures.$inferSelect;
+export type SecurityReport = typeof securityReports.$inferSelect;
 
 // Type aliases for UI code (badge maps, selects, etc.)
 export type EngagementType = Project["engagementType"];
