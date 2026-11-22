@@ -74,6 +74,7 @@ export const DocEditor = (props: { id: string; doc: NonNullable<Awaited<ReturnTy
 	};
 	const bodySync = createRemoteSync({
 		remote: () => doc().markdown,
+		remoteVersion: () => doc().version, // strictly-greater guard: a poll that raced the save never rewinds
 		local: markdown,
 		setLocal: (v) => setMarkdown(v), // LexicalDocEditor re-imports on prop change (echo-guarded)
 		onApplied: () => note("an agent just edited this doc — updated here"),
@@ -270,8 +271,9 @@ export const DocEditor = (props: { id: string; doc: NonNullable<Awaited<ReturnTy
 			body: JSON.stringify({ markdown: md }),
 		});
 		if (res.ok) {
-			setVerNum(((await res.json()) as { version: number }).version);
-			bodySync.markSynced(md);
+			const { version } = (await res.json()) as { version: number };
+			setVerNum(version);
+			bodySync.markSynced(md, version);
 			setStatus(`saved ${new Date().toLocaleTimeString()}`);
 			if (showHistory()) void loadVersions();
 		} else {

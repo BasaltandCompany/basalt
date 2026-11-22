@@ -1,5 +1,5 @@
 import type { APIEvent } from "filesystem-routing/api";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { getAuthedClient } from "~/lib/session";
 import { db } from "~/db";
 import { emailOutbox } from "~/db/schema";
@@ -59,9 +59,22 @@ export const PUT = async (event: APIEvent) => {
 		// per-draft footer override; '' clears back to the branded variant
 		...(body.signatureText !== undefined ? { signatureText: body.signatureText || null } : {}),
 	};
-	if (Object.keys(meta).length === 0) return json({ ok: true, version });
-	const [row] = await db.update(emailOutbox).set(meta).where(eq(emailOutbox.id, event.params!.id)).returning();
-	return json(row ? { ...row, version } : { error: "not found" }, row ? 200 : 404);
+	if (Object.keys(meta).length === 0) {
+		// body-only autosave: nothing else to set — still return the full row so
+		// the client's pool merge carries the final monotonic version
+		const [row] = await db.select().from(emailOutbox).where(eq(emailOutbox.id, event.params!.id));
+		return json(row ?? { ok: true, version });
+	}
+	// meta-only writes bump version too — it's the row's monotonic sync token
+	// (pool mergeRowDecision strictly-greater guard), not just a body count
+	const [row] = await db
+		.update(emailOutbox)
+		.set({ ...meta, version: sql`${emailOutbox.version} + 1` })
+		.where(eq(emailOutbox.id, event.params!.id))
+		.returning();
+	// row.version is the final monotonic row version (meta bump and/or tracked
+	// body version) — the autosave client baselines every saved field on it
+	return json(row ?? { error: "not found" }, row ? 200 : 404);
 };
 
 export const POST = async (event: APIEvent) => {
