@@ -9,7 +9,7 @@
     "serve": "bun vite preview",
     "start": "bun scripts/bun-server.ts",
     "typecheck": "tsc --noEmit",
-    "test": "DATABASE_URL=postgres://dummy@localhost:5/dummy bun test",
+    "test": "DATABASE_URL=postgres://dummy@localhost:5/dummy bun test src",
     "prepare": "command -v git >/dev/null 2>&1 && git config core.hooksPath .githooks || true",
     "db:generate": "drizzle-kit generate && bash scripts/stamp-migrations.sh",
     "db:migrate": "bash scripts/db-guard.sh migrate",
