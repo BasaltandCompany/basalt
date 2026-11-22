@@ -689,6 +689,26 @@ export const deliverableUpdates = pgTable(
 	],
 );
 
+// ── Project status updates (client-facing broadcasts) ──────────────
+// Collin posts a status update on a project from the admin side; emailing
+// the company's portal members goes through lib/notify.ts (Resend) and
+// flips emailedAt. Registered in the registry as kind "project-update".
+export const projectUpdates = pgTable(
+	"project_updates",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "cascade" }),
+		title: text("title"),
+		body: text("body").notNull(),
+		// null = posted without emailing stakeholders
+		emailedAt: timestamp("emailed_at"),
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+	},
+	(t) => [index("idx_project_updates_project").on(t.projectId)],
+);
+
 // ── Pull requests (GitHub App webhook mirror) ─────────────────────
 // Rows mirror GitHub PRs; githubId is the stable API id so webhook
 // redelivery upserts instead of duplicating. Never owned by basalt —
