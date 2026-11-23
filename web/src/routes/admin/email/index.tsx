@@ -128,9 +128,11 @@ export default function AdminEmail() {
 	// hiddenIds/readOverride signals are gone (one source of truth).
 	const poolThread = (id: string) => poolRow<EmailThread>("email-thread", id);
 	const visibleThreads = (): EmailThread[] => {
-		if (!activeQ() && poolSeeded("email-thread")) return poolRows<EmailThread>("email-thread").filter((t) => !t.archived);
-		// search mode renders the server's matches, minus rows optimistically archived
-		return (inbox()?.threads ?? []).filter((t) => poolThread(t.id)?.archived !== true);
+		const rows =
+			!activeQ() && poolSeeded("email-thread")
+				? poolRows<EmailThread>("email-thread").filter((t) => !t.archived)
+				: (inbox()?.threads ?? []).filter((t) => poolThread(t.id)?.archived !== true);
+		return [...rows].sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime());
 	};
 	// drafts read pool-first too: pool rows update from the /api/sync poll (~3s)
 	// while the query only moves on revalidate — agent edits show live everywhere
@@ -259,12 +261,23 @@ export default function AdminEmail() {
 
 	// Linear/Superhuman trick: the pane paints from an in-memory thread cache
 	// and neighbors are prefetched after each move — j/k almost always hits
-	// memory. Session-scoped; ponytail: cached threads never refresh in the
-	// background — a reply landing mid-session appears on next reload/sync.
+	// memory. Local sends patch this cache immediately.
+	// ponytail: external replies stay stale until reload; invalidate on message-level sync.
 	const threadCache = new Map<string, ThreadFull>();
 	const cacheThread = (d: ThreadFull) => {
 		if (threadCache.size > 100) threadCache.clear();
 		threadCache.set(d.thread.id, d);
+	};
+	const applySentMessage = (thread: EmailThread, message: EmailMessage) => {
+		mergeIntoPool("email-thread", [thread as unknown as PoolRow], false);
+		const open = selected();
+		const current = threadCache.get(thread.id) ?? (open?.thread.id === thread.id ? open : { thread, messages: [] });
+		const messages = current.messages.some((m) => m.id === message.id)
+			? current.messages
+			: [...current.messages, message].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+		const next = { thread, messages };
+		cacheThread(next);
+		if (open?.thread.id === thread.id) setSelected(next);
 	};
 	const prefetch = (t?: EmailThread) => {
 		if (!t || threadCache.has(t.id)) return;
@@ -428,28 +441,35 @@ export default function AdminEmail() {
 	// per-draft schedule-send state — mirrors sendDraft's lint-gate UX
 	const [schedInput, setSchedInput] = createSignal<Record<string, string>>({});
 	const [lintBlockedSched, setLintBlockedSched] = createSignal<string | null>(null);
-	const sendDraft = async (outboxId: string, overrideLint = false) => {
+	const sendDraft = async (outboxId: string, overrideLint = false): Promise<boolean> => {
 		setSendStatus("sending…");
 		const res = await fetch(`/api/email/drafts/${outboxId}`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ op: "send", body: editBody()[outboxId], overrideLint }),
 		});
-		const r = await res.json();
+		const r = (await res.json()) as
+			| { ok: true; gmailMessageId: string; thread: EmailThread; message: EmailMessage }
+			| { ok?: false; blocked?: "voice_lint"; violations?: { rule?: string }[]; error?: string };
 		if (r.ok) {
+			applySentMessage(r.thread, r.message);
 			setLintBlockedDraft(null);
+			setOpenDraft((id) => (id === outboxId ? null : id));
+			await revalidate("email-inbox");
 			setSendStatus("sent");
 			setTimeout(() => setSendStatus(""), 5000);
-			void revalidate("email-inbox"); // move the row from drafts to Sent immediately
-		} else if (r.blocked === "voice_lint") {
+			return true;
+		}
+		if (r.blocked === "voice_lint") {
 			const first = r.violations?.[0]?.rule ?? "voice issues";
 			const more = (r.violations?.length ?? 1) - 1;
 			setLintBlockedDraft(outboxId);
 			setSendStatus(`voice lint: ${first}${more > 0 ? ` (+${more} more)` : ""} — fix the draft or send anyway`);
 		} else {
 			setLintBlockedDraft(null);
-			setSendStatus(`failed: ${r.error}`);
+			setSendStatus(`failed: ${r.error ?? `HTTP ${res.status}`}`);
 		}
+		return false;
 	};
 
 	const discardDraft = async (outboxId: string) => {
@@ -504,7 +524,7 @@ export default function AdminEmail() {
 			setEditBody({ ...editBody(), [outboxId]: patch.body });
 			lintDraft(outboxId, patch.body);
 		}
-	if (patch.to !== undefined || patch.subject !== undefined || patch.cc !== undefined || patch.bcc !== undefined || patch.signature !== undefined) {
+		if (patch.to !== undefined || patch.subject !== undefined || patch.cc !== undefined || patch.bcc !== undefined || patch.signature !== undefined || patch.signatureText !== undefined) {
 			setEditMeta({ ...editMeta(), [outboxId]: { ...editMeta()[outboxId], ...patch } });
 		}
 		clearTimeout(draftSaveTimers[outboxId]);
@@ -709,8 +729,7 @@ export default function AdminEmail() {
 		}
 		// sendDraft reads the (possibly edited) body from editBody
 		setEditBody({ ...editBody(), [draftId]: c.body });
-		await sendDraft(draftId, overrideLint);
-		if (lintBlockedDraft() === draftId) return; // gate hit: overlay stays up, Send became Send anyway
+		if (!(await sendDraft(draftId, overrideLint))) return;
 		setCompose(null);
 		flash("Sent");
 	};

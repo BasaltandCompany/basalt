@@ -1,7 +1,7 @@
 // Self-check for gmail payload parsing + mime building (pure functions).
 // Run: DATABASE_URL=postgres://dummy bun test src/lib/gmail.test.ts
 import { describe, expect, test } from "bun:test";
-import { buildMime, buildReplyQuote, extractText, extractHtml, addr, latestMessage, isTrashed, threadSubject, extractAttachments } from "./gmail";
+import { buildMime, buildReplyQuote, stripQuotedHistory, extractText, extractHtml, addr, latestMessage, isTrashed, threadSubject, extractAttachments } from "./gmail";
 import { toBase64 } from "./crypto";
 
 const part = (mimeType: string, data: string): any => ({
@@ -138,6 +138,23 @@ describe("buildMime", () => {
 		expect(branded).toContain("logo-email.png");
 	});
 
+	test("reply MIME orders body, footer, then the latest-message quote in plain and HTML", () => {
+		const mime = buildMime({
+			to: "a@b.c",
+			subject: "Hi",
+			body: "BODY TOKEN",
+			signature: "full",
+			signatureText: "FOOTER TOKEN",
+			quotedReply: "On Nov 19, 2026, Jane wrote:\n> QUOTE TOKEN",
+		});
+		const htmlStart = mime.indexOf("<html><body");
+		expect(mime.indexOf("BODY TOKEN")).toBeLessThan(mime.indexOf("FOOTER TOKEN"));
+		expect(mime.indexOf("FOOTER TOKEN")).toBeLessThan(mime.indexOf("On Nov 19, 2026"));
+		expect(mime.indexOf("BODY TOKEN", htmlStart)).toBeLessThan(mime.indexOf("FOOTER TOKEN", htmlStart));
+		expect(mime.indexOf("FOOTER TOKEN", htmlStart)).toBeLessThan(mime.indexOf("<blockquote", htmlStart));
+		expect(mime).toContain("QUOTE TOKEN");
+	});
+
 	// ── attachments ──
 	test("attachments → multipart/mixed, body section first, one base64 part per file", () => {
 		const b64 = toBase64("PDFBYTES");
@@ -167,18 +184,21 @@ describe("buildMime", () => {
 		expect(mime).toContain("Q".repeat(76));
 	});
 
-	test("attachments + signature → alternative nested inside mixed", () => {
+	test("attachments + signature keep body, footer, quote before files", () => {
 		const mime = buildMime({
 			to: "a@b.c",
 			subject: "Hi",
-			body: "b",
+			body: "BODY TOKEN",
 			signature: "plain",
+			quotedReply: "On Nov 19, 2026, Jane wrote:\n> QUOTE TOKEN",
 			attachments: [{ filename: "a.pdf", mimeType: "application/pdf", base64: toBase64("x") }],
 		});
+		const attachment = mime.indexOf('Content-Disposition: attachment; filename="a.pdf"');
 		expect(mime).toContain("multipart/mixed");
 		expect(mime).toContain("multipart/alternative");
-		expect(mime.indexOf("multipart/alternative")).toBeGreaterThan(mime.indexOf("multipart/mixed"));
-		expect(mime).toContain("--_basalt_sig--");
+		expect(mime.indexOf("BODY TOKEN")).toBeLessThan(mime.indexOf("-- \nCollin"));
+		expect(mime.indexOf("-- \nCollin")).toBeLessThan(mime.indexOf("QUOTE TOKEN"));
+		expect(mime.indexOf("QUOTE TOKEN")).toBeLessThan(attachment);
 		expect(mime.trimEnd().endsWith("--_basalt_att--")).toBe(true);
 	});
 
@@ -192,6 +212,42 @@ describe("buildMime", () => {
 		const empty = buildMime({ to: "a@b.c", subject: "Hi", body: "b", attachments: [] });
 		expect(empty).toBe(plain);
 		expect(plain).not.toContain("multipart");
+	});
+});
+
+describe("reply history trimming", () => {
+	test("keeps only the newest message from a nested Gmail reply", () => {
+		const body = `Sounds good. Add me as reviewer on the PRs.
+
+Luke Leckron | BCW Supplies
+
+On Nov 20, 2026, 4:30 PM, Basalt & Company <cpfeifer@basalt.ac> wrote:
+> Perfect thanks Luke.
+>
+> On Nov 19, 2026, 9:00 AM, Luke wrote:
+> > Older history`;
+		expect(stripQuotedHistory(body)).toBe("Sounds good. Add me as reviewer on the PRs.\n\nLuke Leckron | BCW Supplies");
+	});
+
+	test("cuts leading quote blocks and Outlook original-message headers", () => {
+		expect(stripQuotedHistory("> old message\n> older message")).toBe("");
+		expect(stripQuotedHistory("Latest answer.\n\nOn Nov 20, Jane <jane@example.com>\nwrote:\n> old message")).toBe("Latest answer.");
+		expect(
+			stripQuotedHistory(`Latest answer.
+
+-----Original Message-----
+From: Jane Smith <jane@example.com>
+Sent: Thursday, November 19, 2026 4:42 PM
+To: Collin Pfeifer <cpfeifer@basalt.ac>
+Subject: Re: Hello
+
+Old message`),
+		).toBe("Latest answer.");
+	});
+
+	test("ordinary text containing From is unchanged", () => {
+		const body = "From the client side, this looks good.\nShip it tomorrow.";
+		expect(stripQuotedHistory(body)).toBe(body);
 	});
 });
 
@@ -395,19 +451,23 @@ describe("extractAttachments", () => {
 });
 
 describe("buildReplyQuote", () => {
-	test("header + > prefixed lines", () => {
+	test("header + > prefixed newest-message lines", () => {
 		const q = buildReplyQuote({ date: new Date(2026, 10, 19, 16, 42), fromName: "Jane Smith", fromEmail: "jane@acme.com", bodyText: "line one\nline two" });
-		expect(q.split("\n")[0]).toMatch(/^On Nov 19, 2026, 4:42 PM, Jane Smith <jane@acme\.com> wrote:$/);
+		expect(q?.split("\n")[0]).toMatch(/^On Nov 19, 2026, 4:42 PM, Jane Smith <jane@acme\.com> wrote:$/);
 		expect(q).toContain("> line one\n> line two");
 	});
 
-	test("blank lines become bare >", () => {
-		const q = buildReplyQuote({ date: new Date(2026, 10, 19), fromName: "Jane", bodyText: "a\n\nb" });
-		expect(q.split("\n").slice(1)).toEqual(["> a", ">", "> b"]);
+	test("nested history is omitted from the quote", () => {
+		const q = buildReplyQuote({
+			date: new Date(2026, 10, 19),
+			fromName: "Jane",
+			bodyText: "new answer\n\nOn Nov 18, 2026, 1:00 PM, Collin wrote:\n> old answer",
+		});
+		expect(q).toContain("> new answer");
+		expect(q).not.toContain("old answer");
 	});
 
-	test("no name → email only; empty body → header + bare >", () => {
-		const q = buildReplyQuote({ date: new Date(2026, 10, 19), fromEmail: "x@y.z", bodyText: "" });
-		expect(q.split("\n")).toEqual([expect.stringMatching(/^On .*x@y\.z wrote:$/), ">"]);
+	test("blank newest content returns no quote", () => {
+		expect(buildReplyQuote({ date: new Date(2026, 10, 19), fromEmail: "x@y.z", bodyText: "> old message" })).toBeNull();
 	});
 });
