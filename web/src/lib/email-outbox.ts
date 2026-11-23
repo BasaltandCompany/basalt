@@ -7,11 +7,11 @@
 // client import gets RPC stubs instead of a db-in-browser crash.
 import { and, desc, eq, isNotNull, ne, sql } from "drizzle-orm";
 import { db } from "~/db";
-import { emailMessages, emailOutbox, emailThreads } from "~/db/schema";
-import { buildReplyQuote, getPrimaryAccount, threadWithMessages, sendGmail } from "~/lib/gmail";
+import { emailMessages, emailOutbox, emailThreads, type EmailMessage, type EmailThread } from "~/db/schema";
+import { buildReplyQuote, getPrimaryAccount, resolveFooter, threadWithMessages, sendGmail } from "~/lib/gmail";
 import { trackText } from "~/lib/crdt-text-db";
 import { lintVoiceText, recordLintOverrides } from "~/lib/voice-lint-db";
-import { SIGNATURES } from "~/lib/email-signature";
+import { REPLY_TO } from "~/lib/email-signature";
 import { supabaseService } from "~/lib/supabase";
 import { toBase64 } from "~/lib/crypto";
 import type { OutboxAttachment } from "~/db/schema";
@@ -96,7 +96,7 @@ async function loadAttachments(list: OutboxAttachment[]): Promise<MimeAttachment
 }
 
 export type SendResult =
-	| { ok: true; gmailMessageId: string }
+	| { ok: true; gmailMessageId: string; thread: EmailThread; message: EmailMessage }
 	| { ok: false; error: string }
 	| { ok: false; blocked: "voice_lint"; violations: LintViolation[] };
 
@@ -189,12 +189,10 @@ export async function sendOutboxInner(
 		await recordLintOverrides(lint.violations.map((v) => v.patternId), outboxId);
 	}
 
-	// reply threading + quoted history: find the last message in the thread.
-	// The composer holds only the human's words — the "On … wrote:" quote is
-	// built here, send-only: row.body/lint/version history stay pure, and the
-	// contains-check keeps retries from stacking the quote.
+	// reply threading + quoted context: target the last inbound message, but keep
+	// the quote separate from the authored body so the footer can sit between them.
 	let inReplyToGmailId: string | undefined;
-	let sendBody = body;
+	let quotedReply: string | undefined;
 	if (row.threadId) {
 		const [thread] = await db.select().from(emailThreads).where(eq(emailThreads.id, row.threadId));
 		if (thread) {
@@ -205,16 +203,17 @@ export async function sendOutboxInner(
 			inReplyToGmailId = target?.gmailId;
 			if (target) {
 				const quote = buildReplyQuote(target);
-				if (!body.includes(quote.split("\n")[0])) sendBody = `${body}\n\n${quote}`;
+				if (quote && !body.includes(quote.split("\n")[0])) quotedReply = quote;
 			}
 		}
 	}
 
 	// signature: explicit per-draft choice wins; NULL = auto (campaign → plain,
-	// otherwise full). 'none' = bare send. Footer is the last thing in every
-	// outbound email — below the quoted history on replies.
+	// otherwise full). The resolved footer is reused for the local sent copy so
+	// Basalt displays exactly what Gmail received.
 	const sig = row.signature === "none" ? undefined : (row.signature ?? (row.campaignCompanyId ? "plain" : "full")) as "full" | "plain" | undefined;
-	const deliveredBody = sig ? `${sendBody}\n\n${SIGNATURES[sig].plain}` : sendBody;
+	const footer = resolveFooter(sig, row.signatureText);
+	const deliveredBody = footer ? `${body}\n\n${footer.plain}` : body;
 
 	try {
 		// a missing/corrupt attachment file fails the send — never deliver the
@@ -225,9 +224,10 @@ export async function sendOutboxInner(
 			cc: row.ccEmail,
 			bcc: row.bccEmail,
 			subject: row.subject,
-			body: sendBody,
+			body,
 			signature: sig,
 			signatureText: row.signatureText,
+			quotedReply,
 			inReplyToGmailId,
 			attachments: mimeAttachments.length ? mimeAttachments : undefined,
 		});
@@ -250,51 +250,61 @@ export async function sendOutboxInner(
 				...(tracked ? { loroSnapshot: tracked.loroSnapshot, version: tracked.version } : {}),
 			})
 			.where(eq(emailOutbox.id, outboxId));
-		// record the sent message locally — replies keep their thread current
-		// without waiting for a sync; a NEW compose also gets its thread created
-		// so the Sent tab updates on the immediate revalidate instead of on the
-		// next Gmail sync
-		let threadRowId = row.threadId;
-		if (!threadRowId) {
-			const [threadRow] = await db
+		// record the sent message locally — the response updates the open thread and
+		// Sent tab without waiting for a Gmail sync. Store only authored body + footer;
+		// the recipient-facing quote is context, not another local copy of the thread.
+		const sentAt = new Date();
+		const snippet = body.replace(/\s+/g, " ").trim().slice(0, 200);
+		let sentThread: EmailThread;
+		if (!row.threadId) {
+			const [thread] = await db
 				.insert(emailThreads)
 				.values({
 					accountId: account.id,
 					gmailThreadId,
 					subject: row.subject,
-					snippet: "",
-					fromName: account.email,
-					fromEmail: account.email,
+					snippet,
+					fromName: "Collin Pfeifer",
+					fromEmail: REPLY_TO,
 					unread: false,
 					archived: true,
-					lastMessageAt: new Date(),
+					lastMessageAt: sentAt,
 				})
 				.onConflictDoUpdate({
 					target: emailThreads.gmailThreadId,
-					set: { lastMessageAt: new Date(), subject: row.subject },
+					set: { subject: row.subject, snippet, fromName: "Collin Pfeifer", fromEmail: REPLY_TO, unread: false, lastMessageAt: sentAt },
 				})
 				.returning();
-			threadRowId = threadRow.id;
+			sentThread = thread;
+		} else {
+			const [thread] = await db
+				.update(emailThreads)
+				.set({ snippet, fromName: "Collin Pfeifer", fromEmail: REPLY_TO, unread: false, lastMessageAt: sentAt })
+				.where(eq(emailThreads.id, row.threadId))
+				.returning();
+			sentThread = thread;
 		}
-		await db
+		const [insertedMessage] = await db
 			.insert(emailMessages)
 			.values({
-				threadId: threadRowId,
+				threadId: sentThread.id,
 				gmailId: gmailMessageId,
+				fromName: "Collin Pfeifer",
+				fromEmail: REPLY_TO,
 				toEmails: row.toEmail,
 				bodyText: deliveredBody,
 				// local record already has the delivered text: '' marks the row
 				// "checked" so open-backfill never refetches
 				bodyHtml: "",
-				date: new Date(),
+				date: sentAt,
 				isSent: true,
 			})
-			.onConflictDoNothing({ target: emailMessages.gmailId });
-		await db
-			.update(emailThreads)
-			.set({ lastMessageAt: new Date() })
-			.where(eq(emailThreads.id, threadRowId));
-		return { ok: true, gmailMessageId };
+			.onConflictDoNothing({ target: emailMessages.gmailId })
+			.returning();
+		const sentMessage =
+			insertedMessage ??
+			(await db.select().from(emailMessages).where(eq(emailMessages.gmailId, gmailMessageId)).limit(1))[0];
+		return { ok: true, gmailMessageId, thread: sentThread, message: sentMessage };
 	} catch (e) {
 		const error = e instanceof Error ? e.message : String(e);
 		await db.update(emailOutbox).set({ status: "failed", error }).where(eq(emailOutbox.id, outboxId));

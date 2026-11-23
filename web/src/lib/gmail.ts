@@ -524,24 +524,31 @@ export async function performUnsubscribe(account: EmailAccount, info: UnsubInfo)
 
 export type MimeAttachment = { filename: string; mimeType: string; base64: string };
 
+function plainMessage(body: string, footer?: { plain: string }, quotedReply?: string): string {
+	return [body, footer?.plain, quotedReply].filter((part): part is string => part !== undefined && part !== "").join("\n\n");
+}
+
+function quotedReplyHtml(quotedReply: string): string {
+	const [header, ...lines] = quotedReply.replace(/\r\n/g, "\n").split("\n");
+	const content = [header, ...lines.map((line) => line.replace(/^> ?/, ""))].join("\n");
+	return `<blockquote class="gmail_quote" type="cite" style="margin:24px 0 0;padding-left:12px;border-left:2px solid #d8d2c4;color:#6b6455;">${escapeBodyHtml(content)}</blockquote>`;
+}
+
 // the alternative CONTENT — from the first `--_basalt_sig` boundary onward.
-// Its enclosing Content-Type header is added by the caller: the top-level
-// entity when there are no attachments, the part header inside
-// multipart/mixed otherwise. Emitted exactly once either way — a duplicated
-// header here becomes body preamble, which strict clients (Spark) mis-parse
-// into a blank footer.
-function alternativeContent(body: string, footer: { plain: string; html: string }): string {
+// Its enclosing Content-Type header is added by the caller. Emitting that header
+// here too turns it into body preamble and strict clients such as Spark hide the footer.
+function alternativeContent(body: string, footer: { plain: string; html: string }, quotedReply?: string): string {
 	return [
 		"--_basalt_sig",
 		'Content-Type: text/plain; charset="UTF-8"',
 		"Content-Transfer-Encoding: 8bit",
 		"",
-		`${body}\n\n${footer.plain}`,
+		plainMessage(body, footer, quotedReply),
 		"--_basalt_sig",
 		'Content-Type: text/html; charset="UTF-8"',
 		"Content-Transfer-Encoding: 8bit",
 		"",
-		`<html><body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111111;line-height:1.5;margin:0;padding:24px;">${escapeBodyHtml(body)}${footer.html}</body></html>`,
+		`<html><body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111111;line-height:1.5;margin:0;padding:24px;">${escapeBodyHtml(body)}${footer.html}${quotedReply ? quotedReplyHtml(quotedReply) : ""}</body></html>`,
 		"--_basalt_sig--",
 	].join("\r\n");
 }
@@ -562,13 +569,13 @@ export function resolveFooter(signature?: "full" | "plain", signatureText?: stri
 
 // the body's own MIME section — its Content-Type line onward (everything that
 // sits inside the enclosing multipart/mixed when attachments are present)
-function bodySection(body: string, footer?: { plain: string; html: string }): string {
+function bodySection(body: string, footer?: { plain: string; html: string }, quotedReply?: string): string {
 	if (!footer) {
-		return ['Content-Type: text/plain; charset="UTF-8"', "Content-Transfer-Encoding: 8bit", "", body].join("\r\n");
+		return ['Content-Type: text/plain; charset="UTF-8"', "Content-Transfer-Encoding: 8bit", "", plainMessage(body, undefined, quotedReply)].join("\r\n");
 	}
-	// footer present → multipart/alternative: plain body + footer text, and an
-	// HTML part with the branded (or overridden) footer block.
-	return ['Content-Type: multipart/alternative; boundary="_basalt_sig"', "", alternativeContent(body, footer)].join("\r\n");
+	// footer present → multipart/alternative: body + footer + latest reply in
+	// both plain and HTML parts.
+	return ['Content-Type: multipart/alternative; boundary="_basalt_sig"', "", alternativeContent(body, footer, quotedReply)].join("\r\n");
 }
 
 // RFC 2045: quoted-string header param — drop chars that break the quoting
@@ -576,17 +583,44 @@ function mimeFilename(name: string): string {
 	return name.replace(/[\r\n\\"]/g, "").trim() || "attachment";
 }
 
-/**
- * Plain-text reply quote appended at send time (the composer shows only the
- * human's words): "On <date>, <name> <email> wrote:" + "> " per line.
- */
-export function buildReplyQuote(msg: { date: Date | string; fromName?: string | null; fromEmail?: string | null; bodyText?: string | null }): string {
+/** Remove older quoted history from a message body, leaving only the newest
+ * authored content. Handles the common Gmail/Apple/Outlook reply markers. */
+export function stripQuotedHistory(text: string): string {
+	const lines = text.replace(/\r\n/g, "\n").split("\n");
+	let cut = lines.length;
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i].trim();
+		const outlookHeaders = lines.slice(i, i + 7).map((value) => value.trim());
+		const startsOutlookBlock =
+			/^From:\s*\S/i.test(line) &&
+			outlookHeaders.some((value) => /^(?:Sent|Date):\s*\S/i.test(value)) &&
+			outlookHeaders.some((value) => /^To:\s*\S/i.test(value)) &&
+			outlookHeaders.some((value) => /^Subject:\s*\S/i.test(value));
+		const startsWrappedReply = /^On\s+\S/i.test(line) && lines[i + 1]?.trim().toLowerCase() === "wrote:";
+		if (
+			(/^On .+\bwrote:\s*$/i.test(line) || startsWrappedReply) ||
+			/^[-_]{2,}\s*(?:Original|Forwarded) Message\s*[-_]{2,}$/i.test(line) ||
+			/^Begin forwarded message:\s*$/i.test(line) ||
+			(line.startsWith(">") && (i === 0 || lines[i - 1].trim() === "")) ||
+			startsOutlookBlock
+		) {
+			cut = i;
+			break;
+		}
+	}
+	return lines.slice(0, cut).join("\n").trim();
+}
+
+/** Plain-text latest-message quote appended after the sender's footer. */
+export function buildReplyQuote(msg: { date: Date | string; fromName?: string | null; fromEmail?: string | null; bodyText?: string | null }): string | null {
+	const body = stripQuotedHistory(msg.bodyText ?? "");
+	if (!body) return null;
 	const who = `${msg.fromName ?? msg.fromEmail ?? "them"}${msg.fromName && msg.fromEmail && msg.fromName !== msg.fromEmail ? ` <${msg.fromEmail}>` : ""}`;
 	// manual formatting — bun/node without full ICU render toLocaleString differently
 	const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 	const d = new Date(msg.date);
 	const when = `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}, ${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, "0")} ${d.getHours() < 12 ? "AM" : "PM"}`;
-	const lines = (msg.bodyText ?? "").replace(/\r\n/g, "\n").split("\n").map((l) => (l.trim() ? `> ${l}` : ">"));
+	const lines = body.split("\n").map((line) => (line.trim() ? `> ${line}` : ">"));
 	return `On ${when}, ${who} wrote:\n${lines.join("\n")}`;
 }
 
@@ -595,7 +629,7 @@ function wrap76(b64: string): string {
 	return (b64.match(/.{1,76}/g) ?? []).join("\r\n");
 }
 
-export function buildMime(input: { to: string; cc?: string | null; bcc?: string | null; subject: string; body: string; signature?: "full" | "plain"; signatureText?: string | null; attachments?: MimeAttachment[] }): string {
+export function buildMime(input: { to: string; cc?: string | null; bcc?: string | null; subject: string; body: string; signature?: "full" | "plain"; signatureText?: string | null; quotedReply?: string; attachments?: MimeAttachment[] }): string {
 	const headers = [
 		`To: ${input.to}`,
 		...(input.cc ? [`Cc: ${input.cc}`] : []),
@@ -609,14 +643,13 @@ export function buildMime(input: { to: string; cc?: string | null; bcc?: string 
 	];
 	const footer = resolveFooter(input.signature, input.signatureText);
 	if (!footer && !input.attachments?.length) {
-		// legacy bare path — byte-identical output
 		headers.push('Content-Type: text/plain; charset="UTF-8"', "Content-Transfer-Encoding: 8bit");
-		return `${headers.join("\r\n")}\r\n\r\n${input.body}`;
+		return `${headers.join("\r\n")}\r\n\r\n${plainMessage(input.body, undefined, input.quotedReply)}`;
 	}
 	if (input.attachments?.length) {
 		// attachments → multipart/mixed: body section first, one base64 part per file
 		headers.push('Content-Type: multipart/mixed; boundary="_basalt_att"');
-		const lines = ["--_basalt_att", bodySection(input.body, footer)];
+		const lines = ["--_basalt_att", bodySection(input.body, footer, input.quotedReply)];
 		for (const a of input.attachments) {
 			const name = mimeFilename(a.filename);
 			lines.push(
@@ -633,18 +666,20 @@ export function buildMime(input: { to: string; cc?: string | null; bcc?: string 
 	}
 	// no attachments → the alternative content IS the body; its header is the
 	// top-level Content-Type, emitted exactly once
+	// footer is guaranteed here: no-footer returned through the plain path above
+	if (!footer) throw new Error("footer required for multipart/alternative");
 	headers.push('Content-Type: multipart/alternative; boundary="_basalt_sig"');
-	return [headers.join("\r\n"), "", alternativeContent(input.body, footer!)].join("\r\n");
+	return [headers.join("\r\n"), "", alternativeContent(input.body, footer, input.quotedReply)].join("\r\n");
 }
 
 /** Send via Gmail. Returns the new message id + its Gmail thread id. */
 export async function sendGmail(
 	account: EmailAccount,
-	input: { to: string; cc?: string | null; bcc?: string | null; subject: string; body: string; signature?: "full" | "plain"; signatureText?: string | null; inReplyToGmailId?: string; attachments?: MimeAttachment[] },
+	input: { to: string; cc?: string | null; bcc?: string | null; subject: string; body: string; signature?: "full" | "plain"; signatureText?: string | null; quotedReply?: string; inReplyToGmailId?: string; attachments?: MimeAttachment[] },
 ): Promise<{ id: string; threadId: string }> {
 	// Gmail threads replies via the threadId param — no In-Reply-To guessing
 	const threadId = input.inReplyToGmailId ? await threadIdOf(account, input.inReplyToGmailId) : undefined;
-	const raw = toBase64Url(buildMime({ to: input.to, cc: input.cc, bcc: input.bcc, subject: input.subject, body: input.body, signature: input.signature, signatureText: input.signatureText, attachments: input.attachments }));
+	const raw = toBase64Url(buildMime({ to: input.to, cc: input.cc, bcc: input.bcc, subject: input.subject, body: input.body, signature: input.signature, signatureText: input.signatureText, quotedReply: input.quotedReply, attachments: input.attachments }));
 	const res = await gmail<{ id: string; threadId: string }>(account, "/messages/send", {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
