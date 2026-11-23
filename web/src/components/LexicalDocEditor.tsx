@@ -135,8 +135,13 @@ export default function LexicalDocEditor(props: {
 	// set inside onSettled (needs the editor closure); the dropdown calls this
 	let insertMentionFn: ((hit: ComponentSearchHit) => void) | undefined;
 
+	// solid 2: onCleanup is forbidden inside onSettled (it re-runs on every
+	// transition and throws CLEANUP_IN_FORBIDDEN_SCOPE, halting reactivity).
+	// Bind once per instance via a guard; teardown stays in the component body.
+	let disposeEditor: (() => void) | undefined;
+	onCleanup(() => disposeEditor?.());
 	onSettled(() => {
-		if (typeof window === "undefined") return; // onSettled runs on the server too
+		if (typeof window === "undefined" || disposeEditor) return;
 		const ed = createEditor({
 			namespace: "madcactus-docs",
 			nodes: DOC_NODES,
@@ -763,7 +768,7 @@ export default function LexicalDocEditor(props: {
 			4, // COMMAND_PRIORITY_HIGH
 		);
 
-		onCleanup(() => {
+		disposeEditor = () => {
 			clearTimeout(timer);
 			clearTimeout(lintTimer);
 			clearTimeout(mentionTimer);
@@ -782,7 +787,7 @@ export default function LexicalDocEditor(props: {
 			host.removeEventListener("mouseover", onHostOver);
 			host.removeEventListener("mouseout", onHostOut);
 			ed.setRootElement(null);
-		});
+		};
 	});
 
  return (

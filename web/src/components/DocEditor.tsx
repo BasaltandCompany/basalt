@@ -207,13 +207,18 @@ export const DocEditor = (props: { id: string; doc: NonNullable<Awaited<ReturnTy
 		// planted during re-layout); unfocused changes settle in 200ms
 		layoutTimer = setTimeout(runLayout, editing() ? 150 : 200);
 	};
+	// solid 2: onCleanup is forbidden inside onSettled (it re-runs on every
+	// transition and throws CLEANUP_IN_FORBIDDEN_SCOPE, halting reactivity).
+	// Bind once per instance via a guard; teardown stays in the component body.
+	let disposeResize: (() => void) | undefined;
+	onCleanup(() => disposeResize?.());
 	onSettled(() => {
-		if (typeof window === "undefined") return; // onSettled runs on the server too
+		if (typeof window === "undefined" || disposeResize) return;
 		const onResize = () => scheduleLayout();
 		window.addEventListener("resize", onResize);
 		// fonts can shift metrics after first paint
 		document.fonts?.ready?.then(() => scheduleLayout());
-		onCleanup(() => window.removeEventListener("resize", onResize));
+		disposeResize = () => window.removeEventListener("resize", onResize);
 	});
 
 	// seed once when the doc resource resolves

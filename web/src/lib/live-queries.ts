@@ -23,8 +23,12 @@ export function applyPoll(cursor: number | null, res: PollResult): { revalidate:
 }
 
 /** Mount once (Layout.tsx). No-op during SSR. */
+// module-level: re-created Layouts must not stack a second poll loop
+let started = false;
 export function useLiveQueries(): void {
 	onSettled(() => {
+		if (started || typeof window === "undefined") return;
+		started = true;
 		let cursor: number | null = null;
 		let inFlight = false;
 
@@ -53,11 +57,7 @@ export function useLiveQueries(): void {
 		};
 
 		void poll(); // establish the cursor without revalidating
-		const timer = setInterval(() => void poll(), POLL_MS);
+		setInterval(() => void poll(), POLL_MS);
 		document.addEventListener("visibilitychange", onVisible);
-		onCleanup(() => {
-			clearInterval(timer);
-			document.removeEventListener("visibilitychange", onVisible);
-		});
 	});
 }
