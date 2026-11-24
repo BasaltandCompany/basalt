@@ -199,159 +199,156 @@ class PageState {
     }
 }
 
-export function generateScorecardPDF(data: ScoreData): Promise<Uint8Array<ArrayBuffer>> {
-    return new Promise(async (resolve, reject) => {
-        try {
-            const PDFDocument = (await import("pdfkit")).default;
-            const doc: Doc = new PDFDocument({
-                size: "LETTER",
-                margins: { top: 0, bottom: 0, left: 0, right: 0 },
-            });
+export async function generateScorecardPDF(data: ScoreData): Promise<Uint8Array<ArrayBuffer>> {
+	const PDFDocument = (await import("pdfkit")).default;
+	const doc: Doc = new PDFDocument({
+		size: "LETTER",
+		margins: { top: 0, bottom: 0, left: 0, right: 0 },
+	});
 
-            const chunks: Uint8Array[] = [];
-            doc.on("data", (c: Uint8Array) => chunks.push(c));
-            doc.on("end", () => {
-                const total = chunks.reduce((n, c) => n + c.length, 0);
-                const out = new Uint8Array(total);
-                let off = 0;
-                for (const c of chunks) {
-                    out.set(c, off);
-                    off += c.length;
-                }
-                resolve(out);
-            });
+	const chunks: Uint8Array[] = [];
+	doc.on("data", (c: Uint8Array) => chunks.push(c));
+	const finished = new Promise<Uint8Array<ArrayBuffer>>((resolve) => {
+		doc.on("end", () => {
+			const total = chunks.reduce((n, c) => n + c.length, 0);
+			const out = new Uint8Array(total);
+			let off = 0;
+			for (const c of chunks) {
+				out.set(c, off);
+				off += c.length;
+			}
+			resolve(out);
+		});
+	});
 
-            const tc = tierColor(data.tier);
+    const tc = tierColor(data.tier);
 
-            // ══════ PAGE 1: COVER ══════
-            fillVellum(doc);
-            const afterDot = drawWordmark(doc, m, m - 10, 24);
-            doc.font("Helvetica-Bold").fontSize(9).fillColor(C.silver)
-                .text("AI READINESS ASSESSMENT", afterDot + 14, m, { lineBreak: false });
-            goldLine(doc, m, m + 36, W - m);
+    // ══════ PAGE 1: COVER ══════
+    fillVellum(doc);
+    const afterDot = drawWordmark(doc, m, m - 10, 24);
+    doc.font("Helvetica-Bold").fontSize(9).fillColor(C.silver)
+        .text("AI READINESS ASSESSMENT", afterDot + 14, m, { lineBreak: false });
+    goldLine(doc, m, m + 36, W - m);
 
-            doc.font("Helvetica-Bold").fontSize(11).fillColor(tc)
-                .text(data.tier.toUpperCase(), m, m + 56, { lineBreak: false });
+    doc.font("Helvetica-Bold").fontSize(11).fillColor(tc)
+        .text(data.tier.toUpperCase(), m, m + 56, { lineBreak: false });
 
-            doc.font(FONT_REGULAR).fontSize(80).fillColor(C.black)
-                .text(`${data.pct}%`, m, m + 78, { lineBreak: false });
+    doc.font(FONT_REGULAR).fontSize(80).fillColor(C.black)
+        .text(`${data.pct}%`, m, m + 78, { lineBreak: false });
 
-            doc.font(FONT_REGULAR).fontSize(12).fillColor(C.silver)
-                .text(data.tierDesc, m, m + 175, { width: cw, lineGap: 4 });
+    doc.font(FONT_REGULAR).fontSize(12).fillColor(C.silver)
+        .text(data.tierDesc, m, m + 175, { width: cw, lineGap: 4 });
 
-            goldLine(doc, m, m + 240, W - m);
+    goldLine(doc, m, m + 240, W - m);
 
-            doc.font("Helvetica-Bold").fontSize(9).fillColor(C.silver)
-                .text("ESTIMATED ANNUAL COST OF MANUAL WORK", m, m + 258, { lineBreak: false });
+    doc.font("Helvetica-Bold").fontSize(9).fillColor(C.silver)
+        .text("ESTIMATED ANNUAL COST OF MANUAL WORK", m, m + 258, { lineBreak: false });
 
-            doc.font(FONT_REGULAR).fontSize(38).fillColor(C.black)
-                .text(`$${data.annualCost.toLocaleString()}`, m, m + 274, { lineBreak: false });
+    doc.font(FONT_REGULAR).fontSize(38).fillColor(C.black)
+        .text(`$${data.annualCost.toLocaleString()}`, m, m + 274, { lineBreak: false });
 
-            doc.font(FONT_ITALIC).fontSize(10).fillColor(C.silver)
-                .text(
-                    `Based on ${data.employeeCount} employees at ~${data.wastePct}% time wasted on manual tasks`,
-                    m, m + 318, { width: cw, lineBreak: false },
-                );
+    doc.font(FONT_ITALIC).fontSize(10).fillColor(C.silver)
+        .text(
+            `Based on ${data.employeeCount} employees at ~${data.wastePct}% time wasted on manual tasks`,
+            m, m + 318, { width: cw, lineBreak: false },
+        );
 
-            goldLine(doc, m, m + 345, W - m);
+    goldLine(doc, m, m + 345, W - m);
 
-            doc.font("Helvetica-Bold").fontSize(9).fillColor(C.black)
-                .text("WHERE YOUR FIRM IS BLEEDING TIME", m, m + 362, { lineBreak: false });
+    doc.font("Helvetica-Bold").fontSize(9).fillColor(C.black)
+        .text("WHERE YOUR FIRM IS BLEEDING TIME", m, m + 362, { lineBreak: false });
 
-            let y = m + 385;
-            const barX = m + 170;
-            const barEnd = W - m - 40;
-            const barW = barEnd - barX;
+    let y = m + 385;
+    const barX = m + 170;
+    const barEnd = W - m - 40;
+    const barW = barEnd - barX;
 
-            for (const [cat, score, max] of data.categories) {
-                const catPct = Math.round((score / max) * 100);
-                const content = CATEGORY_CONTENT[cat];
-                const label = content?.label || cat;
+    for (const [cat, score, max] of data.categories) {
+        const catPct = Math.round((score / max) * 100);
+        const content = CATEGORY_CONTENT[cat];
+        const label = content?.label || cat;
 
-                doc.font(FONT_REGULAR).fontSize(10).fillColor(C.black)
-                    .text(label, m, y, { lineBreak: false });
+        doc.font(FONT_REGULAR).fontSize(10).fillColor(C.black)
+            .text(label, m, y, { lineBreak: false });
 
-                doc.fillColor(C.lightSilver).rect(barX, y + 2, barW, 10).fill();
-                doc.fillColor(tc).rect(barX, y + 2, Math.max((barW * catPct) / 100, 2), 10).fill();
+        doc.fillColor(C.lightSilver).rect(barX, y + 2, barW, 10).fill();
+        doc.fillColor(tc).rect(barX, y + 2, Math.max((barW * catPct) / 100, 2), 10).fill();
 
-                doc.font("Helvetica-Bold").fontSize(10).fillColor(C.black)
-                    .text(`${catPct}%`, W - m - 30, y, { width: 30, align: "right", lineBreak: false });
+        doc.font("Helvetica-Bold").fontSize(10).fillColor(C.black)
+            .text(`${catPct}%`, W - m - 30, y, { width: 30, align: "right", lineBreak: false });
 
-                y += 22;
+        y += 22;
+    }
+
+    // ══════ CATEGORY PAGES ══════
+    const sorted = [...data.categories].sort(
+        (a, b) => b[1] / b[2] - a[1] / a[2],
+    );
+
+    const ps = new PageState(doc, tc, sorted.length);
+
+    for (let i = 0; i < sorted.length; i++) {
+        const [cat] = sorted[i];
+        const content = CATEGORY_CONTENT[cat];
+        if (!content) continue;
+
+        const catPct = Math.round((sorted[i][1] / sorted[i][2]) * 100);
+
+        ps.catIndex = i + 1;
+        ps.newPage();
+
+        // On first page of category, draw title
+        ps.drawTitle(content.label, catPct);
+        ps.drawWhatIs(content.whatIs);
+
+        for (const block of content.blocks) {
+            switch (block.type) {
+                case "text":
+                    ps.drawText(block.content);
+                    break;
+                case "code":
+                    ps.drawCode(block.label, block.content);
+                    break;
+                case "mcp":
+                    ps.drawMcp(block.name, block.url);
+                    break;
             }
-
-            // ══════ CATEGORY PAGES ══════
-            const sorted = [...data.categories].sort(
-                (a, b) => b[1] / b[2] - a[1] / a[2],
-            );
-
-            const ps = new PageState(doc, tc, sorted.length);
-
-            for (let i = 0; i < sorted.length; i++) {
-                const [cat] = sorted[i];
-                const content = CATEGORY_CONTENT[cat];
-                if (!content) continue;
-
-                const catPct = Math.round((sorted[i][1] / sorted[i][2]) * 100);
-
-                ps.catIndex = i + 1;
-                ps.newPage();
-
-                // On first page of category, draw title
-                ps.drawTitle(content.label, catPct);
-                ps.drawWhatIs(content.whatIs);
-
-                for (const block of content.blocks) {
-                    switch (block.type) {
-                        case "text":
-                            ps.drawText(block.content);
-                            break;
-                        case "code":
-                            ps.drawCode(block.label, block.content);
-                            break;
-                        case "mcp":
-                            ps.drawMcp(block.name, block.url);
-                            break;
-                    }
-                }
-
-                ps.drawFirstStep(content.firstStep);
-            }
-
-            // ══════ FINAL CTA PAGE ══════
-            doc.addPage();
-            fillVellum(doc);
-            drawWordmark(doc, m, m - 10, 20);
-            goldLine(doc, m, m + 28, W - m);
-
-            const ctaY = H / 2 - 100;
-
-            doc.font(FONT_REGULAR).fontSize(28).fillColor(C.black)
-                .text("Want all of this done for you?", m, ctaY, { width: cw, align: "center", lineBreak: false });
-
-            doc.font(FONT_REGULAR).fontSize(13).fillColor(C.silver)
-                .text(
-                    "Book a free audit. We'll run a full workflow discovery across your team, map every recurring task, and give you a concrete 90-day plan to go from where you are now to AI-native operations.",
-                    m, ctaY + 50, { width: cw, align: "center", lineGap: 4 },
-                );
-
-            const btnY = ctaY + 170;
-            const btnText = "{ BOOK A FREE AUDIT }";
-            doc.font("Helvetica-Bold").fontSize(13).fillColor(C.gold);
-            doc.text(btnText, m, btnY, { width: cw, align: "center", lineBreak: false });
-
-            doc.font(FONT_REGULAR).fontSize(11).fillColor(C.silver)
-                .text("cal.com/cpfeifer/info-meeting", m, btnY + 28, { width: cw, align: "center", link: "https://cal.com/cpfeifer/info-meeting", lineBreak: false });
-
-            goldLine(doc, m, H - m - 20, W - m);
-            doc.font(FONT_REGULAR).fontSize(10).fillColor(C.silver)
-                .text("Mad Cactus LLC", m, H - m - 10, { width: cw, align: "center", lineBreak: false });
-
-            doc.end();
-        } catch (err) {
-            reject(err);
         }
-    });
+
+        ps.drawFirstStep(content.firstStep);
+    }
+
+    // ══════ FINAL CTA PAGE ══════
+    doc.addPage();
+    fillVellum(doc);
+    drawWordmark(doc, m, m - 10, 20);
+    goldLine(doc, m, m + 28, W - m);
+
+    const ctaY = H / 2 - 100;
+
+    doc.font(FONT_REGULAR).fontSize(28).fillColor(C.black)
+        .text("Want all of this done for you?", m, ctaY, { width: cw, align: "center", lineBreak: false });
+
+    doc.font(FONT_REGULAR).fontSize(13).fillColor(C.silver)
+        .text(
+            "Book a free audit. We'll run a full workflow discovery across your team, map every recurring task, and give you a concrete 90-day plan to go from where you are now to AI-native operations.",
+            m, ctaY + 50, { width: cw, align: "center", lineGap: 4 },
+        );
+
+    const btnY = ctaY + 170;
+    const btnText = "{ BOOK A FREE AUDIT }";
+    doc.font("Helvetica-Bold").fontSize(13).fillColor(C.gold);
+    doc.text(btnText, m, btnY, { width: cw, align: "center", lineBreak: false });
+
+    doc.font(FONT_REGULAR).fontSize(11).fillColor(C.silver)
+        .text("cal.com/cpfeifer/info-meeting", m, btnY + 28, { width: cw, align: "center", link: "https://cal.com/cpfeifer/info-meeting", lineBreak: false });
+
+    goldLine(doc, m, H - m - 20, W - m);
+    doc.font(FONT_REGULAR).fontSize(10).fillColor(C.silver)
+        .text("Mad Cactus LLC", m, H - m - 10, { width: cw, align: "center", lineBreak: false });
+
+    doc.end();
+    return finished;
 }
 
 function fillVellum(doc: Doc) {

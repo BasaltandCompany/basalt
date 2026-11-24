@@ -32,6 +32,46 @@ jobs:
       - working-directory: web
         run: bun run typecheck
 
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1
+      - run: bun install
+      - working-directory: web
+        run: bun run lint
+
+  # Marketing/admin pages must render on the prod server, not just in dev —
+  # client-style relative fetch() and thrown redirect()s only fail during SSR
+  # (PR #213 /writing, /iu). A dummy DB is fine: the probe asserts the initial
+  # render completes (a sync crash -> 500), tolerating deferred query errors.
+  ssr-probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1
+      - run: bun install
+      - working-directory: web
+        run: bun run build
+      - name: Serve and probe every public route
+        working-directory: web
+        run: |
+          DATABASE_URL=postgres://dummy@localhost:5/dummy PORT=3177 bun scripts/bun-server.ts &
+          for i in $(seq 30); do curl -sf http://localhost:3177/ >/dev/null && break || sleep 1; done
+          fail=0
+          # /admin/* beyond login 302s to login unauthed, so only the shell is probed
+          for p in / /writing /case-study /newsletter /gift /iu /admin/login; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:3177$p")
+            echo "$p -> $code"
+            [ "$code" = "200" ] || { echo "FAIL: $p -> $code"; fail=1; }
+          done
+          curl -s http://localhost:3177/iu | grep -q 'http-equiv="refresh"' || { echo 'FAIL: /iu lost its meta refresh'; fail=1; }
+          exit $fail
+
   docker-build:
     runs-on: ubuntu-latest
     steps:

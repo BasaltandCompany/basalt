@@ -1,5 +1,8 @@
 {
   "name": "basalt",
   "private": true,
-  "workspaces": ["web", "packages/ui"]
+  "workspaces": ["web", "packages/ui"],
+  "devDependencies": {
+    "eslint-plugin-solid": "^0.20.1"
+  }
 }
