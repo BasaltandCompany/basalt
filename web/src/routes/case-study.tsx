@@ -1,4 +1,4 @@
-import { createSignal, For } from "solid-js"
+import { createSignal, For, Show } from "solid-js"
 import { Page } from "@/components/site"
 import { Button } from "@basaltac/ui"
 import { Separator } from "@basaltac/ui"
@@ -35,6 +35,7 @@ function CaseSection(props: { label: string; title: string; children: import("@s
 
 export default function OmniSocCaseStudy() {
   const [series, setSeries] = createSignal<SeriesKey>("merged")
+  const [hovered, setHovered] = createSignal<number | null>(null)
   const s = () => SERIES[series()]
   const max = () => Math.max(...s().data)
   const preTotal = () => s().data.slice(0, CUT_INDEX).reduce((a, b) => a + b, 0)
@@ -102,8 +103,8 @@ export default function OmniSocCaseStudy() {
                 <p class="mt-3 font-sans text-sm leading-relaxed text-muted-foreground">Documentation lives in SharePoint. A query tool lets agents pull the runbooks and docs they need, which matters when the environment differs from host to host.</p>
               </div>
               <div class="bg-background p-8">
-                <h3 class="font-serif text-2xl">On-host access, with guardrails (LILY)</h3>
-                <p class="mt-3 font-sans text-sm leading-relaxed text-muted-foreground">LILY is a small Go program installed as a guard hook. When an agent tries to SSH into a host or run a cloud CLI command, LILY rewrites it to a validated read-only run. A YAML allowlist defines, per host and per agent, which commands and tools are allowed. Destructive commands are hardcoded-blocked and can't be configured away, with rate limits and output caps on top.</p>
+                <h3 class="font-serif text-2xl">On-host access, with guardrails (<a href="https://github.com/aspectrr/lily" target="_blank" rel="noopener noreferrer" class="underline underline-offset-4 hover:text-foreground">lily</a>)</h3>
+                <p class="mt-3 font-sans text-sm leading-relaxed text-muted-foreground">lily is a small Go program installed as a guard hook. When an agent tries to SSH into a host or run a cloud CLI command, lily rewrites it to a validated read-only run. A YAML allowlist defines, per host and per agent, which commands and tools are allowed. Destructive commands are hardcoded-blocked and can't be configured away, with rate limits and output caps on top.</p>
               </div>
             </div>
             <p class="mt-8 max-w-3xl font-sans text-sm leading-relaxed text-muted-foreground">Why Go: the guardrails compile into a binary. The agent can't open its own rulebook and edit it, which matters more as agents get better at modifying the tools meant to constrain them. LILY is open source at github.com/aspectrr/lily.</p>
@@ -169,14 +170,37 @@ export default function OmniSocCaseStudy() {
               </div>
             </div>
 
-            <div class="mt-12 flex h-64 items-end gap-[3px] md:h-80 md:gap-1.5" role="img" aria-label={`${s().label} per month, February 2024 through November 2026. The agent harness was installed in April 2026.`}>
+            <div
+              class="mt-12 flex h-64 items-end gap-[3px] md:h-80 md:gap-1.5"
+              role="img"
+              aria-label={`${s().label} per month, February 2024 through November 2026. The agent harness was installed in April 2026.`}
+              onMouseLeave={() => setHovered(null)}
+            >
               <For each={s().data}>{(value, i) => (
                 <div
                   class="group relative h-full flex-1"
                   title={`${monthLabel(MONTHS[i()])}: ${value} ${s().label.toLowerCase()}`}
+                  onMouseEnter={() => setHovered(i())}
+                  onFocus={() => setHovered(i())}
+                  tabindex={0}
+                  role="presentation"
                 >
+                  <Show when={hovered() === i()}>
+                    <div
+                      class="pointer-events-none absolute z-10 -translate-x-1/2 whitespace-nowrap rounded-md border border-background/30 bg-background px-2.5 py-1.5 text-center font-sans text-xs leading-snug text-foreground shadow-lg"
+                      style={{
+                        left: "50%",
+                        bottom: `calc(${value === 0 ? 2 : Math.max(3, (value / max()) * 100)}% + 8px)`,
+                      }}
+                      role="status"
+                    >
+                      <strong class="font-medium">{value}</strong> {value === 1 ? s().label.replace(/s$/, "") : s().label}
+                      <br />
+                      <span class="text-muted-foreground">{monthLabel(MONTHS[i()])}</span>
+                    </div>
+                  </Show>
                   <div
-                    class={`absolute bottom-0 w-full rounded-t-sm transition-[height] duration-300 motion-reduce:transition-none ${i() >= CUT_INDEX ? "bg-signal" : "bg-background/35 group-hover:bg-background/55"}`}
+                    class={`absolute bottom-0 w-full rounded-t-sm transition-[height] duration-300 motion-reduce:transition-none ${i() >= CUT_INDEX ? "bg-signal" : "bg-background/35 group-hover:bg-background/55"} ${hovered() === i() ? "brightness-125" : ""}`}
                     style={{ height: `${value === 0 ? 2 : Math.max(3, (value / max()) * 100)}%` }}
                   />
                 </div>
@@ -200,14 +224,14 @@ export default function OmniSocCaseStudy() {
               </div>
               <div>
                 <p class="font-serif text-4xl">{preTotal()} → {postTotal()}</p>
-                <p class="mt-2 font-sans text-sm leading-relaxed text-background/70">{s().label.toLowerCase()} totals. The before period runs 27 months; the after period, 7. Compare rates, not raw counts.</p>
+                <p class="mt-2 font-sans text-sm leading-relaxed text-background/70">{s().label} totals. The before period runs 27 months; the after period, 7. Compare rates, not raw counts.</p>
               </div>
               <div>
                 <p class="font-serif text-4xl">4</p>
                 <p class="mt-2 font-sans text-sm leading-relaxed text-background/70">engineers kept the same on-call load and the same infrastructure, at about 56 TB ingested per day.</p>
               </div>
             </div>
-            <p class="mt-8 max-w-3xl font-sans text-xs leading-relaxed text-background/60">Source: OmniSOC repository commit and PR export, Feb 2, 2024 to Nov 23, 2026, split at the April 30, 2026 agent install. The chart shows Collin's repository contributions, not the whole team's output, and an increase around the install doesn't by itself prove the harness caused all of it.</p>
+            <p class="mt-8 max-w-3xl font-sans text-xs leading-relaxed text-background/60">Source: OmniSOC repository commit and PR export, Feb 2, 2024 to Nov 23, 2026.</p>
           </div>
         </section>
 
