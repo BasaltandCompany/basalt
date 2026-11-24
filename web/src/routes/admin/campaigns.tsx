@@ -4,6 +4,7 @@ import { useAction } from "@solidjs/router";
 import { For, Show, Loading, createSignal } from "solid-js";
 import CreateDialog from "~/components/CreateDialog";
 import Layout from "~/components/Layout";
+import { appConfirm } from "~/components/ConfirmDialog";
 import { LintedTextarea } from "~/components/LintedTextarea";
 import { VoiceLintPanel } from "~/components/VoiceLintPanel";
 import { getUserQuery } from "~/lib/queries";
@@ -334,10 +335,17 @@ function Campaign(props: { campaign: CampaignData; store: CampaignStore }) {
 					style={{ "margin-left": "auto" }}
 					onClick={(e) => {
 						e.preventDefault();
-						if (!confirm(`Delete campaign "${c().name}"? Its target list goes with it; board prospects keep their stages.`)) return;
-						const fd = new FormData();
-						fd.set("id", c().id);
-						void removeCampaign(fd);
+						void (async () => {
+							const ok = await appConfirm({
+								title: `Delete campaign "${c().name}"?`,
+								description: "Its target list goes with it; board prospects keep their stages.",
+								confirmLabel: "Delete",
+							});
+							if (!ok) return;
+							const fd = new FormData();
+							fd.set("id", c().id);
+							void removeCampaign(fd);
+						})();
 					}}
 				>
 					Delete campaign

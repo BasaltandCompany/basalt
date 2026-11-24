@@ -3,6 +3,7 @@ import { createMemo, For, Show, Loading, createSignal, createEffect } from "soli
 import { useNavigate, useAction, revalidate } from "@solidjs/router";
 
 import CreateDialog from "~/components/CreateDialog";
+import { appConfirm } from "~/components/ConfirmDialog";
 import Layout from "~/components/Layout";
 import { getUserQuery } from "~/lib/queries";
 import {
@@ -124,12 +125,12 @@ function ActivityDetails(props: { prospect: OutreachProspect }) {
 	const reset = useAction(resetBrainActivityAction);
 	const [resetMsg, setResetMsg] = createSignal("");
 	async function handleReset() {
-		if (
-			!confirm(
-				`Reset ${props.prospect.company} brain metrics? Wipes visits, clicks, scroll, dwell and tool history on the brain. Cannot be undone.`,
-			)
-		)
-			return;
+		const ok = await appConfirm({
+			title: `Reset ${props.prospect.company} brain metrics?`,
+			description: "Wipes visits, clicks, scroll, dwell and tool history on the brain. Cannot be undone.",
+			confirmLabel: "Reset",
+		});
+		if (!ok) return;
 		setResetMsg("");
 		const fd = new FormData();
 		fd.set("id", props.prospect.id);

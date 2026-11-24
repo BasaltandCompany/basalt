@@ -5,6 +5,7 @@ import Timer from "~/components/Timer";
 import Brand from "~/components/Brand";
 import CommandPalette from "~/components/CommandPalette";
 import Toaster from "~/components/Toaster";
+import { ConfirmHost } from "~/components/ConfirmDialog";
 import { getDueOutreachCountQuery } from "~/lib/admin-queries";
 import { useLiveQueries } from "~/lib/live-queries";
 
@@ -153,6 +154,7 @@ const Layout: ParentComponent<{ user?: { id?: string; email?: string } | null }>
 			</aside>
 			<main class="content">{props.children}</main>
 			<Toaster />
+			<ConfirmHost />
 		</div>
 	);
 };

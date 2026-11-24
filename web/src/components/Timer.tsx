@@ -8,6 +8,7 @@ import {
 	startTimerAction,
 	stopTimerAction,
 } from "~/lib/queries";
+import { appConfirm } from "~/components/ConfirmDialog";
 import SelectField from "~/components/select-field";
 
 function fmtElapsed(ms: number): string {
@@ -52,8 +53,8 @@ export default function Timer() {
 		if (result?.error) setError(result.error);
 	}
 
-	function handleDiscard() {
-		if (!confirm("Discard this timer? Tracked time will be lost.")) return;
+	async function handleDiscard() {
+		if (!(await appConfirm({ title: "Discard this timer?", description: "Tracked time will be lost.", confirmLabel: "Discard" }))) return;
 		const fd = new FormData();
 		fd.set("_referer", location.pathname);
 		discard(fd);

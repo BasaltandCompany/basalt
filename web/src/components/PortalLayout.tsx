@@ -2,6 +2,7 @@
 import { For, ParentComponent, Show, createEffect } from "solid-js";
 import { useLocation } from "@solidjs/router";
 import Toaster from "~/components/Toaster";
+import { ConfirmHost } from "~/components/ConfirmDialog";
 import Brand from "~/components/Brand";
 
 const links = [
@@ -63,6 +64,7 @@ const PortalLayout: ParentComponent<{ user?: { id?: string; name?: string; email
 			</aside>
 			<main class="content">{props.children}</main>
 			<Toaster />
+			<ConfirmHost />
 		</div>
 	);
 };
