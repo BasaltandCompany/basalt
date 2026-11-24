@@ -7,49 +7,35 @@ import { initHeroVideo } from "@/routes/site-state"
 /**
  * The scroll narrative. One message per 100vh screen; the bottom-left corner
  * swaps between them as you scroll. Edit copy here — nowhere else.
- * Order: what we do → proof → the free-brain CTA.
+ * Order: what we do → process examples → the free workflow pilot.
  */
 const MESSAGES: Message[] = [
   {
     title: "We put AI to work inside your business.",
     body:
-      "We measure one number: revenue per work-hour. Build AI into the work your team already does, and five people produce what twenty-five used to.",
-    link: { href: "/thesis#revenue-per-work-hour", label: "Why this metric?" },
+      "We help small teams find the repetitive work worth fixing, test a practical AI workflow, and teach their people to run it.",
+    link: { href: "/thesis#revenue-per-work-hour", label: "How we measure progress" },
   },
   {
     title: "Proven in production.",
     proof: [
       {
-        client: "A public university",
+        client: "A data privacy provider",
         stat: "2.75x",
-        line: "revenue per work-hour, with AI agents running their outbound and a third of their time back.",
+        line: "revenue per work-hour, plus a 200% improvement in outreach response rates after work on their prospecting pipeline.",
       },
       {
-        client: "A data privacy provider",
-        stat: "+200%",
-        line: "response rates from the cold-outreach dashboard, plus coding-agent training and prospect research that grew sales.",
+        client: "OmniSOC · Indiana University",
+        stat: "2.2×",
+        line: "merged PRs per week after adopting an on-prem agent harness, with a four-person team able to handle maintenace of 56 TB of data per day.",
       },
     ],
   },
   {
-    title: "Start with free tools.",
+    title: "Let us build your first AI workflow for free.",
     body:
-      "Free tools to run your company with AI — plus the steps to set them up, 3 months of Claude, and your AI game plan.",
-    tools: [
-      {
-        name: "Basalt PR Reviewer",
-        line: "Every pull request gets a code and security review before a human sees it. Install once, done.",
-      },
-      {
-        name: "Basalt security scanner",
-        line: "Get a weekly report on how safe your company is. Plain words, in your inbox.",
-      },
-      {
-        name: "Basalt Software Factory",
-        line: "Build and ship your own software. One-stop deploys to Fly, Railway, or Render.",
-      },
-    ],
-    cta: { href: "/gift", label: "Get your free AI game plan" },
+      "Apply for a 12-week pilot. We'll find where AI could do the most work for your business, build a working trial, hand it over to your team, and get them up to speed. We take two companies at a time. Apply now to be considered for the next opening.",
+    cta: { href: "/gift", label: "Apply for a spot" },
   },
 ]
 
@@ -58,7 +44,6 @@ type Message = {
   body?: string
   link?: { href: string; label: string }
   proof?: { client: string; stat: string; line: string }[]
-  tools?: { name: string; line: string }[]
   cta?: { href: string; label: string }
 }
 
@@ -208,24 +193,10 @@ export function Site(props: { heroVideo: string | null }) {
               </div>
             )}
           </Show>
-          <Show when={msg.tools}>
-            {(tools) => (
-              <div class="mt-5 space-y-5">
-                <For each={tools()}>
-                  {(t) => (
-                    <div>
-                      <p class="font-sans text-xs uppercase tracking-[0.25em] text-muted-foreground">{t.name}</p>
-                      <p class="mt-1 max-w-lg font-sans text-sm leading-relaxed text-foreground/80">{t.line}</p>
-                    </div>
-                  )}
-                </For>
-              </div>
-            )}
-          </Show>
           <div class="pointer-events-auto mt-6 flex items-center gap-8">
             <Show
               when={msg.cta}
-              fallback={<LinkText href="/contact">Start a conversation</LinkText>}
+              fallback={<LinkText href={index() === 1 ? "/case-study" : "/contact"}>{index() === 1 ? "Explore the case study" : "Start a conversation"}</LinkText>}
             >
               {(cta) => <LinkText href={cta().href}>{cta().label}</LinkText>}
             </Show>

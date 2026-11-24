@@ -22,7 +22,7 @@ export default function BrainRequests() {
 		<Layout>
 			<Title>Lead magnet requests — Basalt</Title>
 			<h1 class="page-title">Lead magnet requests</h1>
-			<p class="page-subtitle">Claude-gift claims from /gift. Send the 3-month Claude gift by email, then link the row to a prospect when the conversation starts.</p>
+			<p class="page-subtitle">12-week pilot applications from /gift. Older game-plan requests retain the original three-month Claude promise.</p>
 			<Show when={requests()?.length} fallback={<p class="muted">No requests yet.</p>}>
 				<For each={requests()}>
 					{(r) => (
@@ -39,10 +39,10 @@ export default function BrainRequests() {
 						<details style={{ "margin-top": "8px" }}>
 							<summary class="muted" style={{ cursor: "pointer", "font-size": "13px" }}>Their answers</summary>
 							<ul style={{ "font-size": "13px", "line-height": 1.6, margin: "8px 0 0", "padding-left": "18px" }}>
-								<li><strong>Phone:</strong> {(r.answers.phone as string) || "—"} · <strong>Heard about us:</strong> {(r.answers.heardAbout as string) || "—"}</li>
-								<Show when={r.answers.whatTheyDo}>
-									<li><strong>What they do:</strong> {(r.answers.whatTheyDo as string) || "—"} · <strong>Bottleneck:</strong> {(r.answers.bottleneck as string) || "—"} · <strong>Stack:</strong> {Array.isArray(r.answers.stack) ? (r.answers.stack as string[]).join(", ") || "—" : "—"}</li>
-								</Show>
+							<li><strong>Request:</strong> {r.answers.intent === "pilot" ? "12-week pilot application" : r.answers.intent === "plan" ? "Game plan" : "Legacy game plan + three months of Claude"}</li>
+							<li><strong>Business:</strong> {(r.answers.about as string) || (r.answers.whatTheyDo as string) || "—"} · <strong>Workflow:</strong> {(r.answers.workflow as string) || (r.answers.bottleneck as string) || "—"}</li>
+						<li><strong>Industry:</strong> {(r.answers.industry as string) || "—"} · <strong>Technology footprint:</strong> {(r.answers.techFootprint as string) || "—"}</li>
+							<li><strong>Phone:</strong> {(r.answers.phone as string) || "—"} · <strong>Heard about us:</strong> {(r.answers.heardAbout as string) || "—"}</li>
 							</ul>
 						</details>
 							<div style={{ display: "flex", gap: "8px", "margin-top": "12px", "flex-wrap": "wrap", "align-items": "center" }}>
