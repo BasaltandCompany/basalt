@@ -736,8 +736,13 @@ export default function AdminEmail() {
 
 	// ── hotkeys ──
 	let searchEl: HTMLInputElement | undefined;
+	// solid 2: onCleanup is forbidden inside onSettled (it re-runs on every
+	// transition and throws CLEANUP_IN_FORBIDDEN_SCOPE, halting reactivity).
+	// Bind once per instance via a guard; teardown stays in the component body.
+	let disposeHotkeys: (() => void) | undefined;
+	onCleanup(() => disposeHotkeys?.());
 	onSettled(() => {
-		if (typeof window === "undefined") return; // onSettled runs on the server too
+		if (typeof window === "undefined" || disposeHotkeys) return;
 		const handler = async (e: KeyboardEvent) => {
 			const target = e.target as HTMLElement;
 			const typing = ["INPUT", "TEXTAREA"].includes(target.tagName) || target.isContentEditable;
@@ -912,7 +917,7 @@ export default function AdminEmail() {
 			}
 		};
 		window.addEventListener("keydown", handler);
-		onCleanup(() => window.removeEventListener("keydown", handler));
+		disposeHotkeys = () => window.removeEventListener("keydown", handler);
 	});
 
 	createEffect(
@@ -929,6 +934,11 @@ export default function AdminEmail() {
 	// that stays empty until the next manual action. Also polls email-status:
 	// the background sync writes lastSyncAt only when it finishes, so "never"
 	// has to keep revalidating until the timestamp lands.
+	// solid 2: onCleanup is forbidden inside onSettled — teardown stays in the
+	// component body. Each re-run starts a fresh self-clearing poll (safe: ticks
+	// converge once sync lands), so no instance guard is needed.
+	let disposePoll: (() => void) | undefined;
+	onCleanup(() => disposePoll?.());
 	onSettled(() => {
 		let ticks = 0;
 		const timer = setInterval(() => {
@@ -943,9 +953,10 @@ export default function AdminEmail() {
 				void revalidate("email-status");
 			} else {
 				clearInterval(timer);
+				disposePoll = undefined;
 			}
 		}, 2500);
-		onCleanup(() => clearInterval(timer));
+		disposePoll = () => clearInterval(timer);
 	});
 
 	createEffect(

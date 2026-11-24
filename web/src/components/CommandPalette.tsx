@@ -2,7 +2,7 @@
 // Built on the shadcn Command parts (cmdk-solid); filtering, arrow-key
 // selection and Enter handling come from cmdk — this file is behavior only.
 // g <key>: g e email · g d docs · g a admin · g m meetings · g o outreach
-import { For, Show, createSignal, onCleanup, onSettled } from "solid-js";
+import { For, Show, createSignal } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { CommandDialog,
 	CommandEmpty,
@@ -11,6 +11,9 @@ import { CommandDialog,
 	CommandList, } from "@basaltac/ui";
 
 type Cmd = { label: string; hint?: string; run: () => void };
+
+// module-level: the ⌘K/g-leader listener binds once per app, not per Layout instance
+let keyShortcutsBound = false;
 
 export default function CommandPalette() {
 	const navigate = useNavigate();
@@ -88,8 +91,12 @@ export default function CommandPalette() {
 		setSearch("");
 	};
 
-	onSettled(() => {
-		if (typeof window === "undefined") return; // onSettled runs on the server too
+	// solid 2: onSettled re-runs on every transition and onCleanup is forbidden
+	// inside it. The shortcut listener is app-lifetime: module flag registers it
+	// exactly once (a re-created Layout would otherwise stack a second handler,
+	// making ⌘K toggle twice), and teardown is skipped entirely.
+	if (typeof window !== "undefined" && !keyShortcutsBound) {
+		keyShortcutsBound = true;
 		let gTimer: ReturnType<typeof setTimeout> | undefined;
 		const handler = (e: KeyboardEvent) => {
 			const target = e.target as HTMLElement;
@@ -129,11 +136,7 @@ export default function CommandPalette() {
 			}
 		};
 		window.addEventListener("keydown", handler);
-		onCleanup(() => {
-			window.removeEventListener("keydown", handler);
-			clearTimeout(gTimer);
-		});
-	});
+	}
 
 	return (
 		<CommandDialog
