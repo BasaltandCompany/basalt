@@ -3,17 +3,13 @@
 import { createMemo } from "solid-js"
 import { For, Show } from "solid-js"
 import { Page } from "@/components/site"
-import { DASHBOARD } from "@/lib/dashboard"
-
-type Issue = { id: string; issueNumber: number; title: string; publishedAt: string | null }
+import { getDispatchIssuesQuery } from "@/lib/dispatch-queries"
 
 export default function Writing() {
-  const issues = createMemo(async () => {
-    const res = await fetch(`${DASHBOARD}/api/newsletter-issues`)
-    if (!res.ok) return []
-    const data = (await res.json()) as { issues: Issue[] }
-    return data.issues
-  })
+
+  // Server query, not a relative fetch — relative fetch() throws "URL is invalid"
+  // during SSR (500 on /writing in prod, fly logs 2026-11-24).
+  const issues = createMemo(() => getDispatchIssuesQuery())
 
   return (
     <Page
