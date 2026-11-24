@@ -6,10 +6,12 @@
 // attribute a block. Answers train learned matchers, so prompts decay.
 //
 // Build: bash build.sh  → BasaltSampler.app
-// Config: ~/.config/basalt/sampler.json  { baseUrl, apiKey, deviceId }
-// Privacy: only (timestamp, app name, ≤200-char title, idle seconds) leave
-// this machine, and only to your own basalt server. No screenshots, no OCR,
-// no keystrokes.
+// Config: ~/.config/basalt/sampler.json
+//   { baseUrl, apiKey, deviceId, calendarIcalUrl?, webDir?, bunPath? }
+// Runs EVERYTHING: 30s sampling, the pi-usage-scan + calendar collector
+// (in-process timer, no launchd/cron), and the prompt loop. Privacy: only
+// (timestamp, app name, ≤200-char title, idle seconds) leave this machine,
+// and only to your own basalt server. No screenshots, no OCR, no keystrokes.
 import AppKit
 import CoreGraphics
 import Foundation
@@ -20,11 +22,18 @@ let queuePath = NSString(string: "~/.local/share/basalt/sampler-queue.jsonl").ex
 let sampleInterval: TimeInterval = 30
 let uploadBatchesOf = 4 // 4 × 30s = one POST every 2 min
 let promptCooldown: TimeInterval = 15 * 60
+let collectorInterval: TimeInterval = 600 // 10 min — lives in the app, no launchd
+let logPath = NSString(string: "~/.local/share/basalt/collector.log").expandingTildeInPath
 
 struct SamplerConfig: Codable {
 	var baseUrl: String
 	var apiKey: String
 	var deviceId: String
+	// calendar: Google Calendar "Secret address in iCal format" (private)
+	var calendarIcalUrl: String?
+	// collector scripts live in the main basalt checkout, not this worktree
+	var webDir: String?
+	var bunPath: String?
 }
 
 func loadConfig() -> SamplerConfig? {
@@ -83,11 +92,20 @@ final class Sampler: NSObject, NSApplicationDelegate {
 		UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
 
 		resume()
+		startCollector()
 	}
 
 	func rebuildMenu() {
 		let menu = NSMenu()
 		menu.addItem(withTitle: paused ? "Resume sampling" : "Pause sampling", action: #selector(togglePause), keyEquivalent: "")
+		let collectorItem = NSMenuItem(title: "Collector: \(collectorStatus)", action: nil, keyEquivalent: "")
+		collectorItem.isEnabled = false
+		menu.addItem(collectorItem)
+		menu.addItem(NSMenuItem.separator())
+		menu.addItem(withTitle: "Run collector now", action: #selector(runCollectorNow), keyEquivalent: "")
+		menu.addItem(withTitle: "Open Activity dashboard", action: #selector(openDashboard), keyEquivalent: "")
+		menu.addItem(withTitle: "Open Config", action: #selector(openConfig), keyEquivalent: "")
+		menu.addItem(withTitle: "Open Log", action: #selector(openLog), keyEquivalent: "")
 		menu.addItem(NSMenuItem.separator())
 		menu.addItem(withTitle: "Test prompt", action: #selector(testPrompt), keyEquivalent: "")
 		menu.addItem(withTitle: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -193,6 +211,84 @@ final class Sampler: NSObject, NSApplicationDelegate {
 		}
 		try? kept.write(toFile: queuePath, atomically: true, encoding: .utf8)
 	}
+
+	// MARK: collector — the scheduled work launchd used to do, in-process
+
+	var collectorTimer: Timer?
+	var collectorStatus = "waiting"
+
+	func startCollector() {
+		replayQueue() // samples queued while offline last session
+		collectorTimer = Timer.scheduledTimer(withTimeInterval: collectorInterval, repeats: true) { [weak self] _ in self?.runCollector() }
+		runCollector() // first pass at launch
+	}
+
+	@objc func runCollectorNow() { runCollector() }
+
+	/// Runs the two TS collectors via bun (they stay the single source of
+	/// truth for scan/calendar logic). Runs even when sampling is paused —
+	/// pause is about desktop sampling only.
+	func runCollector() {
+		guard config != nil else { return }
+		let webDir = NSString(string: config.webDir ?? "~/GitHub/basalt/web").expandingTildeInPath
+		let scripts = ["pi-usage-scan.ts", "collect-calendar.ts"]
+		let key = config.apiKey
+		let base = config.baseUrl
+		let cal = config.calendarIcalUrl ?? ""
+		let bun = config.bunPath ?? "/usr/bin/env"
+		DispatchQueue.global(qos: .utility).async { [weak self] in
+			var report = ""
+			var allOk = true
+			for script in scripts {
+				let out = Pipe(), err = Pipe()
+				let p = Process()
+				p.executableURL = URL(fileURLWithPath: bun)
+				p.arguments = bun == "/usr/bin/env" ? ["bun", "\(webDir)/scripts/activity/\(script)"] : ["\(webDir)/scripts/activity/\(script)"]
+				p.environment = [
+					"HOME": NSHomeDirectory(),
+					"PATH": "/usr/bin:/bin:/usr/sbin:/usr/local/bin",
+					"ACTIVITY_API_KEY": key,
+					"ACTIVITY_BASE_URL": base,
+					"ACTIVITY_CAL_URL": cal,
+				]
+				p.standardOutput = out
+				p.standardError = err
+				do { try p.run() } catch {
+					report += "\(script): cannot launch bun — \(error.localizedDescription)\n"
+					allOk = false
+					continue
+				}
+				// watchdog: a hung network call must not stop the next tick
+				DispatchQueue.main.asyncAfter(deadline: .now() + 540) { if p.isRunning { p.terminate() } }
+				let outData = out.fileHandleForReading.readDataToEndOfFile()
+				let errData = err.fileHandleForReading.readDataToEndOfFile()
+				p.waitUntilExit()
+				let text = String(data: outData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+				let errs = String(data: errData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+				report += "\(script): exit \(p.terminationStatus)\(text.isEmpty ? "" : " — \(text)")\(errs.isEmpty ? "" : " | \(errs)")\n"
+				if p.terminationStatus != 0 { allOk = false }
+			}
+			DispatchQueue.main.async {
+				guard let self else { return }
+				self.collectorStatus = (allOk ? "✓ " : "✗ ") + DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .short)
+				self.appendCollectorLog(report)
+				self.rebuildMenu()
+			}
+		}
+	}
+
+	func appendCollectorLog(_ text: String) {
+		if !FileManager.default.fileExists(atPath: logPath) { FileManager.default.createFile(atPath: logPath, contents: nil) }
+		if let h = FileHandle(forWritingAtPath: logPath) {
+			h.seekToEndOfFile()
+			h.write(Data("\(Date()):\n\(text)\n".utf8))
+			try? h.close()
+		}
+	}
+
+	@objc func openDashboard() { NSWorkspace.shared.open(URL(string: config.baseUrl + "/admin/activity")!) }
+	@objc func openConfig() { NSWorkspace.shared.open(URL(fileURLWithPath: configPath)) }
+	@objc func openLog() { NSWorkspace.shared.open(URL(fileURLWithPath: logPath)) }
 
 	// MARK: prompts
 
