@@ -19,12 +19,14 @@ const ROUTES: [string, string][] = [
 
 const server = spawn("bun", [path.join(dist, "server", "node.js")], {
 	env: { ...process.env, PORT: String(PORT) },
-	stdio: "ignore",
+	// inherit stderr: a crashed prerender server must show why (CI once
+	// failed here with the cause swallowed)
+	stdio: ["ignore", "inherit", "inherit"],
 });
 try {
 	let up = false;
-	for (let i = 0; i < 50 && !up; i++) {
-		await new Promise((r) => setTimeout(r, 100));
+	for (let i = 0; i < 150 && !up; i++) {
+		await new Promise((r) => setTimeout(r, 200));
 		up = await fetch(`http://localhost:${PORT}/`)
 			.then((r) => r.ok)
 			.catch(() => false);
