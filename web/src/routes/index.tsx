@@ -22,7 +22,7 @@ const MESSAGES: Message[] = [
       {
         client: "A data privacy provider",
         stat: "2.75x",
-        line: "revenue per work-hour, plus a 200% improvement in outreach response rates after work on their prospecting pipeline.",
+        line: "revenue per work-hour, plus a 2x improvement in outreach response rate after work on their prospecting pipeline.",
       },
       {
         client: "OmniSOC · Indiana University",
