@@ -18,7 +18,7 @@ function json(body: unknown, status = 200) {
 
 export async function GET(event: APIEvent) {
 	if ((await getAuthedClient()) === null) return json({ error: "Unauthorized" }, 401);
-	const id = event.params!.id ?? "";
+	const id = event.params!.itemId ?? "";
 	const format = new URL(event.request.url).searchParams.get("format");
 
 	const [item] = await db

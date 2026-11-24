@@ -36,6 +36,7 @@ export default function SecureShareDetail() {
 		for (const ev of ["pointermove", "pointerdown", "keydown"]) document.addEventListener(ev, wake);
 	});
 	onCleanup(() => {
+		if (typeof window === "undefined") return; // Solid runs cleanups server-side after SSR
 		clearTimeout(idleTimer);
 		for (const ev of ["pointermove", "pointerdown", "keydown"]) document.removeEventListener(ev, wake);
 	});
@@ -96,7 +97,7 @@ export default function SecureShareDetail() {
 
 						<div style={{ margin: "16px 0", padding: "12px", border: "1px solid #ddd" }}>
 							<div style={{ "font-size": "12px", color: "#666", "margin-bottom": "6px" }}>Guest upload link</div>
-							<code style={{ "font-size": "13px", "word-break": "break-all" }}>{location.origin}/drop/{d().share.token}</code>
+							<code style={{ "font-size": "13px", "word-break": "break-all" }}>{typeof window !== "undefined" ? window.location.origin : ""}/drop/{d().share.token}</code>
 							<Button
 								variant="outline"
 								size="sm"
