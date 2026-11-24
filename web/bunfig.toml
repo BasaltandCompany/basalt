@@ -1,0 +1,45 @@
+# web/bunfig.toml — linter config for `bun lint`.
+# Bun's default rules (ESLint + typescript-eslint recommended) stay on; this
+# file adds the Solid reactivity plugin. Rules below are "error" (CI-failing)
+# only where the codebase is already clean — they gate future regressions.
+# Rules currently firing are "warn" triage lists: fix the finding, then move
+# the rule up to "error". Do not demote an error rule to silence a finding.
+
+[lint]
+plugins = ["eslint-plugin-solid"]
+
+[lint.rules]
+# ── error: zero findings today, gates new code ─────────────────────────────
+"solid/no-destructure" = "error"
+"solid/no-react-deps" = "error"
+"solid/no-react-specific-props" = "error"
+"solid/no-proxy-apis" = "error"
+"solid/jsx-no-duplicate-props" = "error"
+"solid/jsx-no-undef" = "error"
+"solid/jsx-uses-vars" = "error"
+"solid/no-unassigned-vars" = "error"
+"solid/no-unknown-namespaces" = "error"
+"solid/event-handlers" = "error"
+"solid/imports" = "error"
+
+# ── warn: triage lists (2026-11-24 counts) — fix, then promote to error ────
+# solid/reactivity            59 findings: untracked prop reads, async tracked
+#                             scopes — each fix needs a human look at behavior.
+"solid/reactivity" = "warn"
+# solid/style-prop            19: class vs style shape
+"solid/style-prop" = "warn"
+# solid/prefer-show           13: {cond && …} → <Show> is a perf refactor
+"solid/prefer-show" = "warn"
+# solid/prefer-for            4: map → <For> changes list identity
+"solid/prefer-for" = "warn"
+# solid/components-return-once 3: early returns need JSX restructure
+"solid/components-return-once" = "warn"
+# solid/no-array-handlers      2: onEvent={[fnA, fnB]} → one handler
+"solid/no-array-handlers" = "warn"
+# solid/validate-jsx-nesting   1: emails/kit table markup, email clients
+"solid/validate-jsx-nesting" = "warn"
+# solid/no-innerhtml           7: sanctioned markdown→html renders today;
+#                             becomes an error once those are sanitized-checked
+"solid/no-innerhtml" = "warn"
+# solid/self-closing-comp      6: style
+"solid/self-closing-comp" = "warn"

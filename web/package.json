@@ -7,6 +7,7 @@
     "build": "bun --bun vite build && bun run scripts/check-client-bundle.ts",
     "postbuild": "bun scripts/prerender.ts",
     "serve": "bun vite preview",
+    "lint": "bun lint",
     "start": "bun scripts/bun-server.ts",
     "typecheck": "tsc --noEmit",
     "test": "DATABASE_URL=postgres://dummy@localhost:5/dummy bun test src",
