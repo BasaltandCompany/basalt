@@ -2,6 +2,7 @@ import { Title } from "@solidjs/meta";
 import { createMemo, For, Show, createSignal, onSettled } from "solid-js";
 
 import Layout from "~/components/Layout"
+import { appConfirm } from "~/components/ConfirmDialog";
 import { toast } from "~/lib/toast"
 
 const errT = (m: string) => toast(m, "error");
@@ -58,7 +59,12 @@ export default function AdminFunnels() {
 	async function setArchived(f: Funnel, toArchive: boolean) {
 		if (toArchive) {
 			const runCount = runs().filter((r) => r.funnelId === f.id).length;
-			if (!confirm(`Archive "${f.name}"? ${runCount} run(s), ${itemCounts()[f.id] ?? 0} item(s) stay restorable — nothing is deleted.`)) return;
+			const ok = await appConfirm({
+				title: `Archive "${f.name}"?`,
+				description: `${runCount} run(s), ${itemCounts()[f.id] ?? 0} item(s) stay restorable — nothing is deleted.`,
+				confirmLabel: "Archive",
+			});
+			if (!ok) return;
 		}
 		const r = await fetch("/api/funnels/archive", {
 			method: "POST",
