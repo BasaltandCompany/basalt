@@ -47,7 +47,7 @@ Support retainer runs through October 18. We review what shipped at the November
 
 ## Numbers reconciliation (internal — do not publish this section)
 
-The homepage card says **2.75x revenue per work hour** and **+175% revenue growth**, and describes them as estimates. Here is what the corpus actually shows:
+The homepage now attributes the 2.75x claim to the data privacy provider, not a public university. Collin confirmed on Nov 24, 2026 that the public numbers are verified; the older research corpus below did not include the underlying revenue endpoints. Obtain those records before changing the claim or publishing this named draft.
 
 | Claim | Corpus evidence | Verdict |
 | --- | --- | --- |
@@ -55,7 +55,7 @@ The homepage card says **2.75x revenue per work hour** and **+175% revenue growt
 | Revenue $5–6K/yr after | Canimex enterprise onboarding (≈$450/mo ≈ $5.4K/yr informational figure, Sep 15); Atlas $399 (Sep 1); quote tiers $600–$2,000+ | Directionally supported; no document totals it |
 | 2.75x / +175% | Arithmetic on the two numbers above (5.5/2 = 2.75; (5.5−2)/2 = +175%) | Internally consistent, externally unevidenced |
 
-The direction is real and document-backed (flat-rate $399 subscribers → enterprise contracts at 2–5x the price, during the engagement window). The precise multiplier is not stated anywhere in the corpus. Keep the word "estimated" on the homepage card, and get Eric to confirm or correct the two endpoints before this study publishes.
+This older corpus supports the direction but does not itself contain the multiplier's underlying records. Collin has separately confirmed the published number; retain the correct attribution and request the original measurements for this named case-study draft.
 
 ## Candidate pull quotes (verbatim, attributed, dated)
 
@@ -106,7 +106,7 @@ Every narrative claim → source. Internal meeting IDs are Anarlog session ids.
 
 - Meetings reviewed in depth: kickoff era via email; Caden sales discussion (Aug 3); L10 07/31, 08/21, 09/01, 09/15; Cool Fellas 08/05; ImportYeti Scraping Fixes (Sep 18); Deployment Debugging (Sep 10). Not individually reviewed: L10 08/25, Website/Funnel/Pricing Strategy (Aug 26), Enrichment Debugging (Aug 27), Enrichment Working Session (Aug 31), Sales Outreach Strategy Feedback (Aug 18), Teghan Deliverability/Enrichment (notes only, no transcript). None of these are load-bearing for the claims above, but pull-quote candidates may be hiding in them.
 - No document states the exact $2K → $5–6K revenue endpoints; see reconciliation.
-- Homepage card already carries the ponytail note: numbers need Customs Data Lock's sign-off before being claimed as measured.
+- The 2.75x homepage claim was restored after Collin confirmed it is verified and corrected its client attribution; the older corpus alone does not establish its endpoints.
 
 ## Publishing checklist (Collin only)
 
@@ -114,4 +114,4 @@ Every narrative claim → source. Internal meeting IDs are Anarlog session ids.
 2. Ask Eric for sign-off on the numbers and for one original quote.
 3. Pick pull quotes; fix or trim the Teghan typo quote.
 4. Decide the canonical client name on the page (Customs Data Lock vs CDL).
-5. Only then: site route + homepage card swap. Do not edit the homepage card in this task.
+5. Only then: named site route. Keep the homepage claim attributed to the data privacy provider, never the university.

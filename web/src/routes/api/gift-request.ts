@@ -1,7 +1,5 @@
-// /api/gift-request — the /gift lead-magnet form target. Validates, stores the
-// row (answers verbatim in jsonb + extracted queryable columns), and alerts
-// Collin, who builds and sends the AI game plan manually. Spam defense: per-IP
-// rate limit + honeypot field, no captcha dependency.
+// /api/gift-request — validates and stores 12-week pilot applications.
+// Older requests retain their original Claude entitlement; never overwrite them.
 import type { APIEvent } from "filesystem-routing/api";
 import { db } from "~/db";
 import { brainRequests } from "~/db/schema";
@@ -51,7 +49,7 @@ export function OPTIONS() {
 
 export const POST = async (event: APIEvent) => {
 	const body = (await event.request.json().catch(() => null)) as Record<string, unknown> | null;
-	if (!body) return json({ error: "Invalid request." }, 400);
+	if (!body || typeof body !== "object" || Array.isArray(body)) return json({ error: "Invalid request." }, 400);
 
 	// honeypot: real users never see (or fill) the "website" field
 	if (String(body.website ?? "").trim() !== "") return json({ ok: true });
@@ -66,6 +64,12 @@ export const POST = async (event: APIEvent) => {
 
 	if (!contactName || !company) return json({ error: "Name and company are required." }, 400);
 	if (!EMAIL_RE.test(contactEmail)) return json({ error: "A valid work email is required." }, 400);
+	const about = str("about");
+	const workflow = str("workflow");
+	const industry = str("industry");
+	const techFootprint = str("techFootprint");
+	if (!about || !industry || !techFootprint || body.contactConsent !== "yes") return json({ error: "Describe your business and technology setup, and confirm we may reply." }, 400);
+	if ([contactName, contactEmail, company, about, workflow, industry, techFootprint, str("jobTitle"), str("phone"), str("heardAbout")].some((value) => value.length > 2000)) return json({ error: "Please shorten your answers." }, 400);
 
 	// issue attribution: /gift?ref=<docId> from the issue page CTA links
 	const ref = str("ref");
@@ -79,8 +83,12 @@ export const POST = async (event: APIEvent) => {
 		company,
 		email: contactEmail,
 		heardAbout: str("heardAbout"),
-		about: str("about"),
-		bottleneck: str("bottleneck"),
+		about,
+		workflow,
+		industry,
+		techFootprint,
+		intent: "pilot",
+		contactConsent: "yes",
 	};
 
 	const [row] = await db
@@ -94,17 +102,19 @@ export const POST = async (event: APIEvent) => {
 		})
 		.returning({ id: brainRequests.id });
 
-	const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+	const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 	await alertEmail(
-		`New AI game plan request: ${company}`,
-		`<p><strong>${esc(contactName)}</strong> (${esc(str("jobTitle") || "—")}) at <strong>${esc(company)}</strong> claimed the game plan.</p>
+		`New pilot application: ${company}`,
+		`<p><strong>${esc(contactName)}</strong> (${esc(str("jobTitle") || "—")}) at <strong>${esc(company)}</strong> applied for the 12-week pilot. No slot is reserved.</p>
 		 <p><a href="mailto:${esc(contactEmail)}">${esc(contactEmail)}</a> · phone ${esc(str("phone") || "—")}</p>
 		 <ul>
 			<li><strong>Heard about us:</strong> ${esc(str("heardAbout") || "—")}</li>
-			<li><strong>What the business does:</strong> ${esc(str("about") || "—")}</li>
-			<li><strong>Where work piles up:</strong> ${esc(str("bottleneck") || "—")}</li>
+			<li><strong>What the business does:</strong> ${esc(about)}</li>
+			<li><strong>Industry:</strong> ${esc(industry)}</li>
+			<li><strong>Technology footprint:</strong> ${esc(techFootprint)}</li>
+			<li><strong>Workflow to improve:</strong> ${esc(workflow)}</li>
 		 </ul>
-		 <p>Build the game plan (where AI pays off first, steps, prompts, templates + the Claude gift), then manage it in the dashboard → Lead magnet requests (row ${row.id}).</p>`,
+		 <p>Reply personally within a couple of days. Qualify and agree on one workflow before accepting. Dashboard → Lead magnet requests (row ${row.id}).</p>`,
 	);
 
 	return json({ ok: true });
