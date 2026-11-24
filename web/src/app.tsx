@@ -23,6 +23,31 @@ function hardReloadOnce(): boolean {
 	return true;
 }
 
+// Deploy watcher: the desktop app is a launch-at-login tray app whose
+// webview keeps executing the bundle it booted with — deploys never reached
+// a running session, so every crash fix "still" fired for days afterwards.
+// The prerendered "/" gets a fresh Last-Modified per deploy (built in-image);
+// poll it and one reload picks up the new bundle. Dev SSR has no
+// Last-Modified → inert.
+const DEPLOY_POLL_MS = 60_000;
+if (!isServer) {
+	let deployStamp = "";
+	const checkDeploy = async () => {
+		try {
+			const res = await fetch("/", { method: "HEAD", cache: "no-store" });
+			const lm = res.headers.get("last-modified") ?? "";
+			if (!lm) return; // dev: no static Last-Modified, never baseline
+			if (deployStamp && lm !== deployStamp && hardReloadOnce()) location.reload();
+			deployStamp = lm;
+		} catch {
+			// offline/proxy flap — retry next tick
+		}
+	};
+	setInterval(checkDeploy, DEPLOY_POLL_MS);
+	checkDeploy();
+}
+
+
 export default function App() {
 	return (
 		<Errored

@@ -60,5 +60,17 @@ test("log time updates the dashboard without an uncaught client exception", asyn
 
 	// The new entry must appear client-side (no refresh) and nothing may throw.
 	await expect(page.locator("table", { hasText: desc })).toBeVisible({ timeout: 10_000 });
+
+	// ── Sidebar Timer: start + stop must both update the UI with no throw.
+	// Same crash class as the log-entry form (covers the redirect-throwing
+	// start/stop actions the entry form doesn't exercise).
+	const timerForm = page.locator("form:has(button.timer-start)");
+	await timerForm.locator('button[aria-haspopup="listbox"]').click();
+	await page.locator('[role="option"]').first().click();
+	await timerForm.locator('input[name="description"]').fill("e2e timer");
+	await timerForm.locator("button.timer-start").click();
+	await expect(page.locator("button.timer-stop")).toBeVisible({ timeout: 10_000 });
+	await page.locator("button.timer-stop").click();
+	await expect(page.locator("button.timer-start")).toBeVisible({ timeout: 10_000 });
 	expect(errors).toEqual([]);
 });
