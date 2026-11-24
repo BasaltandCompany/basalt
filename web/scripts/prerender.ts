@@ -18,7 +18,14 @@ const ROUTES: [string, string][] = [
 ];
 
 const server = spawn("bun", [path.join(dist, "server", "node.js")], {
-	env: { ...process.env, PORT: String(PORT) },
+	// CI has no .env file (bun only auto-loads one locally), so the spawned
+	// server needs a DATABASE_URL even though the prerendered routes never
+	// query it. Prod builds pass the real one through.
+	env: {
+		...process.env,
+		PORT: String(PORT),
+		DATABASE_URL: process.env.DATABASE_URL ?? "postgres://dummy@localhost:5/dummy",
+	},
 	// inherit stderr: a crashed prerender server must show why (CI once
 	// failed here with the cause swallowed)
 	stdio: ["ignore", "inherit", "inherit"],
