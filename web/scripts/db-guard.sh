@@ -27,6 +27,21 @@ case "${DATABASE_URL:-}" in
 		exit 1 ;;
 esac
 
+if [[ "$CMD" == "migrate" ]]; then
+	# A prod-restored dev DB (companies populated, no drizzle ledger) can't take a
+	# full drizzle replay: constraint/backfill statements aren't IF NOT EXISTS
+	# stamped. dev-setup.sh applies pending migrations against the supabase
+	# ledger instead. Fresh or drizzle-tracked DBs pass through to drizzle-kit.
+	if [[ -n "${DATABASE_URL:-}" ]]; then
+		STATE=$(NO_COLOR=1 bun -e 'import postgres from "postgres"; const s = postgres(process.env.DATABASE_URL, {max:1}); const led = await s`select 1 from drizzle.__drizzle_migrations limit 1`.then(() => "drizzle").catch(() => null); const rows = led ? 0 : (await s`select 1 from companies limit 1`.catch(() => [])).length; process.stdout.write(led ? "drizzle" : (rows > 0 ? "restored" : "fresh")); await s.end();' 2>/dev/null || echo unknown)
+		if [[ "$STATE" == "restored" ]]; then
+			echo "REFUSING db:migrate — this DB was restored from prod and is tracked by the supabase ledger, not drizzle's." >&2
+			echo "Apply pending migrations with: bash scripts/dev-setup.sh" >&2
+			exit 1
+		fi
+	fi
+fi
+
 if [[ "$CMD" == "push" ]]; then
 	# Same "fresh" test dev-setup uses: companies missing or empty → allow
 	# (the fresh-build path). Any data row → the ledger and the schema have
