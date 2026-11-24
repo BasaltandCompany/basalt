@@ -35,6 +35,12 @@ declare module "virtual:file-routes" {
   /** The flat route manifest, in scan order. */
   const routes: readonly [
     {
+      path: "/admin/activity";
+      page: true;
+      $component: FileRouteLazyRef<Pick<typeof import("./src/routes/admin/activity"), Extract<"default", keyof typeof import("./src/routes/admin/activity")>>>;
+      $$route?: undefined;
+    },
+    {
       path: "/admin/api-keys";
       page: true;
       $component: FileRouteLazyRef<Pick<typeof import("./src/routes/admin/api-keys"), Extract<"default", keyof typeof import("./src/routes/admin/api-keys")>>>;
@@ -272,6 +278,44 @@ declare module "virtual:file-routes" {
       path: "/admin/videos";
       page: true;
       $component: FileRouteLazyRef<Pick<typeof import("./src/routes/admin/videos"), Extract<"default", keyof typeof import("./src/routes/admin/videos")>>>;
+      $$route?: undefined;
+    },
+    {
+      path: "/api/activity/heartbeats";
+      page: false;
+      $POST: FileRouteLazyRef<Pick<typeof import("./src/routes/api/activity/heartbeats"), Extract<"POST", keyof typeof import("./src/routes/api/activity/heartbeats")>>>;
+      $$route?: undefined;
+    },
+    {
+      path: "/api/activity/matchers";
+      page: false;
+      $GET: FileRouteLazyRef<Pick<typeof import("./src/routes/api/activity/matchers"), Extract<"GET", keyof typeof import("./src/routes/api/activity/matchers")>>>;
+      $POST: FileRouteLazyRef<Pick<typeof import("./src/routes/api/activity/matchers"), Extract<"POST", keyof typeof import("./src/routes/api/activity/matchers")>>>;
+      $HEAD: FileRouteLazyRef<Pick<typeof import("./src/routes/api/activity/matchers"), Extract<"GET", keyof typeof import("./src/routes/api/activity/matchers")>>>;
+      $$route?: undefined;
+    },
+    {
+      path: "/api/activity/meetings";
+      page: false;
+      $POST: FileRouteLazyRef<Pick<typeof import("./src/routes/api/activity/meetings"), Extract<"POST", keyof typeof import("./src/routes/api/activity/meetings")>>>;
+      $$route?: undefined;
+    },
+    {
+      path: "/api/activity/prompt-answers";
+      page: false;
+      $POST: FileRouteLazyRef<Pick<typeof import("./src/routes/api/activity/prompt-answers"), Extract<"POST", keyof typeof import("./src/routes/api/activity/prompt-answers")>>>;
+      $$route?: undefined;
+    },
+    {
+      path: "/api/activity/samples";
+      page: false;
+      $POST: FileRouteLazyRef<Pick<typeof import("./src/routes/api/activity/samples"), Extract<"POST", keyof typeof import("./src/routes/api/activity/samples")>>>;
+      $$route?: undefined;
+    },
+    {
+      path: "/api/activity/usage";
+      page: false;
+      $POST: FileRouteLazyRef<Pick<typeof import("./src/routes/api/activity/usage"), Extract<"POST", keyof typeof import("./src/routes/api/activity/usage")>>>;
       $$route?: undefined;
     },
     {
@@ -1146,6 +1190,14 @@ declare module "virtual:file-routes" {
       id: "/oauth/consent";
       page: true;
       $component: FileRouteLazyRef<Pick<typeof import("./src/routes/oauth/consent"), Extract<"default", keyof typeof import("./src/routes/oauth/consent")>>>;
+      $$route?: undefined;
+      children?: undefined;
+    },
+    {
+      path: "/admin/activity";
+      id: "/admin/activity";
+      page: true;
+      $component: FileRouteLazyRef<Pick<typeof import("./src/routes/admin/activity"), Extract<"default", keyof typeof import("./src/routes/admin/activity")>>>;
       $$route?: undefined;
       children?: undefined;
     },

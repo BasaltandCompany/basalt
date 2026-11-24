@@ -9,3 +9,4 @@ e2e/.state.json
 # playwright
 test-results/
 playwright-report/
+.env.bak

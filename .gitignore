@@ -31,3 +31,8 @@ pnpm-debug.log*
 # meeting-publisher runtime state (logs, pushed ids, API key)
 tools/meeting-publisher/state/
 .env.local
+
+# built by desktop/sampler/build.sh, never committed
+basalt-sampler-app/
+
+desktop/sampler/BasaltSampler.app/

@@ -11,6 +11,7 @@ import { emailMessages, emailOutbox, emailThreads, type EmailMessage, type Email
 import { buildReplyQuote, getPrimaryAccount, resolveFooter, threadWithMessages, sendGmail } from "~/lib/gmail";
 import { trackText } from "~/lib/crdt-text-db";
 import { lintVoiceText, recordLintOverrides } from "~/lib/voice-lint-db";
+import { recordMutationForEmail } from "~/lib/activity/record";
 import { REPLY_TO } from "~/lib/email-signature";
 import { supabaseService } from "~/lib/supabase";
 import { toBase64 } from "~/lib/crypto";
@@ -249,7 +250,12 @@ export async function sendOutboxInner(
 				gmailMessageId,
 				...(tracked ? { loroSnapshot: tracked.loroSnapshot, version: tracked.version } : {}),
 			})
-			.where(eq(emailOutbox.id, outboxId));
+		.where(eq(emailOutbox.id, outboxId));
+	// activity credit (ASPTR-227): best-effort, never fails the send
+	try {
+		await recordMutationForEmail(row.toEmail, `email: ${row.subject}`);
+	} catch { /* attribution is never worth a sent-email retry loop */ }
+
 		// record the sent message locally — the response updates the open thread and
 		// Sent tab without waiting for a Gmail sync. Store only authored body + footer;
 		// the recipient-facing quote is context, not another local copy of the thread.

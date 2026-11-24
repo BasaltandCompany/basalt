@@ -5,6 +5,7 @@ import { For, Show, Loading, createSignal } from "solid-js";
 import CreateDialog from "~/components/CreateDialog";
 import Layout from "~/components/Layout";
 import ProjectDocuments from "~/components/ProjectDocuments";
+import ActivityHeartbeat from "~/components/ActivityHeartbeat";
 import ConfirmButton from "~/components/ConfirmButton";
 import {
 	createTimeEntryAction,
@@ -184,6 +185,8 @@ export default function ProjectDetail() {
 					{(p) => (
 						<>
 							<Title>{p().name} — Basalt</Title>
+							{/* ASPTR-227: page presence feeds activity hours while the tab is visible */}
+							<ActivityHeartbeat projectId={params.id!} />
 							<a href="/admin/projects" class="muted" style={{ "font-size": "13px", "margin-bottom": "8px", display: "inline-block" }}>
 								All Projects
 							</a>

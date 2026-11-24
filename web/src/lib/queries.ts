@@ -13,6 +13,7 @@ import {
 	deliverableUpdates,
 	timer,
 } from "~/db/schema";
+import { recordMutation } from "~/lib/activity/record";
 import type { Project, EngagementType, ProjectStatus } from "~/db/schema";
 
 // ── Auth ──────────────────────────────────────────────────────────
@@ -193,6 +194,7 @@ export const updateProjectAction = formAction(async (formData: FormData) => {
 		return { error: "End date must be after start date." };
 	}
 	await db.update(projects).set(values).where(eq(projects.id, id));
+	await recordMutation(id, "project edit");
 	await revalidate([getProjectQuery.key, getProjectsQuery.key]);
 	return { success: "Saved." };
 }, "updateProject");
