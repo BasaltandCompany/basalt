@@ -463,6 +463,125 @@ export const timeEntries = pgTable(
 	],
 );
 
+// ── Activity attribution (ASPTR-227) ───────────────────────────────
+// Matchers map worktree paths / git remotes / window titles to a
+// client project (projectId) or an internal/personal bucket (category).
+// Exact row for kind+pattern upserts so the desktop prompt learning and
+// the seed script are both idempotent.
+
+export const matcherKind = pgEnum("matcher_kind", [
+	"git_remote",
+	"worktree",
+	"title",
+]);
+
+export const matcherSource = pgEnum("matcher_source", ["curated", "learned"]);
+
+export const matcherCategory = pgEnum("matcher_category", ["internal", "personal"]);
+
+export const projectMatchers = pgTable(
+	"project_matchers",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		// client bucket — real project; or category bucket (internal/personal)
+		projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }),
+		category: matcherCategory("category"),
+		kind: matcherKind("kind").notNull(),
+		pattern: text("pattern").notNull(),
+		source: matcherSource("source").notNull().default("curated"),
+		useCount: integer("use_count").notNull().default(0),
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+	},
+	(t) => [
+		uniqueIndex("uq_project_matchers_pattern").on(t.kind, t.pattern),
+		index("idx_project_matchers_project").on(t.projectId),
+		check("matcher_target_check", sql`num_nonnulls(${t.projectId}, ${t.category}) <= 1`),
+	],
+);
+
+export const activitySource = pgEnum("activity_source", [
+	"pi_session",
+	"app_heartbeat",
+	"app_mutation",
+	"calendar",
+	"desktop",
+	"prompt_answer",
+	"manual",
+]);
+
+export const activityConfidence = pgEnum("activity_confidence", [
+	"exact",
+	"inferred",
+	"prompted",
+	"manual",
+]);
+
+// One row per attributed time span across every signal source. Rollup
+// merges overlapping rows (never double-counts): OS idle splits desktop
+// blocks upstream, and desktop coverage clips heartbeat spans. projectId
+// XOR category picks the bucket; both null = unassigned, awaiting
+// review or a prompt answer.
+export const activityEvents = pgTable(
+	"activity_events",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		deviceId: text("device_id"),
+		source: activitySource("source").notNull(),
+		startedAt: timestamp("started_at").notNull(),
+		endedAt: timestamp("ended_at").notNull(),
+		projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+		category: matcherCategory("category"),
+		confidence: activityConfidence("confidence").notNull().default("inferred"),
+		appName: text("app_name"),
+		// ≤80 chars; kept only on Collin's own single-user DB so the review
+		// screen can show context. Config can disable (titleSnippet=null).
+		titleSnippet: text("title_snippet"),
+		detail: text("detail"),
+		// ingest idempotency: (deviceId, source, monotonic/batch id)
+		dedupeKey: text("dedupe_key").notNull(),
+		convertedEntryId: uuid("converted_entry_id").references(() => timeEntries.id, {
+			onDelete: "set null",
+		}),
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+	},
+	(t) => [
+		uniqueIndex("uq_activity_events_dedupe").on(t.dedupeKey),
+		index("idx_activity_events_started").on(t.startedAt),
+		index("idx_activity_events_project").on(t.projectId),
+		check("activity_event_target_check", sql`num_nonnulls(${t.projectId}, ${t.category}) <= 1`),
+		check("activity_event_span_check", sql`${t.endedAt} > ${t.startedAt}`),
+	],
+);
+
+// Daily rollup of Pi agent usage per project/bucket — tokens and the
+// provider-reported API-equivalent cost (NOT coding-plan money). One row
+// per (day, project/bucket, provider, model); dedupeKey upserts.
+export const agentUsageDaily = pgTable(
+	"agent_usage_daily",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		dedupeKey: text("dedupe_key").notNull(),
+		day: date("day").notNull(),
+		projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+		category: matcherCategory("category"),
+		provider: text("provider"),
+		model: text("model"),
+		inputTokens: integer("input_tokens").notNull().default(0),
+		outputTokens: integer("output_tokens").notNull().default(0),
+		cacheReadTokens: integer("cache_read_tokens").notNull().default(0),
+		cacheWriteTokens: integer("cache_write_tokens").notNull().default(0),
+		totalTokens: integer("total_tokens").notNull().default(0),
+		apiCostUsd: doublePrecision("api_cost_usd").notNull().default(0),
+		sessionCount: integer("session_count").notNull().default(0),
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+	},
+	(t) => [
+		uniqueIndex("uq_agent_usage_daily_dedupe").on(t.dedupeKey),
+		index("idx_agent_usage_daily_day").on(t.day),
+		check("agent_usage_target_check", sql`num_nonnulls(${t.projectId}, ${t.category}) <= 1`),
+	],
+);
+
 // ── Documents ──────────────────────────────────────────────────────
 
 export const documents = pgTable(
@@ -1665,6 +1784,13 @@ export type QuoteItem = typeof quoteItems.$inferSelect;
 export type QuoteVersion = typeof quoteVersions.$inferSelect;
 export type QuoteSignature = typeof quoteSignatures.$inferSelect;
 export type SecurityReport = typeof securityReports.$inferSelect;
+export type ProjectMatcher = typeof projectMatchers.$inferSelect;
+export type ActivityEvent = typeof activityEvents.$inferSelect;
+export type AgentUsageDaily = typeof agentUsageDaily.$inferSelect;
+export type MatcherKind = ProjectMatcher["kind"];
+export type MatcherCategory = ProjectMatcher["category"];
+export type ActivitySource = ActivityEvent["source"];
+export type ActivityConfidence = ActivityEvent["confidence"];
 
 // Type aliases for UI code (badge maps, selects, etc.)
 export type EngagementType = Project["engagementType"];

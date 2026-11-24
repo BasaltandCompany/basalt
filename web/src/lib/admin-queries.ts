@@ -3,6 +3,7 @@ import { redirect } from "@solidjs/web";
 import { eq, and, desc, asc, inArray, isNull, isNotNull, ilike, gt, gte, lte, notInArray, sql } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm";
 import { dateOrNull } from "./queries";
+import { recordMutation } from "~/lib/activity/record";
 import { getAuthedClient, getCurrentUser } from "./session";
 import { exchangeGithubCode, verifyGithubAuthState } from "./github-prs";
 import { supabaseService } from "./supabase";
@@ -529,6 +530,7 @@ export const createDeliverableAction = formAction(async (formData: FormData) => 
 		description: String(formData.get("description") || ""),
 		sortOrder: nextOrder,
 	});
+	await recordMutation(projectId, `deliverable: ${String(formData.get("title"))}`);
 	await revalidate(getDeliverablesQuery.key);
 	return { success: "Deliverable created." };
 }, "createDeliverable");
@@ -1785,6 +1787,7 @@ export const postProjectUpdateAction = formAction(async (formData: FormData) => 
 	}
 
 	await db.insert(projectUpdates).values({ projectId, title: title || null, body, emailedAt });
+	await recordMutation(projectId, `status update${title ? ": " + title : ""}`);
 	await revalidate([getProjectQuery.keyFor(projectId), getProjectUpdatesQuery.keyFor(projectId)]);
 	return { success: note || "Update posted." };
 }, "postProjectUpdate");
