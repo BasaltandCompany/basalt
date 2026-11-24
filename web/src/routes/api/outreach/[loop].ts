@@ -10,11 +10,24 @@
 // queue, and the automation (not this API) enforces the daily invite cap and
 // the abort conditions.
 import type { APIEvent } from "filesystem-routing/api";
-import { and, asc, count, eq, gt, ilike, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, asc, count, eq, gt, ilike, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "~/db";
 import { outreachProspects } from "~/db/schema";
 import { isAdminApiKey, json } from "~/lib/admin-api";
 import { UUID_RE } from "~/lib/uuid";
+
+// Match the person, not their company or Sales Navigator's varying tracking suffix.
+export function linkedinProfileKey(raw: string) {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "https:" || url.hostname !== "www.linkedin.com" || url.username || url.password || url.port) return null;
+    const sales = url.pathname.match(/^\/sales\/lead\/([\w-]+)(?:,[^/]*)?\/?$/);
+    if (sales) return { kind: "sales" as const, id: sales[1] };
+    const profile = url.pathname.match(/^\/in\/([\w.%-]+)\/?$/);
+    if (profile) return { kind: "profile" as const, id: profile[1].toLowerCase() };
+  } catch { /* invalid URL */ }
+  return null;
+}
 
 export const POST = async (event: APIEvent) => {
 	if (!(await isAdminApiKey(event.request))) return json({ error: "Unauthorized" }, 401);
@@ -24,18 +37,21 @@ export const POST = async (event: APIEvent) => {
 		const body = (await event.request.json().catch(() => null)) as {
 			candidates?: { company?: string; contactName?: string; profileUrl?: string }[];
 		} | null;
-		const list = (body?.candidates ?? []).filter((c) => c.company?.trim());
+		const list = Array.isArray(body?.candidates) ? body.candidates.filter((c) => typeof c?.company === "string" && c.company.trim()) : [];
 		if (!list.length) return json({ error: "candidates[] with company is required" }, 400);
+		const keys = list.slice(0, 25).map((c) => c.profileUrl ? linkedinProfileKey(c.profileUrl) : null);
+		if (list.slice(0, 25).some((c, i) => c.profileUrl && !keys[i])) return json({ error: "profileUrl must be a LinkedIn profile or Sales Navigator lead URL" }, 400);
 		const sourceNote = `li-search ${new Date().toISOString().slice(0, 10)}`;
 		let created = 0;
 		let skipped = 0;
-		for (const c of list.slice(0, 25)) {
+		for (const [i, c] of list.slice(0, 25).entries()) {
 			const company = c.company!.trim();
-			const [existing] = await db
-				.select({ id: outreachProspects.id })
-				.from(outreachProspects)
-				.where(ilike(outreachProspects.company, company))
-				.limit(1);
+			const key = keys[i];
+			const identity = key?.kind === "sales"
+				? sql<boolean>`substring(${outreachProspects.notes} from '^li: https://www[.]linkedin[.]com/sales/lead/([A-Za-z0-9_-]+)') = ${key.id}`
+				: key ? sql<boolean>`lower(substring(${outreachProspects.notes} from '^li: https://www[.]linkedin[.]com/in/([A-Za-z0-9_.%-]+)')) = ${key.id}`
+				: ilike(outreachProspects.company, company);
+			const [existing] = await db.select({ id: outreachProspects.id }).from(outreachProspects).where(identity).limit(1);
 			if (existing) {
 				skipped++;
 				continue;
