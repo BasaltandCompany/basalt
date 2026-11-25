@@ -1,0 +1,2 @@
+ALTER TABLE "reviewer_installations" ADD COLUMN IF NOT EXISTS "steward" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "reviewer_installations" ADD COLUMN IF NOT EXISTS "approvals_mode" text DEFAULT 'off' NOT NULL;
