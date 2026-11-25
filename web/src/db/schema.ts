@@ -793,6 +793,10 @@ export const reviewerInstallations = pgTable("reviewer_installations", {
 	companyId: uuid("company_id").references(() => companies.id, { onDelete: "set null" }),
 	approved: boolean("approved").notNull().default(false),
 	enabled: boolean("enabled").notNull().default(true),
+	// PR Steward: auto-fix failing CI/conflicts on this client's PRs
+	steward: boolean("steward").notNull().default(false),
+	// approval policy lane: off | observe | active
+	approvalsMode: text("approvals_mode").notNull().default("off"),
 	note: text("note"),
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 	updatedAt: timestamp("updated_at")
